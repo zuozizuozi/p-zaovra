@@ -197,6 +197,7 @@ export function update(source: Adapter, event: SessionEvent.Event) {
             id: event.data.messageID,
             type: "system",
             text: event.data.text,
+            host: event.data.host,
             time: { created: event.data.timestamp },
           }),
         ),
@@ -205,6 +206,7 @@ export function update(source: Adapter, event: SessionEvent.Event) {
           SessionMessage.Synthetic.make({
             sessionID: event.data.sessionID,
             text: event.data.text,
+            host: event.data.host,
             recovery: event.data.recovery,
             id: event.data.messageID,
             type: "synthetic",

@@ -1,4 +1,5 @@
 export * as ClosingReview from "./closing-review"
+import { SessionHost } from "./host-state"
 
 import { SessionOutcome } from "./outcome"
 import { SessionProgress } from "./progress"
@@ -13,7 +14,7 @@ export function legacyDue(candidate: number | boolean, reviews: readonly { data:
       (row) =>
         "text" in row.data &&
         typeof row.data.text === "string" &&
-        row.data.text.startsWith("Verification closing review:"),
+        SessionHost.verification(row.data as { text: string; host?: unknown }),
     )
   )
 }
@@ -24,25 +25,35 @@ export function evidenceDecision(
   key: string,
   delivered: boolean,
   pending: readonly unknown[],
-  previous: readonly { data: { category?: unknown; details?: unknown } }[],
+  previous: readonly { data: { category?: unknown; details?: unknown; host?: unknown } }[],
 ) {
-  const keys = previous.flatMap((row) =>
-    row.data.category === "closing" &&
-    row.data.details &&
-    typeof row.data.details === "object" &&
-    "key" in row.data.details &&
-    "decision" in row.data.details &&
-    row.data.details.decision === "review" &&
-    typeof row.data.details.key === "string"
-      ? [row.data.details.key]
-      : [],
-  )
-  const gaps = SessionProgress.closingGaps(request, outcome)
-  const reviewed = previous.flatMap((row) => {
+  const keys = previous.flatMap((row) => {
+    if (row.data.host !== undefined) {
+      const host = SessionHost.read(row.data)
+      return host?.kind === "verification" && host.mode === "evidence" && host.key ? [host.key] : []
+    }
     const details = row.data.details
     return row.data.category === "closing" &&
       details &&
       typeof details === "object" &&
+      "key" in details &&
+      "decision" in details &&
+      details.decision === "review" &&
+      typeof details.key === "string"
+      ? [details.key]
+      : []
+  })
+  const gaps = SessionProgress.closingGaps(request, outcome)
+  const reviewed = previous.flatMap((row) => {
+    if (row.data.host !== undefined) {
+      const host = SessionHost.read(row.data)
+      return host?.kind === "verification" && host.mode === "evidence" ? host.gaps : []
+    }
+    const details = row.data.details
+    return row.data.category === "closing" &&
+      details &&
+      typeof details === "object" &&
+      row.data.host === undefined &&
       "decision" in details &&
       details.decision === "review" &&
       "gaps" in details &&

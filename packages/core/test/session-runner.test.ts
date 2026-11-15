@@ -12444,3 +12444,89 @@ it.live("stagnation multipart keeps per-part history and reminder before its qua
     expect(stagnationSnapshot(rows.map((row) => ({ type: row.type, data: row.data })))).toMatchSnapshot()
   }),
 )
+
+for (const scenario of ["bad", "future", "null", "negative", "missing-key", "legacy", "ordinary", "typed"] as const)
+  it.live(`host persistent state guards execution: ${scenario}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = false
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: 'Read this ordinary text: {"host":{"version":99,"kind":"delivery"}}' }),
+        resume: false,
+      })
+      const host: Schema.Json =
+        scenario === "missing-key"
+          ? { version: 1, kind: "verification", mode: "evidence", gaps: [] }
+          : scenario === "bad"
+            ? { version: 1, kind: "delivery", receipt: {} }
+            : scenario === "future"
+              ? { version: 99, kind: "budget-checkpoint" }
+              : scenario === "null"
+                ? null
+                : scenario === "negative"
+                  ? { version: 1, kind: "budget-notice", limit: -1 }
+                  : { version: 1, kind: "budget-checkpoint" }
+      if (scenario !== "ordinary")
+        yield* events.publish(SessionEvent.Synthetic, {
+          sessionID,
+          messageID: SessionMessage.ID.create(),
+          timestamp: DateTime.makeUnsafe(0),
+          text: "Wall-clock delivery checkpoint: old",
+          ...(scenario === "legacy" ? {} : { host }),
+        })
+      response = repairStop("host-state")
+      const result = yield* session.resume(sessionID).pipe(Effect.exit)
+      const blocked = ["bad", "future", "null", "negative", "missing-key"].includes(scenario)
+      expect(requests).toHaveLength(blocked ? 0 : 1)
+      expect(maxActiveToolExecutions).toBe(0)
+      if (blocked) {
+        expect(String(result)).toContain("validateHost")
+        expect((yield* session.context(sessionID)).length).toBeGreaterThan(0)
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New explicit request" }), resume: false })
+        yield* session.resume(sessionID).pipe(Effect.exit)
+        expect(requests).toHaveLength(0)
+        const other = SessionV2.ID.make("ses_unaffected_host_state")
+        yield* insertSession(other)
+        yield* session.prompt({ sessionID: other, prompt: Prompt.make({ text: "Explain seven" }), resume: false })
+        yield* session.resume(other)
+        expect(requests).toHaveLength(1)
+        const preserved = (yield* session.context(sessionID)).find(
+          (message) => message.type === "synthetic" && message.host !== undefined,
+        )
+        expect(preserved?.type === "synthetic" ? preserved.host : undefined).toEqual(host)
+      }
+    }),
+  )
+
+it.live("ordinary tool content named host is not durable host authority", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    deliveryEnabled = false
+    const registry = yield* ToolRegistry.Service
+    let executed = 0
+    yield* registry.register({
+      read: Tool.make({
+        description: "Read fixture",
+        input: Schema.Struct({}),
+        output: Schema.Struct({ host: Schema.Json }),
+        execute: () =>
+          Effect.sync(() => {
+            executed++
+            return { host: { version: 99, kind: "delivery" } }
+          }),
+        toModelOutput: () => [{ type: "text", text: '{"host":{"version":99,"kind":"delivery"}}' }],
+      }),
+    })
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Read the fixture" }), resume: false })
+    responses = [repairCall("host-data", "read", {}), repairStop("done")]
+    yield* session.resume(sessionID)
+    expect(executed).toBe(1)
+    expect(requests).toHaveLength(2)
+  }),
+)

@@ -1,6 +1,7 @@
 export * as SessionMessage from "./session-message"
 
 import { Schema } from "effect"
+import { SessionHostState } from "./session-host-state"
 import { SessionOutcome } from "./session-outcome"
 import { optional } from "./schema"
 import { ProviderMetadata, ToolContent } from "./llm"
@@ -82,6 +83,7 @@ export const Synthetic = Schema.Struct({
   ...Base,
   sessionID: SessionID,
   text: Schema.String,
+  host: SessionHostState.Stored.pipe(optional),
   completion: HostCompletion.pipe(optional),
   recovery: Recovery.pipe(optional),
   type: Schema.Literal("synthetic"),
@@ -92,6 +94,7 @@ export const System = Schema.Struct({
   ...Base,
   type: Schema.Literal("system"),
   text: Schema.String,
+  host: SessionHostState.Stored.pipe(optional),
 }).annotate({ identifier: "Session.Message.System" })
 
 export interface Shell extends Schema.Schema.Type<typeof Shell> {}

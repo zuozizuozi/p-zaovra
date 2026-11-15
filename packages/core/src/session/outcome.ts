@@ -1,4 +1,5 @@
 export * as SessionOutcome from "./outcome"
+import { SessionHost } from "./host-state"
 
 import { Schema, Option, DateTime } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
@@ -869,7 +870,7 @@ export function derive(
   if (
     review !== undefined ||
     (start > 0 && engineeringWork(turn)) ||
-    latest.some((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
+    latest.some((message) => message.type === "synthetic" && SessionHost.verification(message))
   ) {
     if (!review) missing.push("requirements review: submit verification_review before claiming completion")
     if (review) {

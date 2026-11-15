@@ -1,6 +1,7 @@
 export * as SessionEvent from "./session-event"
 
 import { Schema } from "effect"
+import { SessionHostState } from "./session-host-state"
 import { SessionOutcome } from "./session-outcome"
 import { optional } from "./schema"
 import { Event } from "./event"
@@ -162,6 +163,7 @@ export const ContextUpdated = Event.define({
     ...Base,
     messageID: SessionMessage.ID,
     text: Schema.String,
+    host: SessionHostState.Stored.pipe(optional),
   },
 })
 export type ContextUpdated = typeof ContextUpdated.Type
@@ -173,6 +175,7 @@ export const Synthetic = Event.define({
     ...Base,
     messageID: SessionMessage.ID,
     text: Schema.String,
+    host: SessionHostState.Stored.pipe(optional),
     recovery: SessionMessage.Recovery.pipe(optional),
   },
 })
@@ -551,6 +554,7 @@ export const QualityProgress = Event.define({
     ...Base,
     category: Schema.Literals(["continuation", "closing", "stagnation", "cache", "operation", "recovery"]),
     details: Schema.Json,
+    host: SessionHostState.Stored.pipe(optional),
   },
 })
 

@@ -1,6 +1,8 @@
 export * as DeliveryContract from "./delivery-contract"
 
 import { Schema, Option } from "effect"
+import { SessionHostState } from "@zaovra-ai/schema/session-host-state"
+import { SessionHost } from "./host-state"
 import { Model } from "@zaovra-ai/schema/model"
 import { Token } from "../util/token"
 import { SessionUsageQuery } from "./usage"
@@ -11,38 +13,31 @@ import type { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 /** One repair cycle, independent of strict verification and ordinary execution. */
 export const budget = { turns: 3, output: 1_024, durationMs: 180_000, tools: 12, ratio: 0.15 } as const
 export const prefix = "Delivery contract review: "
-export const Receipt = Schema.Struct({
-  request: Schema.String,
-  started: Schema.Number,
-  tokens: Schema.Number,
-  decision: Schema.Literals(["review", "repair", "consumed", "finished", "unverified"]),
-  missing: Schema.Array(Schema.String),
-  reason: Schema.optional(Schema.String),
-  turns: Schema.optional(Schema.Number),
-  toolCalls: Schema.optional(Schema.Number),
-  report: Schema.optional(Schema.Boolean),
-  // Freeze the original allowance. Repair consumption earns no new credit.
-  allowance: Schema.optional(Schema.Number),
-  spent: Schema.optional(Schema.Number),
-  cacheRead: Schema.optional(Schema.Number),
-  estimatedCost: Schema.optional(Schema.Number),
-  model: Schema.optional(Schema.String),
-  costs: Schema.optional(Schema.Array(Model.Cost)),
-  limits: Schema.optional(
-    Schema.Struct({
-      turns: Schema.Number,
-      totalTokens: Schema.Number,
-      outputTokens: Schema.Number,
-      durationMs: Schema.Number,
-      toolChecks: Schema.Number,
-    }),
-  ),
-})
+export const Receipt = SessionHostState.DeliveryReceipt
 
 export function receipt(messages: readonly SessionMessage.Message[], request: string | undefined) {
   return messages
     .flatMap((message) => {
-      if (message.type !== "synthetic" || !message.text.startsWith(prefix)) return []
+      if (message.type !== "synthetic") return []
+      if (message.host !== undefined) {
+        const host = SessionHost.read(message)
+        if (!host)
+          return [
+            {
+              request: request ?? "",
+              started: 0,
+              tokens: 0,
+              decision: "unverified" as const,
+              missing: ["invalid durable host state"],
+              reason: "invalid-host-state",
+              id: message.id,
+            },
+          ]
+        return host?.kind === "delivery" && host.receipt.request === request
+          ? [{ ...host.receipt, id: message.id }]
+          : []
+      }
+      if (!message.text.startsWith(prefix)) return []
       const decoded = Schema.decodeUnknownOption(Schema.UnknownFromJsonString.pipe(Schema.decodeTo(Receipt)))(
         message.text.slice(prefix.length),
       )

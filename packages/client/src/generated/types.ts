@@ -1135,6 +1135,121 @@ export type SessionsContextOutput = {
         readonly turn?: string
         readonly sessionID: string
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly report?: boolean
+                    readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                  }
+                }
+            )
         readonly completion?: {
           readonly type: "bash-completion"
           readonly sourceMessageID: string
@@ -1157,6 +1272,121 @@ export type SessionsContextOutput = {
         readonly turn?: string
         readonly type: "system"
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly report?: boolean
+                    readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                  }
+                }
+            )
       }
     | {
         readonly id: string
@@ -1475,6 +1705,121 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly category: "continuation" | "closing" | "stagnation" | "cache" | "operation" | "recovery"
           readonly details: JsonValue
+          readonly host?:
+            | JsonValue
+            | (
+                | {
+                    readonly version: 1
+                    readonly kind: "verification-decision"
+                    readonly key: string
+                    readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                    readonly gaps: ReadonlyArray<string>
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "stagnation-observation"
+                    readonly observation: {
+                      readonly category: string
+                      readonly error: string
+                      readonly cwd: string
+                      readonly environment?: string
+                      readonly artifact?: string
+                      readonly hypothesis?: string
+                      readonly expectedEvidence?: string
+                      readonly evidence?: string
+                    }
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "delivery"
+                    readonly receipt: {
+                      readonly request: string
+                      readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                      readonly missing: ReadonlyArray<string>
+                      readonly reason?: string
+                      readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly report?: boolean
+                      readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly model?: string
+                      readonly costs?: ReadonlyArray<{
+                        readonly configured?: {
+                          readonly input: boolean
+                          readonly output: boolean
+                          readonly cacheRead: boolean
+                          readonly cacheWrite: boolean
+                        }
+                        readonly tier?: { readonly type: "context"; readonly size: number }
+                        readonly input: number
+                        readonly output: number
+                        readonly cache: { readonly read: number; readonly write: number }
+                      }>
+                      readonly limits?: {
+                        readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                      }
+                    }
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "budget-closing"
+                    readonly receipt: {
+                      readonly requestID?: string
+                      readonly sourceMessageID?: string
+                      readonly deadline?: number
+                      readonly closingReserveMs?: number
+                      readonly providerDeadline?: number
+                      readonly state: "stopped_unverified"
+                      readonly cancelled: ReadonlyArray<string>
+                      readonly preserved: ReadonlyArray<string>
+                    }
+                  }
+                | { readonly version: 1; readonly kind: "budget-checkpoint" }
+                | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+                | {
+                    readonly version: 1
+                    readonly kind: "verification"
+                    readonly request?: string
+                    readonly mode: "legacy" | "evidence"
+                    readonly key?: string
+                    readonly gaps: ReadonlyArray<string>
+                  }
+                | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+                | {
+                    readonly version: 1
+                    readonly kind: "facts"
+                    readonly snapshot: {
+                      readonly activeMs?: number
+                      readonly remainingTokens?: number
+                      readonly remainingTokenUpperBound?: number
+                      readonly advisoryOnly?: boolean
+                      readonly sourceRequest: string
+                      readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly activeTimeUnknown?: boolean
+                      readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+              )
         }
       }
     | {
@@ -1723,6 +2068,121 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly messageID: string
           readonly text: string
+          readonly host?:
+            | JsonValue
+            | (
+                | {
+                    readonly version: 1
+                    readonly kind: "verification-decision"
+                    readonly key: string
+                    readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                    readonly gaps: ReadonlyArray<string>
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "stagnation-observation"
+                    readonly observation: {
+                      readonly category: string
+                      readonly error: string
+                      readonly cwd: string
+                      readonly environment?: string
+                      readonly artifact?: string
+                      readonly hypothesis?: string
+                      readonly expectedEvidence?: string
+                      readonly evidence?: string
+                    }
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "delivery"
+                    readonly receipt: {
+                      readonly request: string
+                      readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                      readonly missing: ReadonlyArray<string>
+                      readonly reason?: string
+                      readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly report?: boolean
+                      readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly model?: string
+                      readonly costs?: ReadonlyArray<{
+                        readonly configured?: {
+                          readonly input: boolean
+                          readonly output: boolean
+                          readonly cacheRead: boolean
+                          readonly cacheWrite: boolean
+                        }
+                        readonly tier?: { readonly type: "context"; readonly size: number }
+                        readonly input: number
+                        readonly output: number
+                        readonly cache: { readonly read: number; readonly write: number }
+                      }>
+                      readonly limits?: {
+                        readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                      }
+                    }
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "budget-closing"
+                    readonly receipt: {
+                      readonly requestID?: string
+                      readonly sourceMessageID?: string
+                      readonly deadline?: number
+                      readonly closingReserveMs?: number
+                      readonly providerDeadline?: number
+                      readonly state: "stopped_unverified"
+                      readonly cancelled: ReadonlyArray<string>
+                      readonly preserved: ReadonlyArray<string>
+                    }
+                  }
+                | { readonly version: 1; readonly kind: "budget-checkpoint" }
+                | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+                | {
+                    readonly version: 1
+                    readonly kind: "verification"
+                    readonly request?: string
+                    readonly mode: "legacy" | "evidence"
+                    readonly key?: string
+                    readonly gaps: ReadonlyArray<string>
+                  }
+                | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+                | {
+                    readonly version: 1
+                    readonly kind: "facts"
+                    readonly snapshot: {
+                      readonly activeMs?: number
+                      readonly remainingTokens?: number
+                      readonly remainingTokenUpperBound?: number
+                      readonly advisoryOnly?: boolean
+                      readonly sourceRequest: string
+                      readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly activeTimeUnknown?: boolean
+                      readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+              )
         }
       }
     | {
@@ -1736,6 +2196,121 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly messageID: string
           readonly text: string
+          readonly host?:
+            | JsonValue
+            | (
+                | {
+                    readonly version: 1
+                    readonly kind: "verification-decision"
+                    readonly key: string
+                    readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                    readonly gaps: ReadonlyArray<string>
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "stagnation-observation"
+                    readonly observation: {
+                      readonly category: string
+                      readonly error: string
+                      readonly cwd: string
+                      readonly environment?: string
+                      readonly artifact?: string
+                      readonly hypothesis?: string
+                      readonly expectedEvidence?: string
+                      readonly evidence?: string
+                    }
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "delivery"
+                    readonly receipt: {
+                      readonly request: string
+                      readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                      readonly missing: ReadonlyArray<string>
+                      readonly reason?: string
+                      readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly report?: boolean
+                      readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly model?: string
+                      readonly costs?: ReadonlyArray<{
+                        readonly configured?: {
+                          readonly input: boolean
+                          readonly output: boolean
+                          readonly cacheRead: boolean
+                          readonly cacheWrite: boolean
+                        }
+                        readonly tier?: { readonly type: "context"; readonly size: number }
+                        readonly input: number
+                        readonly output: number
+                        readonly cache: { readonly read: number; readonly write: number }
+                      }>
+                      readonly limits?: {
+                        readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                        readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                      }
+                    }
+                  }
+                | {
+                    readonly version: 1
+                    readonly kind: "budget-closing"
+                    readonly receipt: {
+                      readonly requestID?: string
+                      readonly sourceMessageID?: string
+                      readonly deadline?: number
+                      readonly closingReserveMs?: number
+                      readonly providerDeadline?: number
+                      readonly state: "stopped_unverified"
+                      readonly cancelled: ReadonlyArray<string>
+                      readonly preserved: ReadonlyArray<string>
+                    }
+                  }
+                | { readonly version: 1; readonly kind: "budget-checkpoint" }
+                | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+                | {
+                    readonly version: 1
+                    readonly kind: "verification"
+                    readonly request?: string
+                    readonly mode: "legacy" | "evidence"
+                    readonly key?: string
+                    readonly gaps: ReadonlyArray<string>
+                  }
+                | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+                | {
+                    readonly version: 1
+                    readonly kind: "facts"
+                    readonly snapshot: {
+                      readonly activeMs?: number
+                      readonly remainingTokens?: number
+                      readonly remainingTokenUpperBound?: number
+                      readonly advisoryOnly?: boolean
+                      readonly sourceRequest: string
+                      readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly activeTimeUnknown?: boolean
+                      readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+              )
           readonly recovery?: {
             readonly id: string
             readonly started: number
@@ -2355,6 +2930,121 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly category: "continuation" | "closing" | "stagnation" | "cache" | "operation" | "recovery"
         readonly details: JsonValue
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number
+                    readonly tokens: number
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number
+                    readonly toolCalls?: number
+                    readonly report?: boolean
+                    readonly allowance?: number
+                    readonly spent?: number
+                    readonly cacheRead?: number
+                    readonly estimatedCost?: number
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number
+                      readonly totalTokens: number
+                      readonly outputTokens: number
+                      readonly durationMs: number
+                      readonly toolChecks: number
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number
+                    readonly requestElapsedMs: number
+                    readonly providerTurns: number
+                    readonly allowanceTurn: number
+                    readonly allowanceLimit?: number
+                    readonly knownTokens: number
+                    readonly unreported: number
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number
+                    readonly hardDeadline?: number
+                    readonly executionDeadline?: number
+                    readonly advisoryDeadline?: number
+                    readonly remainingMs?: number
+                    readonly executableRemainingMs?: number
+                    readonly advisoryRemainingMs?: number
+                  }
+                }
+            )
       }
     }
   | {
@@ -2603,6 +3293,121 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly messageID: string
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number
+                    readonly tokens: number
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number
+                    readonly toolCalls?: number
+                    readonly report?: boolean
+                    readonly allowance?: number
+                    readonly spent?: number
+                    readonly cacheRead?: number
+                    readonly estimatedCost?: number
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number
+                      readonly totalTokens: number
+                      readonly outputTokens: number
+                      readonly durationMs: number
+                      readonly toolChecks: number
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number
+                    readonly requestElapsedMs: number
+                    readonly providerTurns: number
+                    readonly allowanceTurn: number
+                    readonly allowanceLimit?: number
+                    readonly knownTokens: number
+                    readonly unreported: number
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number
+                    readonly hardDeadline?: number
+                    readonly executionDeadline?: number
+                    readonly advisoryDeadline?: number
+                    readonly remainingMs?: number
+                    readonly executableRemainingMs?: number
+                    readonly advisoryRemainingMs?: number
+                  }
+                }
+            )
       }
     }
   | {
@@ -2616,6 +3421,121 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly messageID: string
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number
+                    readonly tokens: number
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number
+                    readonly toolCalls?: number
+                    readonly report?: boolean
+                    readonly allowance?: number
+                    readonly spent?: number
+                    readonly cacheRead?: number
+                    readonly estimatedCost?: number
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number
+                      readonly totalTokens: number
+                      readonly outputTokens: number
+                      readonly durationMs: number
+                      readonly toolChecks: number
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number
+                    readonly requestElapsedMs: number
+                    readonly providerTurns: number
+                    readonly allowanceTurn: number
+                    readonly allowanceLimit?: number
+                    readonly knownTokens: number
+                    readonly unreported: number
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number
+                    readonly hardDeadline?: number
+                    readonly executionDeadline?: number
+                    readonly advisoryDeadline?: number
+                    readonly remainingMs?: number
+                    readonly executableRemainingMs?: number
+                    readonly advisoryRemainingMs?: number
+                  }
+                }
+            )
         readonly recovery?: {
           readonly id: string
           readonly started: number
@@ -4031,6 +4951,121 @@ export type SessionsMessageOutput = {
         readonly turn?: string
         readonly sessionID: string
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly report?: boolean
+                    readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                  }
+                }
+            )
         readonly completion?: {
           readonly type: "bash-completion"
           readonly sourceMessageID: string
@@ -4053,6 +5088,121 @@ export type SessionsMessageOutput = {
         readonly turn?: string
         readonly type: "system"
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly report?: boolean
+                    readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                  }
+                }
+            )
       }
     | {
         readonly id: string
@@ -7035,6 +8185,121 @@ export type MessagesListOutput = {
         readonly turn?: string
         readonly sessionID: string
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly report?: boolean
+                    readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                  }
+                }
+            )
         readonly completion?: {
           readonly type: "bash-completion"
           readonly sourceMessageID: string
@@ -7057,6 +8322,121 @@ export type MessagesListOutput = {
         readonly turn?: string
         readonly type: "system"
         readonly text: string
+        readonly host?:
+          | JsonValue
+          | (
+              | {
+                  readonly version: 1
+                  readonly kind: "verification-decision"
+                  readonly key: string
+                  readonly decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "stagnation-observation"
+                  readonly observation: {
+                    readonly category: string
+                    readonly error: string
+                    readonly cwd: string
+                    readonly environment?: string
+                    readonly artifact?: string
+                    readonly hypothesis?: string
+                    readonly expectedEvidence?: string
+                    readonly evidence?: string
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "delivery"
+                  readonly receipt: {
+                    readonly request: string
+                    readonly started: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly tokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+                    readonly missing: ReadonlyArray<string>
+                    readonly reason?: string
+                    readonly turns?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly toolCalls?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly report?: boolean
+                    readonly allowance?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly spent?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly cacheRead?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly estimatedCost?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly model?: string
+                    readonly costs?: ReadonlyArray<{
+                      readonly configured?: {
+                        readonly input: boolean
+                        readonly output: boolean
+                        readonly cacheRead: boolean
+                        readonly cacheWrite: boolean
+                      }
+                      readonly tier?: { readonly type: "context"; readonly size: number }
+                      readonly input: number
+                      readonly output: number
+                      readonly cache: { readonly read: number; readonly write: number }
+                    }>
+                    readonly limits?: {
+                      readonly turns: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly totalTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly outputTokens: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly durationMs: number | "Infinity" | "-Infinity" | "NaN"
+                      readonly toolChecks: number | "Infinity" | "-Infinity" | "NaN"
+                    }
+                  }
+                }
+              | {
+                  readonly version: 1
+                  readonly kind: "budget-closing"
+                  readonly receipt: {
+                    readonly requestID?: string
+                    readonly sourceMessageID?: string
+                    readonly deadline?: number
+                    readonly closingReserveMs?: number
+                    readonly providerDeadline?: number
+                    readonly state: "stopped_unverified"
+                    readonly cancelled: ReadonlyArray<string>
+                    readonly preserved: ReadonlyArray<string>
+                  }
+                }
+              | { readonly version: 1; readonly kind: "budget-checkpoint" }
+              | { readonly version: 1; readonly kind: "budget-notice"; readonly limit: number }
+              | {
+                  readonly version: 1
+                  readonly kind: "verification"
+                  readonly request?: string
+                  readonly mode: "legacy" | "evidence"
+                  readonly key?: string
+                  readonly gaps: ReadonlyArray<string>
+                }
+              | { readonly version: 1; readonly kind: "stagnation"; readonly request?: string; readonly key: string }
+              | {
+                  readonly version: 1
+                  readonly kind: "facts"
+                  readonly snapshot: {
+                    readonly activeMs?: number
+                    readonly remainingTokens?: number
+                    readonly remainingTokenUpperBound?: number
+                    readonly advisoryOnly?: boolean
+                    readonly sourceRequest: string
+                    readonly contextEpoch: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly requestElapsedMs: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly providerTurns: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceTurn: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly allowanceLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly knownTokens: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly unreported: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly activeTimeUnknown?: boolean
+                    readonly budgetLimit?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly hardDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executionDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryDeadline?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly remainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly executableRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                    readonly advisoryRemainingMs?: number | "Infinity" | "-Infinity" | "NaN"
+                  }
+                }
+            )
       }
     | {
         readonly id: string
