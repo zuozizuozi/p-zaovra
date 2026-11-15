@@ -1,7 +1,7 @@
 export * as MemoryStore from "./store"
 
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "../database/database"
 import { ProjectV2 } from "../project"
@@ -9,6 +9,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionSchema } from "../session/schema"
 import { SessionMessageTable, SessionTable } from "../session/sql"
 import { Hash } from "../util/hash"
+import { MemoryFileEvidence } from "./file-evidence"
 import { MemoryNoteTable, MemoryRecoveryTable, MemoryRecoveryClaimTable } from "./sql"
 
 export interface ObserveInput {
@@ -96,6 +97,9 @@ export interface Interface {
   /** Records a fact the host saw for itself. A fact the user deleted stays deleted. */
   readonly observe: (input: ObserveInput) => Effect.Effect<Memory.Note | undefined>
   readonly write: (input: WriteInput) => Effect.Effect<Memory.Note | undefined>
+  /** Internal host-only storage. No route/tool exposes these calls or grants read permission. */
+  readonly bindFiles: (input: MemoryFileEvidence.Bind) => Effect.Effect<boolean>
+  readonly checkFiles: (input: MemoryFileEvidence.Check) => Effect.Effect<boolean>
   readonly edit: (id: Memory.ID, input: EditInput) => Effect.Effect<Memory.Note | undefined>
   readonly remove: (id: Memory.ID) => Effect.Effect<void>
   readonly clear: (scope: Memory.Scope) => Effect.Effect<void>
@@ -202,6 +206,8 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         ...(row.session_id ? { sessionID: row.session_id } : {}),
         ...(row.seq === null ? {} : { seq: row.seq }),
         hits: row.hits,
+        fileRevision: row.file_revision,
+        ...(row.files === null ? {} : { files: Schema.decodeUnknownSync(Schema.Json)(row.files) }),
         time: { created: row.time_created, updated: row.time_updated, observed: row.time_observed },
       })
 
@@ -452,6 +458,60 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         return rows.map(note)
       })
 
+      // All observation results are computed outside this transaction by a future
+      // authorized host producer. This layer only validates shape, scope and CAS.
+      const fileUpdate = (input: MemoryFileEvidence.Bind | MemoryFileEvidence.Check) =>
+        db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              if (silent.has(input.scope) || (yield* frozen(input.scope)) || (yield* automaticFrozen(input.scope)))
+                return false
+              const row = yield* tx
+                .select()
+                .from(MemoryNoteTable)
+                .where(
+                  and(
+                    eq(MemoryNoteTable.id, input.id),
+                    eq(MemoryNoteTable.scope, input.scope),
+                    eq(MemoryNoteTable.file_revision, input.expectedRevision),
+                    isNull(MemoryNoteTable.time_deleted),
+                  ),
+                )
+                .get()
+              if (!row || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) return false
+              // Unknown versions are preserved, never replaced by an older writer.
+              if (row.files !== null) {
+                const held = MemoryFileEvidence.decode(row.files)
+                if (Option.isNone(held)) return false
+                if ("files" in input && (held.value.state === "changed" || held.value.state === "missing")) return false
+              }
+              const files =
+                "files" in input
+                  ? MemoryFileEvidence.bindings(input.files)
+                  : MemoryFileEvidence.compare(row.files, input.results)
+              if (!files) return false
+              const changed = files.state === "changed" || files.state === "missing"
+              const updated = yield* tx
+                .update(MemoryNoteTable)
+                .set({
+                  files,
+                  file_revision: row.file_revision + 1,
+                  ...(changed && !protectedByUser(row) ? { status: "stale" as const } : {}),
+                })
+                .where(
+                  and(
+                    eq(MemoryNoteTable.id, row.id),
+                    eq(MemoryNoteTable.file_revision, input.expectedRevision),
+                    isNull(MemoryNoteTable.time_deleted),
+                  ),
+                )
+                .returning({ id: MemoryNoteTable.id })
+                .get()
+              return updated !== undefined
+            }),
+          )
+          .pipe(Effect.orDie)
+
       const insert = (values: typeof MemoryNoteTable.$inferInsert) =>
         db
           .insert(MemoryNoteTable)
@@ -487,7 +547,12 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                   .get()
                   .pipe(Effect.orDie)
               const change = (id: Memory.ID, values: Partial<typeof MemoryNoteTable.$inferInsert>) =>
-                tx.update(MemoryNoteTable).set(values).where(eq(MemoryNoteTable.id, id)).run().pipe(Effect.orDie)
+                tx
+                  .update(MemoryNoteTable)
+                  .set({ ...values, file_revision: sql`${MemoryNoteTable.file_revision} + 1` })
+                  .where(eq(MemoryNoteTable.id, id))
+                  .run()
+                  .pipe(Effect.orDie)
               return yield* Effect.forEach(decisions, (decision) =>
                 Effect.gen(function* () {
                   const basis = decision.basis.trim().slice(0, 200)
@@ -497,6 +562,8 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                   if (protectedByUser(row))
                     return { id: decision.id, result: "refused: written by the user; only the user changes it" }
                   if (decision.action === "verify") {
+                    if (!MemoryFileEvidence.usable(note(row)))
+                      return { id: decision.id, result: "refused: file dependencies need a fresh host check" }
                     yield* change(row.id, { status: "verified", verification: `checked: ${basis}` })
                     return { id: decision.id, result: "verified" }
                   }
@@ -527,6 +594,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                     if (deleted || (yield* suppressed(scope, text)))
                       return { id: decision.id, result: "refused: wording was deleted by the user" }
                     yield* change(target.id, {
+                      files: MemoryFileEvidence.edited(target.files),
                       text,
                       hits: target.hits + row.hits,
                       origin: "consolidation",
@@ -585,20 +653,25 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               yield* db
                 .update(MemoryNoteTable)
                 .set({
+                  file_revision: sql`${MemoryNoteTable.file_revision} + 1`,
                   hits: existing.hits + 1,
                   time_observed: now,
                   ...(edited
                     ? {}
                     : {
+                        files:
+                          input.text === existing.text ? existing.files : MemoryFileEvidence.edited(existing.files),
                         text: input.text,
                         verification: input.verification,
                         session_id: input.sessionID,
                         seq: input.seq,
                         // One success says the command worked once. Seen again in another conversation, it is a practice.
                         status:
-                          input.settled || existing.status === "verified" || existing.session_id !== input.sessionID
-                            ? "verified"
-                            : existing.status,
+                          existing.status === "stale"
+                            ? "stale"
+                            : input.settled || existing.status === "verified" || existing.session_id !== input.sessionID
+                              ? "verified"
+                              : existing.status,
                       }),
                 })
                 .where(eq(MemoryNoteTable.id, existing.id))
@@ -646,33 +719,49 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
       )
 
       const edit = Effect.fn("MemoryStore.edit")(function* (id: Memory.ID, input: EditInput) {
-        const current = yield* get(id)
-        if (
-          !current ||
-          (yield* frozen(current.scope)) ||
-          (input.text && (yield* suppressed(current.scope, input.text)))
-        )
-          return undefined
-        const text = input.text?.trim()
-        yield* db
-          .update(MemoryNoteTable)
-          .set({
-            ...(text ? { text, status: "verified" as const } : {}),
-            ...(text || input.status === "verified"
-              ? { origin: "user" as const, verification: text ? "edited by the user" : "confirmed by the user" }
-              : {}),
-            ...(input.kind ? { kind: input.kind } : {}),
-            ...(input.status ? { status: input.status } : {}),
-          })
-          .where(and(eq(MemoryNoteTable.id, id), isNull(MemoryNoteTable.time_deleted)))
-          .run()
+        return yield* db
+          .transaction(() =>
+            Effect.gen(function* () {
+              const current = yield* get(id)
+              if (
+                !current ||
+                (yield* frozen(current.scope)) ||
+                (input.text && (yield* suppressed(current.scope, input.text)))
+              )
+                return undefined
+              const text = input.text?.trim()
+              yield* db
+                .update(MemoryNoteTable)
+                .set({
+                  file_revision: sql`${MemoryNoteTable.file_revision} + 1`,
+                  ...(text
+                    ? { text, status: "verified" as const, files: MemoryFileEvidence.edited(current.files ?? null) }
+                    : {}),
+                  ...(text || input.status === "verified"
+                    ? { origin: "user" as const, verification: text ? "edited by the user" : "confirmed by the user" }
+                    : {}),
+                  ...(input.kind ? { kind: input.kind } : {}),
+                  ...(input.status ? { status: input.status } : {}),
+                })
+                .where(and(eq(MemoryNoteTable.id, id), isNull(MemoryNoteTable.time_deleted)))
+                .run()
+                .pipe(Effect.orDie)
+              return yield* get(id)
+            }),
+          )
           .pipe(Effect.orDie)
-        return yield* get(id)
       })
 
       // The original fact key survives; the separate alias also suppresses edited wording.
       // Both rows keep no readable text or provenance from the removed note.
-      const tombstone = () => ({ time_deleted: Date.now(), text: "", verification: null, session_id: null, seq: null })
+      const tombstone = () => ({
+        time_deleted: Date.now(),
+        text: "",
+        verification: null,
+        session_id: null,
+        seq: null,
+        files: null,
+      })
 
       const erase = (condition: ReturnType<typeof eq>) =>
         db
@@ -706,7 +795,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                         .pipe(Effect.orDie)
                     yield* tx
                       .update(MemoryNoteTable)
-                      .set(tombstone())
+                      .set({ ...tombstone(), file_revision: sql`${MemoryNoteTable.file_revision} + 1` })
                       .where(eq(MemoryNoteTable.id, row.id))
                       .run()
                       .pipe(Effect.orDie)
@@ -833,6 +922,8 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         get,
         observe,
         write,
+        bindFiles: fileUpdate,
+        checkFiles: fileUpdate,
         edit,
         remove,
         clear,

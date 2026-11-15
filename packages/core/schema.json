@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "72a3fa09-ce01-446a-8c52-18110ca22d22",
+  "id": "b40d2dcd-57f5-49af-95c4-fbab1312870a",
   "prevIds": [
-    "02b4818c-473d-45ff-9a7a-c803816ef67e"
+    "72a3fa09-ce01-446a-8c52-18110ca22d22"
   ],
   "ddl": [
     {
@@ -1109,6 +1109,26 @@
       "default": null,
       "generated": null,
       "name": "seq",
+      "entityType": "columns",
+      "table": "memory_note"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "file_revision",
+      "entityType": "columns",
+      "table": "memory_note"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "files",
       "entityType": "columns",
       "table": "memory_note"
     },

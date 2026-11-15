@@ -157,6 +157,8 @@ export default {
           \`verification\` text,
           \`session_id\` text,
           \`seq\` integer,
+          \`file_revision\` integer DEFAULT 0 NOT NULL,
+          \`files\` text,
           \`hits\` integer DEFAULT 1 NOT NULL,
           \`time_observed\` integer NOT NULL,
           \`time_deleted\` integer,

@@ -66,5 +66,6 @@ export const migrations = (
     import("./migration/20261114201018_memory-recovery-claim"),
     import("./migration/20261115181429_memory-pages"),
     import("./migration/20261115182803_memory-page-owner"),
+    import("./migration/20261115184829_memory-file-links"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

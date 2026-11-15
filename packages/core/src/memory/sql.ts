@@ -20,6 +20,8 @@ export const MemoryNoteTable = sqliteTable(
     verification: text(),
     session_id: text().$type<SessionSchema.ID>(),
     seq: integer(),
+    file_revision: integer().notNull().default(0),
+    files: text({ mode: "json" }).$type<unknown>(),
     hits: integer().notNull().default(1),
     time_observed: integer().notNull(),
     time_deleted: integer(),

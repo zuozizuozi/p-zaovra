@@ -33,6 +33,26 @@ export type Origin = typeof Origin.Type
 export const Status = Schema.Literals(["verified", "unverified", "stale"])
 export type Status = typeof Status.Type
 
+/** Storage contract only. Host producers and filesystem authorization are separate. */
+export const FileBinding = Schema.Struct({
+  path: Schema.NonEmptyString,
+  directory: Schema.NonEmptyString,
+  identity: Schema.NonEmptyString,
+  digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  bytes: NonNegativeInt,
+  sessionID: SessionID,
+  seq: PositiveInt,
+})
+export type FileBinding = typeof FileBinding.Type
+
+export const FileLinks = Schema.Struct({
+  version: Schema.Literal(1),
+  files: Schema.Array(FileBinding).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+  state: Schema.Literals(["unknown", "current", "changed", "missing"]),
+  checkedAt: Schema.Finite.pipe(optional),
+})
+export type FileLinks = typeof FileLinks.Type
+
 export const Note = Schema.Struct({
   id: ID,
   scope: Scope,
@@ -47,6 +67,10 @@ export const Note = Schema.Struct({
   seq: Schema.Int.pipe(optional),
   /** How many separate times the host observed the same fact. */
   hits: Schema.Int,
+  /** CAS token for file checks; legacy notes start at zero. */
+  fileRevision: NonNegativeInt.pipe(optional),
+  /** Preserve unknown future versions as data; never interpret their paths. */
+  files: Schema.Json.pipe(optional),
   time: Schema.Struct({
     created: Schema.Finite,
     updated: Schema.Finite,
