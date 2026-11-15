@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Schema } from "effect"
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError"
-import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core/errors"
+import { EffectDrizzleQueryError } from "drizzle-orm/effect-core/errors"
 import type { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
@@ -41,7 +41,7 @@ export interface Interface {
   readonly list: (scope: Memory.Scope) => Effect.Effect<Run[]>
   readonly ownsSession: (run: Run) => Effect.Effect<boolean>
   readonly authorize: (input: Authority) => Effect.Effect<Run, Rejected>
-  readonly guarded: <A>(input: Authority, operation: Effect.Effect<A>) => Effect.Effect<A, Rejected>
+  readonly guarded: <A, E>(input: Authority, operation: Effect.Effect<A, E>) => Effect.Effect<A, E | Rejected>
   readonly reserve: (input: Authority & { attemptID: string; tokens: number }) => Effect.Effect<void, Rejected>
   readonly settle: (attemptID: string, actual: number) => Effect.Effect<{ exceeded: boolean }, Rejected>
   readonly finish: (id: string, state: "completed" | "cancelled" | "failed") => Effect.Effect<void, Rejected>
@@ -150,10 +150,15 @@ const layer = Layer.effect(
         db
           .transaction(() => authorize(input))
           .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
-      guarded: (input, operation) =>
+      guarded: <A, E>(input: Authority, operation: Effect.Effect<A, E>) =>
         db
           .transaction(() => authorize(input).pipe(Effect.andThen(operation)))
-          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
+          .pipe(
+            Effect.catch((error): Effect.Effect<never, E | Rejected> => {
+              if (isSqlError(error) || error instanceof EffectDrizzleQueryError) return rejectSqlError(error)
+              return Effect.fail(error)
+            }),
+          ),
       create: (input, createSession) =>
         db
           .transaction(() =>

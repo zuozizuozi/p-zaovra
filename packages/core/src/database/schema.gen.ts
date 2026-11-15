@@ -24,6 +24,29 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`memory_page\` (
+          \`id\` text PRIMARY KEY,
+          \`scope\` text NOT NULL,
+          \`key\` text NOT NULL,
+          \`title\` text NOT NULL,
+          \`summary\` text NOT NULL,
+          \`body\` text NOT NULL,
+          \`sources\` text NOT NULL,
+          \`revision\` text NOT NULL,
+          \`aliases\` text NOT NULL,
+          \`time_deleted\` integer,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`memory_page_tombstone\` (
+          \`scope\` text NOT NULL,
+          \`key\` text NOT NULL,
+          \`time_created\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`memory_tidy_attempt\` (
           \`id\` text PRIMARY KEY,
           \`run_id\` text NOT NULL,
@@ -598,6 +621,11 @@ export default {
           \`expires_at\` integer NOT NULL
         );
       `)
+      yield* tx.run(`CREATE UNIQUE INDEX \`memory_page_scope_key_idx\` ON \`memory_page\` (\`scope\`,\`key\`);`)
+      yield* tx.run(`CREATE INDEX \`memory_page_scope_updated_idx\` ON \`memory_page\` (\`scope\`,\`time_updated\`);`)
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`memory_page_tombstone_scope_key_idx\` ON \`memory_page_tombstone\` (\`scope\`,\`key\`);`,
+      )
       yield* tx.run(`CREATE INDEX \`memory_tidy_attempt_run_idx\` ON \`memory_tidy_attempt\` (\`run_id\`);`)
       yield* tx.run(`CREATE INDEX \`memory_tidy_attempt_day_idx\` ON \`memory_tidy_attempt\` (\`day\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`memory_tidy_run_session_idx\` ON \`memory_tidy_run\` (\`session_id\`);`)

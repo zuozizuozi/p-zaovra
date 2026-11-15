@@ -55,6 +55,35 @@ export const Note = Schema.Struct({
 }).annotate({ identifier: "Memory.Note" })
 export interface Note extends Schema.Schema.Type<typeof Note> {}
 
+export const PageID = Schema.String.pipe(
+  Schema.brand("Memory.PageID"),
+  statics((schema) => ({ create: () => schema.make("mpg_" + ascending()) })),
+)
+export type PageID = typeof PageID.Type
+
+/** The host captures the note and its exact content; a model cannot attest its own sources. */
+export const PageSource = Schema.Struct({
+  id: ID,
+  digest: Schema.String,
+  sessionID: SessionID.pipe(optional),
+  seq: Schema.Int.pipe(optional),
+}).annotate({ identifier: "Memory.PageSource" })
+export interface PageSource extends Schema.Schema.Type<typeof PageSource> {}
+
+export const Page = Schema.Struct({
+  id: PageID,
+  scope: Scope,
+  title: Schema.String,
+  summary: Schema.String,
+  body: Schema.String,
+  sources: Schema.Array(PageSource),
+  revision: Schema.String,
+  /** Current means sources still match, not that a model's summary is an instruction. */
+  status: Schema.Literals(["current", "stale"]),
+  time: Schema.Struct({ created: Schema.Finite, updated: Schema.Finite }),
+}).annotate({ identifier: "Memory.Page" })
+export interface Page extends Schema.Schema.Type<typeof Page> {}
+
 /** One earlier conversation that matched a search, with the passages that matched. */
 export const SessionMatch = Schema.Struct({
   sessionID: SessionID,

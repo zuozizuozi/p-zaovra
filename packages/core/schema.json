@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "a80ef508-dc6d-42b9-b701-79e7fc0d5d6e",
+  "id": "02b4818c-473d-45ff-9a7a-c803816ef67e",
   "prevIds": [
-    "94bf8e94-e965-43da-9147-81c24abdd08e"
+    "a80ef508-dc6d-42b9-b701-79e7fc0d5d6e"
   ],
   "ddl": [
     {
@@ -12,6 +12,14 @@
     },
     {
       "name": "data_migration",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_page",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_page_tombstone",
       "entityType": "tables"
     },
     {
@@ -273,6 +281,156 @@
       "name": "time_completed",
       "entityType": "columns",
       "table": "data_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "title",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "summary",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "body",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sources",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "aliases",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_deleted",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "memory_page_tombstone"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key",
+      "entityType": "columns",
+      "table": "memory_page_tombstone"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "memory_page_tombstone"
     },
     {
       "type": "text",
@@ -4658,6 +4816,15 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "memory_page_pk",
+      "table": "memory_page",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "memory_tidy_attempt_pk",
       "table": "memory_tidy_attempt",
       "entityType": "pks"
@@ -4958,6 +5125,60 @@
       "name": "work_worker_pk",
       "table": "work_worker",
       "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "scope",
+          "isExpression": false
+        },
+        {
+          "value": "key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_page_scope_key_idx",
+      "entityType": "indexes",
+      "table": "memory_page"
+    },
+    {
+      "columns": [
+        {
+          "value": "scope",
+          "isExpression": false
+        },
+        {
+          "value": "time_updated",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_page_scope_updated_idx",
+      "entityType": "indexes",
+      "table": "memory_page"
+    },
+    {
+      "columns": [
+        {
+          "value": "scope",
+          "isExpression": false
+        },
+        {
+          "value": "key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_page_tombstone_scope_key_idx",
+      "entityType": "indexes",
+      "table": "memory_page_tombstone"
     },
     {
       "columns": [
