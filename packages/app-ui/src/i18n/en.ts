@@ -1849,6 +1849,18 @@ export const dict = {
   "settings.memory.add": "Add",
   "settings.memory.use": "Use it",
   "settings.memory.enabled.title": "Keep notes across conversations",
+  "settings.memory.index.title": "Include the startup index",
+  "settings.memory.index.description":
+    "A short memory index for new conversations. Existing conversations refresh it after compaction.",
+  "settings.memory.search.title": "Search memory when a task starts",
+  "settings.memory.search.description":
+    "Locally find up to three relevant notes or topics. Makes no extra model call; matches still occupy context.",
+  "settings.memory.index.limits": "Startup index limits",
+  "settings.memory.index.limits.description":
+    "Defaults: 60 lines and 4 KB. Maximum: 200 lines and 25 KB. Includes the guidance text; higher limits use more context.",
+  "settings.memory.index.lines": "Lines",
+  "settings.memory.index.bytes": "UTF-8 bytes",
+  "settings.memory.config.failed": "Memory settings could not be saved. Try the change again.",
   "settings.memory.enabled.description":
     "When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
   "settings.memory.tidy.title": "Tidy this project's notes",

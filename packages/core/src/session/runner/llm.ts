@@ -46,6 +46,8 @@ import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { MemoryTidyTools } from "../../memory/tidy-tools"
 import { MemoryTidyExecution } from "../../memory/tidy-execution"
+import { MemoryTaskContext } from "../../memory/task-context"
+import { SessionMemoryContext } from "../memory-context"
 import { ShellIdentity } from "../../shell-identity"
 import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
@@ -166,6 +168,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const tidyTools = yield* MemoryTidyTools.Service
     const tidyExecution = yield* MemoryTidyExecution.Service
+    const taskMemory = yield* MemoryTaskContext.Service
     const snapshots = yield* Snapshot.Service
     const fs = yield* FSUtil.Service
     const lsp = yield* LSP.Service
@@ -610,10 +613,18 @@ const layer = Layer.effect(
 
     const attachments = yield* SessionAttachments.Service
 
-    const loadSystemContext = (agent: AgentV2.Selection) =>
-      Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
-        concurrency: "unbounded",
-      }).pipe(Effect.map(SystemContext.combine))
+    const loadSystemContext = (agent: AgentV2.Selection, sessionID: SessionSchema.ID) =>
+      Effect.all(
+        [
+          systemContext.load(),
+          skillGuidance.load(agent),
+          referenceGuidance.load(),
+          SessionMemoryContext.load(db, taskMemory, sessionID),
+        ],
+        {
+          concurrency: "unbounded",
+        },
+      ).pipe(Effect.map(SystemContext.combine))
 
     const activeTicks = new Map<string, number>()
     const progressLock = Semaphore.makeUnsafe(1)
@@ -693,9 +704,11 @@ const layer = Layer.effect(
           yield* plugins.wait(PluginInternal.readyID)
           const agent = yield* agents.select(selected?.agent ?? placement.agent)
           const shell = ShellIdentity.snapshot(yield* config.entries(), location)
-          const context = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), sessionID).pipe(
-            Effect.provideService(ShellIdentity.Current, shell),
-          )
+          const context = yield* SessionContextEpoch.initialize(
+            db,
+            loadSystemContext(agent, sessionID),
+            sessionID,
+          ).pipe(Effect.provideService(ShellIdentity.Current, shell))
           return { agent, shell, context }
         }),
       )
@@ -770,11 +783,19 @@ const layer = Layer.effect(
       if (networkRecovery) networkRecovery.step = currentStep
       const sameAgent = session.agent === (selected?.agent ?? placement.agent)
       const agent = sameAgent ? initialized.agent : yield* agents.select(session.agent)
+      // The first prompt may be promoted after initialization. Admit only its
+      // new task source; do not observe every initialized producer a second time.
       const system =
-        (sameAgent ? initialized.context : undefined) ??
-        (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id).pipe(
-          Effect.provideService(ShellIdentity.Current, initialized.shell),
-        ))
+        sameAgent && initialized.context
+          ? yield* SessionContextEpoch.addSources(
+              db,
+              events,
+              SessionMemoryContext.load(db, taskMemory, session.id),
+              session.id,
+            )
+          : yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent, session.id), session.id).pipe(
+              Effect.provideService(ShellIdentity.Current, initialized.shell),
+            )
       const model = yield* models.resolve(session)
       if (budgetStop) {
         budgetStop.model = model
@@ -2960,9 +2981,10 @@ const layer = Layer.effect(
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
       const agent = yield* agents.select(session.agent)
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
+      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent, session.id), session.id)
       const system =
-        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
+        initialized ??
+        (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent, session.id), session.id))
       const model = yield* models.resolve(session)
       if (yield* checkBudget(session, model)) return false
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
@@ -3002,6 +3024,7 @@ export const node = makeLocationNode({
     Config.node,
     MemoryTidyTools.node,
     MemoryTidyExecution.node,
+    MemoryTaskContext.node,
     Snapshot.node,
     FSUtil.node,
     LSP.node,

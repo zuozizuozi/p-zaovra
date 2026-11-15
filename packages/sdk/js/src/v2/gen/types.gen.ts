@@ -2451,6 +2451,12 @@ export type Config = {
   shell?: string
   memory?: {
     enabled?: boolean
+    taskSearch?: boolean
+    index?: {
+      enabled?: boolean
+      maxLines?: number
+      maxBytes?: number
+    }
   }
   logLevel?: LogLevel
   server?: ServerConfig

@@ -1,7 +1,7 @@
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { Switch } from "@zaovra-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
-import { type Component, For, Show, createMemo, createResource } from "solid-js"
+import { type Component, For, Show, createEffect, createMemo, createResource, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
@@ -64,7 +64,41 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     draft: { project: "", user: "" },
     confirming: undefined as Layer | undefined,
     pagesRevision: 0,
+    saving: false,
+    configError: false,
   })
+  const pendingConfig = { revision: 0 }
+  createEffect(
+    on(
+      () => serverSdk().scope,
+      () => {
+        pendingConfig.revision++
+        setState({ saving: false, configError: false })
+      },
+    ),
+  )
+  onCleanup(() => pendingConfig.revision++)
+  const updateMemory = async (patch: NonNullable<ReturnType<typeof serverSync>["data"]["config"]["memory"]>) => {
+    if (state.saving) return
+    const revision = ++pendingConfig.revision
+    const target = serverSdk().scope
+    const sync = serverSync()
+    const previous = sync.data.config.memory
+    setState({ saving: true, configError: false })
+    try {
+      await sync.updateConfig({
+        memory: {
+          ...previous,
+          ...patch,
+          ...(patch.index ? { index: { ...previous?.index, ...patch.index } } : {}),
+        },
+      })
+    } catch {
+      if (revision === pendingConfig.revision && target === serverSdk().scope) setState("configError", true)
+    } finally {
+      if (revision === pendingConfig.revision && target === serverSdk().scope) setState("saving", false)
+    }
+  }
   const reload = (layer: Layer) => (layer === "project" ? projectActions.refetch() : userActions.refetch())
 
   const save = async (layer: Layer, id: string) => {
@@ -237,13 +271,84 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
               <Switch
                 hideLabel
                 checked={serverSync().data.config.memory?.enabled !== false}
-                onChange={(enabled) => void serverSync().updateConfig({ memory: { enabled } })}
+                disabled={state.saving}
+                onChange={(enabled) => void updateMemory({ enabled })}
               >
                 {language.t("settings.memory.enabled.title")}
               </Switch>
             </div>
           </SettingsRowV2>
+          <SettingsRowV2
+            title={language.t("settings.memory.index.title")}
+            description={language.t("settings.memory.index.description")}
+          >
+            <div data-action="settings-memory-index">
+              <Switch
+                hideLabel
+                checked={serverSync().data.config.memory?.index?.enabled !== false}
+                disabled={state.saving || serverSync().data.config.memory?.enabled === false}
+                onChange={(enabled) => void updateMemory({ index: { enabled } })}
+              >
+                {language.t("settings.memory.index.title")}
+              </Switch>
+            </div>
+          </SettingsRowV2>
+          <SettingsRowV2
+            title={language.t("settings.memory.search.title")}
+            description={language.t("settings.memory.search.description")}
+          >
+            <div data-action="settings-memory-search">
+              <Switch
+                hideLabel
+                checked={serverSync().data.config.memory?.taskSearch !== false}
+                disabled={state.saving || serverSync().data.config.memory?.enabled === false}
+                onChange={(taskSearch) => void updateMemory({ taskSearch })}
+              >
+                {language.t("settings.memory.search.title")}
+              </Switch>
+            </div>
+          </SettingsRowV2>
+          <SettingsRowV2
+            title={language.t("settings.memory.index.limits")}
+            description={language.t("settings.memory.index.limits.description")}
+          >
+            <fieldset class="flex gap-3" disabled={state.saving || serverSync().data.config.memory?.enabled === false}>
+              <label class="text-xs">
+                {language.t("settings.memory.index.lines")}
+                <TextInputV2
+                  type="number"
+                  min="8"
+                  max="200"
+                  step="1"
+                  aria-label={language.t("settings.memory.index.lines")}
+                  value={serverSync().data.config.memory?.index?.maxLines ?? 60}
+                  onChange={(event) => {
+                    if (event.currentTarget.reportValidity() && event.currentTarget.value !== "")
+                      void updateMemory({ index: { maxLines: Number(event.currentTarget.value) } })
+                  }}
+                />
+              </label>
+              <label class="text-xs">
+                {language.t("settings.memory.index.bytes")}
+                <TextInputV2
+                  type="number"
+                  min="1024"
+                  max="25600"
+                  step="1"
+                  aria-label={language.t("settings.memory.index.bytes")}
+                  value={serverSync().data.config.memory?.index?.maxBytes ?? 4096}
+                  onChange={(event) => {
+                    if (event.currentTarget.reportValidity() && event.currentTarget.value !== "")
+                      void updateMemory({ index: { maxBytes: Number(event.currentTarget.value) } })
+                  }}
+                />
+              </label>
+            </fieldset>
+          </SettingsRowV2>
         </SettingsListV2>
+        <Show when={state.configError}>
+          <p role="alert">{language.t("settings.memory.config.failed")}</p>
+        </Show>
         <Show when={directory()}>
           <Show when={recovery.error}>
             <p role="alert">{language.t("settings.memory.recovery.failed")}</p>
@@ -254,7 +359,9 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           <Show when={!recovery.loading && !recovery.error && recovery()?.state !== "none" && recovery()} keyed>
             {(data) => <MemoryRecoveryPanel data={data} resolve={resolveRecovery} />}
           </Show>
-          <fieldset disabled={frozen()}>{section("project", project)}</fieldset>
+          <fieldset data-slot="memory-project" disabled={frozen()}>
+            {section("project", project)}
+          </fieldset>
         </Show>
         <Show when={tidyTarget()} keyed>
           {(target) => (

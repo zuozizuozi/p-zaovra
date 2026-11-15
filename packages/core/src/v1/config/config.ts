@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "../../schema"
 import { ConfigExperimental } from "../../config/experimental"
 import { ConfigReference } from "../../config/reference"
+import { ConfigMemory } from "../../config/memory"
 import { ConfigAgentV1 } from "./agent"
 import { ConfigAttachmentV1 } from "./attachment"
 import { ConfigCommandV1 } from "./command"
@@ -36,7 +37,7 @@ export const Info = Schema.Struct({
     description: "JSON schema reference for configuration validation",
   }),
   shell: Schema.optional(Schema.String).annotate({ description: "Default shell to use for terminal and bash tool" }),
-  memory: Schema.optional(Schema.Struct({ enabled: Schema.optional(Schema.Boolean) })).annotate({
+  memory: Schema.optional(ConfigMemory.Info).annotate({
     description: "Notes kept across conversations; enabled false turns them off without deleting any",
   }),
   logLevel: Schema.optional(LogLevelRef).annotate({ description: "Log level" }),

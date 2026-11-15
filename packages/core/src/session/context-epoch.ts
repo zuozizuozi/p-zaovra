@@ -1,7 +1,7 @@
 export * as SessionContextEpoch from "./context-epoch"
 
 import { eq } from "drizzle-orm"
-import { DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { SystemContext } from "../system-context/index"
@@ -36,6 +36,37 @@ export function prepare(
 ): Effect.Effect<Prepared, SystemContext.InitializationBlocked | ContextSnapshotDecodeError> {
   return prepareOnce(db, events, context, sessionID).pipe(Effect.withSpan("SessionContextEpoch.prepare"))
 }
+
+/** Admit post-promotion sources without re-observing already initialized producers. */
+export const addSources = Effect.fn("SessionContextEpoch.addSources")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  context: Effect.Effect<SystemContext.SystemContext>,
+  sessionID: SessionSchema.ID,
+) {
+  const stored = yield* find(db, sessionID)
+  if (!stored) return yield* Effect.die("Context Epoch not initialized")
+  const snapshot = yield* Schema.decodeUnknownEffect(SystemContext.Snapshot)(stored.snapshot).pipe(
+    Effect.mapError((error) => new ContextSnapshotDecodeError({ sessionID, details: String(error) })),
+  )
+  const generation = yield* context.pipe(Effect.flatMap(SystemContext.initialize))
+  const keys = Object.keys(generation.snapshot)
+  if (keys.every((key) => Object.hasOwn(snapshot, key)))
+    return { baseline: stored.baseline, baselineSeq: stored.baseline_seq }
+  if (keys.some((key) => Object.hasOwn(snapshot, key)))
+    return yield* Effect.die("Post-promotion sources must not replace admitted sources")
+  yield* events.publish(
+    SessionEvent.ContextUpdated,
+    {
+      sessionID,
+      messageID: SessionMessage.ID.create(),
+      timestamp: yield* DateTime.now,
+      text: generation.baseline,
+    },
+    { commit: () => advance(db, sessionID, { ...snapshot, ...generation.snapshot }).pipe(Effect.orDie) },
+  )
+  return { baseline: stored.baseline, baselineSeq: stored.baseline_seq }
+})
 
 const prepareOnce = Effect.fnUntraced(function* (
   db: DatabaseService,
@@ -117,6 +148,17 @@ export const reset = Effect.fn("SessionContextEpoch.reset")(function* (
     .where(eq(SessionContextEpochTable.session_id, sessionID))
     .run()
     .pipe(Effect.orDie)
+})
+
+/** Read a source's admitted value; prepare still validates the whole epoch. */
+export const sourceValue = Effect.fn("SessionContextEpoch.sourceValue")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  key: SystemContext.Key,
+) {
+  const stored = yield* find(db, sessionID)
+  const snapshot = Schema.decodeUnknownOption(SystemContext.Snapshot)(stored?.snapshot)
+  return Option.isSome(snapshot) ? snapshot.value[key]?.value : undefined
 })
 
 const insert = Effect.fnUntraced(function* (

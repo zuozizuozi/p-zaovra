@@ -376,6 +376,9 @@ const config = Layer.succeed(
         new Config.Document({
           type: "document",
           info: new Config.Info({
+            // These protocol/ordering fixtures isolate task memory; its default-on
+            // first-turn and restart integration lives in memory-task-context.test.ts.
+            memory: { taskSearch: false },
             session_token_budget: sessionTokenBudget,
             session_duration_ms: sessionDuration,
             session_output: sessionOutput,
