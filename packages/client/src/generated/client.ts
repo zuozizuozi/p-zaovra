@@ -165,6 +165,16 @@ import type {
   CommandsRenderOutput,
   SkillsListInput,
   SkillsListOutput,
+  MemoryPrepareTidyInput,
+  MemoryPrepareTidyOutput,
+  MemoryListTidyInput,
+  MemoryListTidyOutput,
+  MemoryGetTidyInput,
+  MemoryGetTidyOutput,
+  MemoryStartTidyInput,
+  MemoryStartTidyOutput,
+  MemoryCancelTidyInput,
+  MemoryCancelTidyOutput,
   MemoryRecoveryInput,
   MemoryRecoveryOutput,
   MemoryResolveRecoveryInput,
@@ -1403,6 +1413,73 @@ export function make(options: ClientOptions) {
         ),
     },
     memory: {
+      prepareTidy: (input: MemoryPrepareTidyInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryPrepareTidyOutput }>(
+          {
+            method: "POST",
+            path: `/api/memory/tidy`,
+            query: { location: input["location"] },
+            body: {
+              requestID: input["requestID"],
+              layer: input["layer"],
+              model: input["model"],
+              tokens: input["tokens"],
+              dailyTokens: input["dailyTokens"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      listTidy: (input?: MemoryListTidyInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryListTidyOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory/tidy`,
+            query: { location: input?.["location"], layer: input?.["layer"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      getTidy: (input: MemoryGetTidyInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryGetTidyOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory/tidy/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"], layer: input["layer"] },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      startTidy: (input: MemoryStartTidyInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryStartTidyOutput }>(
+          {
+            method: "POST",
+            path: `/api/memory/tidy/${encodeURIComponent(input.id)}/start`,
+            query: { location: input["location"], layer: input["layer"] },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      cancelTidy: (input: MemoryCancelTidyInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryCancelTidyOutput }>(
+          {
+            method: "POST",
+            path: `/api/memory/tidy/${encodeURIComponent(input.id)}/cancel`,
+            query: { location: input["location"], layer: input["layer"] },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       recovery: (input?: MemoryRecoveryInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: MemoryRecoveryOutput }>(
           {

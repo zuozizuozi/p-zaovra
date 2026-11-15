@@ -2,8 +2,9 @@ export * as Memory from "./memory"
 
 import { Schema } from "effect"
 import { ascending } from "./identifier"
-import { optional, statics } from "./schema"
+import { NonNegativeInt, PositiveInt, optional, statics } from "./schema"
 import { SessionID } from "./session-id"
+import { Model } from "./model"
 
 export const ID = Schema.String.pipe(
   Schema.brand("Memory.ID"),
@@ -89,3 +90,35 @@ export const RecoveryChoice = Schema.Struct({
   ids: Schema.Array(ID),
 }).annotate({ identifier: "Memory.RecoveryChoice" })
 export interface RecoveryChoice extends Schema.Schema.Type<typeof RecoveryChoice> {}
+
+/** An explicit, idempotent confirmation. Admission alone never starts model work. */
+export const TidyRequest = Schema.Struct({
+  requestID: Schema.String,
+  layer: Schema.Literals(["project", "user"]).pipe(optional),
+  model: Model.Ref,
+  tokens: PositiveInt.pipe(optional),
+  dailyTokens: PositiveInt.pipe(optional),
+}).annotate({ identifier: "Memory.TidyRequest" })
+export interface TidyRequest extends Schema.Schema.Type<typeof TidyRequest> {}
+
+export const TidyTask = Schema.Struct({
+  id: Schema.String,
+  requestID: Schema.String,
+  sessionID: SessionID,
+  layer: Schema.Literals(["project", "user"]),
+  directory: Schema.String,
+  model: Model.Ref,
+  tokens: PositiveInt,
+  dailyTokens: PositiveInt,
+  state: Schema.Literals(["active", "completed", "cancelled", "failed"]),
+  // Active durable tasks can be ready or paused; opening this view never resumes them.
+  executing: Schema.Boolean,
+  usage: Schema.Struct({
+    known: NonNegativeInt,
+    reserved: NonNegativeInt,
+    charged: NonNegativeInt,
+    unknown: NonNegativeInt,
+  }),
+  time: Schema.Struct({ created: Schema.Finite, finished: Schema.NullOr(Schema.Finite) }),
+}).annotate({ identifier: "Memory.TidyTask" })
+export interface TidyTask extends Schema.Schema.Type<typeof TidyTask> {}

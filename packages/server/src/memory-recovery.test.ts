@@ -6,6 +6,13 @@ import { MemoryGroup } from "@zaovra-ai/protocol/groups/memory"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "@zaovra-ai/core/database/database"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
+import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
+import { makeGlobalNode } from "@zaovra-ai/core/effect/app-node"
+import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { MemoryNoteTable } from "@zaovra-ai/core/memory/sql"
 import { Project } from "@zaovra-ai/core/project"
 import { Location } from "@zaovra-ai/core/location"
@@ -21,9 +28,27 @@ import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 test("actual memory HTTP and generated SDK recover explicitly and preserve deletion suppression", async () => {
   const place = { project: Project.ID.global, directory: "/http/Alpha" }
   const runtime = ManagedRuntime.make(
-    MemoryStore.layerWith("linux").pipe(Layer.provideMerge(Database.layerFromPath(":memory:"))),
+    AppNodeBuilder.build(
+      LayerNode.group([MemoryStore.node, Database.node, MemoryTidyStore.node, MemoryTidyTasks.node, SessionV2.node]),
+      [
+        [
+          MemoryStore.node,
+          makeGlobalNode({
+            service: MemoryStore.Service,
+            layer: MemoryStore.layerWith("linux"),
+            deps: [Database.node],
+          }),
+        ],
+        [Database.node, Database.layerFromPath(":memory:")],
+        [SessionExecution.node, SessionExecution.noopLayer],
+      ],
+    ),
   )
-  const context = await runtime.runPromise(Effect.context<MemoryStore.Service | Database.Service>())
+  const context = await runtime.runPromise(
+    Effect.context<
+      MemoryStore.Service | Database.Service | MemoryTidyStore.Service | MemoryTidyTasks.Service | SessionV2.Service
+    >(),
+  )
   await runtime.runPromise(
     Effect.gen(function* () {
       const database = yield* Database.Service

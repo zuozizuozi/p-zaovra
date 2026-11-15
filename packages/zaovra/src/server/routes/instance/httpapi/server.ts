@@ -39,6 +39,8 @@ import { ModelsDev } from "@zaovra-ai/core/models-dev"
 import { Npm } from "@zaovra-ai/core/npm"
 import { PermissionSaved } from "@zaovra-ai/core/permission/saved"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
+import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
 import { ProjectV2 } from "@zaovra-ai/core/project"
 import { ProjectCopy } from "@zaovra-ai/core/project/copy"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
@@ -218,7 +220,15 @@ export function createRoutes(
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
   const v2Runtime = AppNodeBuilderV1.build(
-    LayerNode.group([Global.node, SessionV2.node, Workspace.node, TaskTool.node, TaskRecovery.startupNode]),
+    LayerNode.group([
+      Global.node,
+      SessionV2.node,
+      Workspace.node,
+      TaskTool.node,
+      TaskRecovery.startupNode,
+      MemoryTidyStore.node,
+      MemoryTidyTasks.node,
+    ]),
     SessionRuntime.replacements,
   )
 

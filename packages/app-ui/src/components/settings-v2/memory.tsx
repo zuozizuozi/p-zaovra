@@ -3,9 +3,6 @@ import { Switch } from "@zaovra-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { type Component, For, Show, createMemo, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
-import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
-import { useModels, type ModelKey } from "@/context/models"
-import { Identifier } from "@/utils/id"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
@@ -13,6 +10,7 @@ import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
 import { MemoryRecoveryPanel } from "./memory-recovery"
+import { MemoryTidyPanel } from "./memory-tidy"
 
 type Layer = "project" | "user"
 
@@ -22,7 +20,6 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const serverSync = useServerSync()
-  const models = useModels()
   // Opened from a conversation, the project is that conversation's, as in the other settings pages.
   const directory = createMemo(() =>
     props.sessionID ? serverSync().session.lineage.peek(props.sessionID)?.session.directory : props.directory,
@@ -65,10 +62,6 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     text: "",
     draft: { project: "", user: "" },
     confirming: undefined as Layer | undefined,
-    model: undefined as ModelKey | undefined,
-    request: undefined as ReturnType<typeof makeTidyRequest> | undefined,
-    created: false,
-    tidying: undefined as "starting" | "started" | "failed" | undefined,
   })
   const reload = (layer: Layer) => (layer === "project" ? projectActions.refetch() : userActions.refetch())
 
@@ -93,54 +86,9 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     setState("draft", layer, "")
     await reload(layer)
   }
-  // Tidying is an ordinary conversation with a fixed request and a token ceiling, so what it
-  // did and what it cost are visible like any other conversation.
-  const available = createMemo(() =>
-    models.list().filter((item) => models.type({ providerID: item.provider.id, modelID: item.id }) === "chat"),
+  const tidyTarget = createMemo(() =>
+    directory() ? { directory: directory()!, server: serverSdk().scope } : undefined,
   )
-  const selected = createMemo(() =>
-    available().find((item) => item.id === state.model?.modelID && item.provider.id === state.model?.providerID),
-  )
-  const selection = {
-    list: available,
-    visible: models.visible,
-    current: selected,
-    set: (value: ModelKey | undefined) => {
-      if (!state.request) setState("model", value)
-    },
-  }
-  const makeTidyRequest = (model: ModelKey | undefined) => {
-    const id = Identifier.ascending("session")
-    return {
-      client: serverSdk().client.v2.session,
-      create: {
-        id,
-        location: location(),
-        budget: { tokens: 300_000 },
-        ...(model ? { model: { id: model.modelID, providerID: model.providerID } } : {}),
-      },
-      prompt: {
-        sessionID: id,
-        id: Identifier.ascending("message"),
-        prompt: { text: language.t("settings.memory.tidy.prompt") },
-      },
-    }
-  }
-  const tidy = async () => {
-    if (frozen() || recovery()?.automaticFrozen) return
-    if (state.tidying === "starting" || state.tidying === "started") return
-    if (!state.request && state.model && !selected()) return
-    setState("tidying", "starting")
-    if (!state.request) setState("request", makeTidyRequest(state.model))
-    const request = state.request!
-    // Retries keep both identities and the captured selection, including after a lost response.
-    if (!state.created) {
-      await request.client.create(request.create, { throwOnError: true })
-      setState("created", true)
-    }
-    await request.client.prompt(request.prompt, { throwOnError: true })
-    setState("tidying", "started")
-  }
   const clear = async (layer: Layer) => {
     await memory().clear({ location: location(), layer }, { throwOnError: true })
     setState("confirming", undefined)
@@ -294,52 +242,13 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           </Show>
           <fieldset disabled={frozen()}>{section("project", project)}</fieldset>
         </Show>
-        <Show when={directory() && (project()?.length ?? 0) > 0}>
-          <SettingsListV2>
-            <SettingsRowV2
-              title={language.t("settings.memory.tidy.title")}
-              description={language.t(
-                state.tidying === "started"
-                  ? "settings.memory.tidy.started"
-                  : state.tidying === "failed"
-                    ? "settings.memory.tidy.failed"
-                    : "settings.memory.tidy.description",
-              )}
-            >
-              <div data-action="settings-memory-tidy" class="flex flex-wrap items-center gap-2">
-                <ModelSelectorPopoverV2
-                  configuredOnly
-                  model={selection}
-                  triggerAs={ButtonV2}
-                  triggerProps={{
-                    variant: "neutral",
-                    disabled: !!state.request,
-                    "aria-label": language.t("settings.memory.tidy.model"),
-                  }}
-                >
-                  {selected()?.name ?? state.model?.modelID ?? language.t("settings.memory.tidy.default")}
-                </ModelSelectorPopoverV2>
-                <Show when={state.model && !state.request}>
-                  <ButtonV2 variant="neutral" onClick={() => setState("model", undefined)}>
-                    {language.t("settings.memory.tidy.default")}
-                  </ButtonV2>
-                </Show>
-                <ButtonV2
-                  variant="neutral"
-                  disabled={
-                    frozen() ||
-                    recovery()?.automaticFrozen ||
-                    state.tidying === "starting" ||
-                    state.tidying === "started" ||
-                    (!state.request && !!state.model && !selected())
-                  }
-                  onClick={() => void tidy().catch(() => setState("tidying", "failed"))}
-                >
-                  {language.t("settings.memory.tidy.action")}
-                </ButtonV2>
-              </div>
-            </SettingsRowV2>
-          </SettingsListV2>
+        <Show when={tidyTarget()} keyed>
+          {(target) => (
+            <MemoryTidyPanel
+              directory={target.directory}
+              disabled={frozen() || !!recovery()?.automaticFrozen || serverSync().data.config.memory?.enabled === false}
+            />
+          )}
         </Show>
         {section("user", user)}
       </div>

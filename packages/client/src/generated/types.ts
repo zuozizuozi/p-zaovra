@@ -90,6 +90,14 @@ export type PermissionNotFoundError = {
 export const isPermissionNotFoundError = (value: unknown): value is PermissionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PermissionNotFoundError"
 
+export type MemoryTidyError = {
+  readonly _tag: "MemoryTidyError"
+  readonly reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy"
+  readonly message: string
+}
+export const isMemoryTidyError = (value: unknown): value is MemoryTidyError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MemoryTidyError"
+
 export type PtyNotFoundError = { readonly _tag: "PtyNotFoundError"; readonly ptyID: string; readonly message: string }
 export const isPtyNotFoundError = (value: unknown): value is PtyNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PtyNotFoundError"
@@ -8298,6 +8306,204 @@ export type SkillsListOutput = {
     readonly content: string
   }>
 }
+
+export type MemoryPrepareTidyInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly requestID: {
+    readonly requestID: string
+    readonly layer?: "project" | "user"
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens?: number
+    readonly dailyTokens?: number
+  }["requestID"]
+  readonly layer?: {
+    readonly requestID: string
+    readonly layer?: "project" | "user"
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens?: number
+    readonly dailyTokens?: number
+  }["layer"]
+  readonly model: {
+    readonly requestID: string
+    readonly layer?: "project" | "user"
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens?: number
+    readonly dailyTokens?: number
+  }["model"]
+  readonly tokens?: {
+    readonly requestID: string
+    readonly layer?: "project" | "user"
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens?: number
+    readonly dailyTokens?: number
+  }["tokens"]
+  readonly dailyTokens?: {
+    readonly requestID: string
+    readonly layer?: "project" | "user"
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens?: number
+    readonly dailyTokens?: number
+  }["dailyTokens"]
+}
+
+export type MemoryPrepareTidyOutput = {
+  readonly data: {
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly layer: "project" | "user"
+    readonly directory: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly executing: boolean
+    readonly usage: {
+      readonly known: number
+      readonly reserved: number
+      readonly charged: number
+      readonly unknown: number
+    }
+    readonly time: { readonly created: number; readonly finished: number | null }
+  }
+}["data"]
+
+export type MemoryListTidyInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryListTidyOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly layer: "project" | "user"
+    readonly directory: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly executing: boolean
+    readonly usage: {
+      readonly known: number
+      readonly reserved: number
+      readonly charged: number
+      readonly unknown: number
+    }
+    readonly time: { readonly created: number; readonly finished: number | null }
+  }>
+}["data"]
+
+export type MemoryGetTidyInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryGetTidyOutput = {
+  readonly data: {
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly layer: "project" | "user"
+    readonly directory: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly executing: boolean
+    readonly usage: {
+      readonly known: number
+      readonly reserved: number
+      readonly charged: number
+      readonly unknown: number
+    }
+    readonly time: { readonly created: number; readonly finished: number | null }
+  }
+}["data"]
+
+export type MemoryStartTidyInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryStartTidyOutput = {
+  readonly data: {
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly layer: "project" | "user"
+    readonly directory: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly executing: boolean
+    readonly usage: {
+      readonly known: number
+      readonly reserved: number
+      readonly charged: number
+      readonly unknown: number
+    }
+    readonly time: { readonly created: number; readonly finished: number | null }
+  }
+}["data"]
+
+export type MemoryCancelTidyInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryCancelTidyOutput = {
+  readonly data: {
+    readonly id: string
+    readonly requestID: string
+    readonly sessionID: string
+    readonly layer: "project" | "user"
+    readonly directory: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly executing: boolean
+    readonly usage: {
+      readonly known: number
+      readonly reserved: number
+      readonly charged: number
+      readonly unknown: number
+    }
+    readonly time: { readonly created: number; readonly finished: number | null }
+  }
+}["data"]
 
 export type MemoryRecoveryInput = {
   readonly location?: {

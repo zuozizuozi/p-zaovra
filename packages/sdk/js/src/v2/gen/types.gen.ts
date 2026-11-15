@@ -3205,6 +3205,12 @@ export type PermissionNotFoundError = {
   message: string
 }
 
+export type MemoryTidyError = {
+  _tag: "MemoryTidyError"
+  reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy"
+  message: string
+}
+
 export type OutputFormat1 =
   | {
       type: "text"
@@ -7261,6 +7267,37 @@ export type SkillV2Info = {
   disabled?: boolean
   location: string
   content: string
+}
+
+export type MemoryTidyRequest = {
+  requestID: string
+  layer?: "project" | "user"
+  model: ModelRef
+  tokens?: number
+  dailyTokens?: number
+}
+
+export type MemoryTidyTask = {
+  id: string
+  requestID: string
+  sessionID: string
+  layer: "project" | "user"
+  directory: string
+  model: ModelRef
+  tokens: number
+  dailyTokens: number
+  state: "active" | "completed" | "cancelled" | "failed"
+  executing: boolean
+  usage: {
+    known: number
+    reserved: number
+    charged: number
+    unknown: number
+  }
+  time: {
+    created: number
+    finished: number
+  }
 }
 
 export type MemoryNote = {
@@ -16711,6 +16748,212 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2MemoryListTidyData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/tidy"
+}
+
+export type V2MemoryListTidyErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryListTidyError = V2MemoryListTidyErrors[keyof V2MemoryListTidyErrors]
+
+export type V2MemoryListTidyResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<MemoryTidyTask>
+  }
+}
+
+export type V2MemoryListTidyResponse = V2MemoryListTidyResponses[keyof V2MemoryListTidyResponses]
+
+export type V2MemoryPrepareTidyData = {
+  body: MemoryTidyRequest
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory/tidy"
+}
+
+export type V2MemoryPrepareTidyErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryTidyError
+   */
+  409: MemoryTidyError
+}
+
+export type V2MemoryPrepareTidyError = V2MemoryPrepareTidyErrors[keyof V2MemoryPrepareTidyErrors]
+
+export type V2MemoryPrepareTidyResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryTidyTask
+  }
+}
+
+export type V2MemoryPrepareTidyResponse = V2MemoryPrepareTidyResponses[keyof V2MemoryPrepareTidyResponses]
+
+export type V2MemoryGetTidyData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/tidy/{id}"
+}
+
+export type V2MemoryGetTidyErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryTidyError
+   */
+  409: MemoryTidyError
+}
+
+export type V2MemoryGetTidyError = V2MemoryGetTidyErrors[keyof V2MemoryGetTidyErrors]
+
+export type V2MemoryGetTidyResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryTidyTask
+  }
+}
+
+export type V2MemoryGetTidyResponse = V2MemoryGetTidyResponses[keyof V2MemoryGetTidyResponses]
+
+export type V2MemoryStartTidyData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/tidy/{id}/start"
+}
+
+export type V2MemoryStartTidyErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryTidyError
+   */
+  409: MemoryTidyError
+}
+
+export type V2MemoryStartTidyError = V2MemoryStartTidyErrors[keyof V2MemoryStartTidyErrors]
+
+export type V2MemoryStartTidyResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryTidyTask
+  }
+}
+
+export type V2MemoryStartTidyResponse = V2MemoryStartTidyResponses[keyof V2MemoryStartTidyResponses]
+
+export type V2MemoryCancelTidyData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/tidy/{id}/cancel"
+}
+
+export type V2MemoryCancelTidyErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryTidyError
+   */
+  409: MemoryTidyError
+}
+
+export type V2MemoryCancelTidyError = V2MemoryCancelTidyErrors[keyof V2MemoryCancelTidyErrors]
+
+export type V2MemoryCancelTidyResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryTidyTask
+  }
+}
+
+export type V2MemoryCancelTidyResponse = V2MemoryCancelTidyResponses[keyof V2MemoryCancelTidyResponses]
 
 export type V2MemoryRecoveryData = {
   body?: never

@@ -1,0 +1,216 @@
+import { expect, test } from "bun:test"
+import path from "node:path"
+import { Effect, Layer, ManagedRuntime, Option } from "effect"
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpRouter, HttpServer } from "effect/unstable/http"
+import { MemoryGroup } from "@zaovra-ai/protocol/groups/memory"
+import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
+import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
+import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
+import { MemoryTidy } from "@zaovra-ai/core/memory/tidy"
+import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
+import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
+import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { SessionRunCoordinator } from "@zaovra-ai/core/session/run-coordinator"
+import { Config } from "@zaovra-ai/core/config"
+import { Database } from "@zaovra-ai/core/database/database"
+import { Global } from "@zaovra-ai/core/global"
+import { Location } from "@zaovra-ai/core/location"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
+import { Project } from "@zaovra-ai/core/project"
+import { MemoryHandler } from "./handlers/memory"
+import { LocationMiddleware, type LocationServices } from "./location"
+import { authorizationLayer } from "./middleware/authorization"
+import { schemaErrorLayer } from "./middleware/schema-error"
+import { ServerAuth } from "./auth"
+import { tmpdir } from "../../core/test/fixture/tmpdir"
+
+test("memory task HTTP and generated client preserve confirmation, stop and scope boundaries", async () => {
+  await using tmp = await tmpdir()
+  const state = { enabled: true, starts: 0, stops: 0 }
+  const started = Promise.withResolvers<void>()
+  const runtime = ManagedRuntime.make(
+    AppNodeBuilder.build(
+      LayerNode.group([
+        MemoryTidy.node,
+        MemoryTidyTasks.node,
+        Config.node,
+        MemoryTidyStore.node,
+        MemoryStore.node,
+        SessionV2.node,
+        Location.node,
+        Database.node,
+      ]),
+      [
+        [
+          Location.node,
+          Layer.succeed(Location.Service, {
+            directory: AbsolutePath.make(tmp.path),
+            project: { id: Project.ID.global, directory: AbsolutePath.make(tmp.path) },
+          }),
+        ],
+        [
+          Global.node,
+          Global.layerWith({
+            data: path.join(tmp.path, "data"),
+            config: path.join(tmp.path, "config"),
+            state: path.join(tmp.path, "state"),
+          }),
+        ],
+        [
+          Config.node,
+          Layer.succeed(Config.Service, {
+            entries: () =>
+              Effect.sync(() => [
+                new Config.Document({
+                  type: "document",
+                  info: new Config.Info({ memory: { enabled: state.enabled } }),
+                }),
+              ]),
+          }),
+        ],
+        [
+          SessionExecution.node,
+          Layer.effect(
+            SessionExecution.Service,
+            Effect.gen(function* () {
+              const coordinator = yield* SessionRunCoordinator.make<SessionV2.ID, never>({
+                drain: (_id, _force, claim) =>
+                  Effect.gen(function* () {
+                    yield* claim?.check ?? Effect.void
+                    state.starts++
+                    started.resolve()
+                    yield* Effect.never
+                  }).pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        state.stops++
+                      }),
+                    ),
+                  ),
+              })
+              return SessionExecution.Service.of({
+                active: coordinator.active,
+                resume: (id, claim) => (claim ? coordinator.owned(id, claim) : coordinator.run(id)),
+                wake: () => Effect.void,
+                interrupt: coordinator.interrupt,
+                prepareInterrupt: coordinator.prepareInterrupt,
+              })
+            }),
+          ),
+        ],
+      ],
+    ),
+  )
+  const context = await runtime.runPromise(
+    Effect.context<
+      | MemoryTidy.Service
+      | MemoryTidyStore.Service
+      | MemoryTidyTasks.Service
+      | Config.Service
+      | MemoryStore.Service
+      | SessionV2.Service
+      | Location.Service
+    >(),
+  )
+  const placement = Layer.succeedContext(context) as Layer.Layer<LocationServices>
+  const web = HttpRouter.toWebHandler(
+    HttpApiBuilder.layer(HttpApi.make("server").add(MemoryGroup)).pipe(
+      Layer.provide(MemoryHandler),
+      Layer.provide(
+        Layer.succeed(
+          LocationMiddleware,
+          LocationMiddleware.of((effect) => effect.pipe(Effect.provide(placement))),
+        ),
+      ),
+      Layer.provide(authorizationLayer),
+      Layer.provide(schemaErrorLayer),
+      Layer.provide(ServerAuth.Config.configLayer({ username: "zaovra", password: Option.none() })),
+      Layer.provide(Layer.succeedContext(context)),
+      Layer.provide(HttpServer.layerServices),
+    ),
+    { disableLogger: true },
+  )
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => web.handler(request, context) })
+  const client = createZaovraClient({ baseUrl: server.url.href, throwOnError: true })
+  try {
+    const request = {
+      requestID: "http-confirmed",
+      model: { id: "fixture", providerID: "fixture" },
+      tokens: 1000,
+      dailyTokens: 2000,
+    }
+    const invalid = await fetch(new URL("/api/memory/tidy", server.url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...request, tokens: 0 }),
+    })
+    expect(invalid.status).toBeGreaterThanOrEqual(400)
+    expect((await client.v2.memory.listTidy({}, { throwOnError: true })).data.data).toHaveLength(0)
+    const prepared = (await client.v2.memory.prepareTidy({ memoryTidyRequest: request }, { throwOnError: true })).data
+      .data
+    expect(prepared.executing).toBe(false)
+    expect(prepared.tokens).toBe(1000)
+    expect(state.starts).toBe(0)
+    expect(
+      (await client.v2.memory.prepareTidy({ memoryTidyRequest: request }, { throwOnError: true })).data.data.id,
+    ).toBe(prepared.id)
+    const conflict = await fetch(new URL("/api/memory/tidy", server.url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...request, tokens: 2000 }),
+    })
+    expect(conflict.status).toBe(409)
+    expect((await conflict.json()).reason).toBe("conflict")
+    expect((await client.v2.memory.listTidy({}, { throwOnError: true })).data.data.map((run) => run.id)).toEqual([
+      prepared.id,
+    ])
+    state.enabled = false
+    const disabled = await fetch(new URL(`/api/memory/tidy/${prepared.id}/start`, server.url), { method: "POST" })
+    expect(disabled.status).toBe(409)
+    expect((await disabled.json()).reason).toBe("unauthorized")
+    expect(state.starts).toBe(0)
+    state.enabled = true
+    await client.v2.memory.startTidy({ id: prepared.id }, { throwOnError: true })
+    await started.promise
+    await client.v2.memory.startTidy({ id: prepared.id }, { throwOnError: true })
+    expect(state.starts).toBe(1)
+    const h = await runtime.runPromise(
+      Effect.gen(function* () {
+        return { store: yield* MemoryTidyStore.Service, sessions: yield* SessionV2.Service }
+      }),
+    )
+    const run = await runtime.runPromise(h.store.get(prepared.id))
+    await runtime.runPromise(
+      h.store.reserve({
+        sessionID: run!.session_id,
+        scope: run!.scope,
+        enabled: true,
+        attemptID: "http-unknown",
+        tokens: 100,
+      }),
+    )
+    const wrongLayer = await fetch(new URL(`/api/memory/tidy/${prepared.id}/cancel?layer=user`, server.url), {
+      method: "POST",
+    })
+    expect(wrongLayer.status).toBe(409)
+    expect((await wrongLayer.json()).reason).toBe("missing")
+    state.enabled = false
+    const cancelled = (await client.v2.memory.cancelTidy({ id: prepared.id }, { throwOnError: true })).data.data
+    expect(cancelled.state).toBe("cancelled")
+    expect(cancelled.usage).toEqual({ known: 0, reserved: 100, charged: 100, unknown: 1 })
+    expect(state.stops).toBe(1)
+    expect(await runtime.runPromise(h.sessions.pendingInputs(run!.session_id))).toHaveLength(0)
+    await client.v2.memory.startTidy({ id: prepared.id }, { throwOnError: true })
+    expect((await client.v2.memory.getTidy({ id: prepared.id }, { throwOnError: true })).data.data.state).toBe(
+      "cancelled",
+    )
+    expect(state.starts).toBe(1)
+  } finally {
+    server.stop(true)
+    await web.dispose()
+    await runtime.dispose()
+  }
+})

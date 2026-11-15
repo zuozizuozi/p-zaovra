@@ -1,4 +1,28 @@
 export const dict = {
+  "settings.memory.task.title": "Budgeted memory tidy",
+  "settings.memory.task.description":
+    "Choose a model and confirm each run. Opening this page never starts or resumes a task. The conversation used for tidying is separate from your current chat.",
+  "settings.memory.task.scope": "Scope",
+  "settings.memory.task.chooseModel": "Choose a tidy model",
+  "settings.memory.task.tokens": "Run limit (tokens)",
+  "settings.memory.task.dailyTokens": "Daily limit (tokens)",
+  "settings.memory.task.confirm":
+    "Confirm the scope, model and token limits below. Starting spends model tokens. Daily usage is shared across memory tasks; uncertain usage remains charged.",
+  "settings.memory.task.review": "Review and confirm",
+  "settings.memory.task.start": "Confirm and start",
+  "settings.memory.task.retry": "Retry this confirmation",
+  "settings.memory.task.failed":
+    "Could not complete the request. Refresh to check the task, check memory access and available budget, then retry. Retrying a confirmation does not create another task.",
+  "settings.memory.task.refresh": "Refresh task status",
+  "settings.memory.task.running": "Running",
+  "settings.memory.task.paused": "Ready or paused — explicit start required",
+  "settings.memory.task.completed": "Completed",
+  "settings.memory.task.cancelled": "Cancelled",
+  "settings.memory.task.stopped": "Stopped with an error — open the tidy conversation for details",
+  "settings.memory.task.charged": "Charged tokens",
+  "settings.memory.task.unknown": "Unconfirmed reservations retained",
+  "settings.memory.task.continue": "Start / continue",
+  "settings.memory.task.stop": "Cancel task",
   "session.revert.planChanged":
     "The restore plan changed. Open Reset to this point again, review the updated files, and confirm.",
   "session.revert.confirmTitle": "Reset to this point?",

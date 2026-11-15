@@ -34,7 +34,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/MemoryTidy") {}
 
-const layer = Layer.effect(
+export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const store = yield* MemoryTidyStore.Service

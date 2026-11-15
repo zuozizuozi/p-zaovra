@@ -3,6 +3,30 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "settings.memory.task.title": "有预算的记忆整理",
+  "settings.memory.task.description":
+    "每次选择模型并确认后才执行。打开页面不会自动开始或继续；整理使用独立对话，不改变当前聊天。",
+  "settings.memory.task.scope": "整理范围",
+  "settings.memory.task.chooseModel": "选择整理模型",
+  "settings.memory.task.tokens": "单次上限（tokens）",
+  "settings.memory.task.dailyTokens": "每日上限（tokens）",
+  "settings.memory.task.confirm":
+    "请核对范围、模型和下列额度。开始后会消耗模型用量；每日用量在整理任务间共享，未确认用量继续占额。",
+  "settings.memory.task.review": "核对本次整理",
+  "settings.memory.task.start": "确认并开始",
+  "settings.memory.task.retry": "重试本次确认",
+  "settings.memory.task.failed":
+    "请求未完成。请刷新核对任务、记忆开关和剩余额度后重试；重试同一确认不会新建第二个任务。",
+  "settings.memory.task.refresh": "刷新任务状态",
+  "settings.memory.task.running": "正在整理",
+  "settings.memory.task.paused": "待开始或已暂停，需要明确继续",
+  "settings.memory.task.completed": "已完成",
+  "settings.memory.task.cancelled": "已取消",
+  "settings.memory.task.stopped": "因错误停止，可打开整理对话查看原因",
+  "settings.memory.task.charged": "已占用 tokens",
+  "settings.memory.task.unknown": "仍保留的未确认占额",
+  "settings.memory.task.continue": "开始 / 继续",
+  "settings.memory.task.stop": "取消任务",
   "session.revert.planChanged": "恢复计划已经变化，请重新点击“重置到此点”核对后再确认。",
   "session.revert.confirmTitle": "重置到此点？",
   "session.revert.confirmDescription": "确认后，会隐藏此点及之后的对话，并按下面的真实计划恢复文件。",

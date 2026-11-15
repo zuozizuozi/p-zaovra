@@ -102,8 +102,8 @@ async function until(check: () => boolean) {
   throw new Error("DOM condition timed out: " + document.body.textContent?.slice(-700))
 }
 function action() {
-  return [...document.querySelectorAll<HTMLButtonElement>('[data-action="settings-memory-tidy"] button')].find(
-    (x) => x.textContent?.trim() === "Tidy now",
+  return [...document.querySelectorAll<HTMLButtonElement>('[data-slot="memory-tidy"] button')].find(
+    (x) => x.textContent?.trim() === "Review and confirm",
   )!
 }
 function picker() {
@@ -118,6 +118,7 @@ async function mount() {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/tidy") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery") return Response.json({ data: recovery })
       if (request.method === "GET" && path === "/api/memory")
         return Response.json({

@@ -88,6 +88,7 @@ import type {
   LspStatusErrors,
   LspStatusResponses,
   MemoryRecoveryChoice,
+  MemoryTidyRequest,
   ModelRef,
   MoveSessionDestination,
   PathGetErrors,
@@ -211,18 +212,28 @@ import type {
   V2McpResourcesResponses,
   V2McpStatusErrors,
   V2McpStatusResponses,
+  V2MemoryCancelTidyErrors,
+  V2MemoryCancelTidyResponses,
   V2MemoryClearErrors,
   V2MemoryClearResponses,
   V2MemoryCreateErrors,
   V2MemoryCreateResponses,
+  V2MemoryGetTidyErrors,
+  V2MemoryGetTidyResponses,
   V2MemoryListErrors,
   V2MemoryListResponses,
+  V2MemoryListTidyErrors,
+  V2MemoryListTidyResponses,
+  V2MemoryPrepareTidyErrors,
+  V2MemoryPrepareTidyResponses,
   V2MemoryRecoveryErrors,
   V2MemoryRecoveryResponses,
   V2MemoryRemoveErrors,
   V2MemoryRemoveResponses,
   V2MemoryResolveRecoveryErrors,
   V2MemoryResolveRecoveryResponses,
+  V2MemoryStartTidyErrors,
+  V2MemoryStartTidyResponses,
   V2MemoryUpdateErrors,
   V2MemoryUpdateResponses,
   V2ModelListErrors,
@@ -5845,6 +5856,174 @@ export class Skill extends HeyApiClient {
 }
 
 export class Memory extends HeyApiClient {
+  /**
+   * Read memory tasks and retained usage without resuming them
+   */
+  public listTidy<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2MemoryListTidyResponses, V2MemoryListTidyErrors, ThrowOnError>({
+      url: "/api/memory/tidy",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Admit a confirmed memory task without starting model work
+   */
+  public prepareTidy<ThrowOnError extends boolean = false>(
+    parameters: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      memoryTidyRequest: MemoryTidyRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { key: "memoryTidyRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2MemoryPrepareTidyResponses, V2MemoryPrepareTidyErrors, ThrowOnError>(
+      {
+        url: "/api/memory/tidy",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Read one memory task
+   */
+  public getTidy<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2MemoryGetTidyResponses, V2MemoryGetTidyErrors, ThrowOnError>({
+      url: "/api/memory/tidy/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Explicitly start or continue an admitted budgeted memory task
+   */
+  public startTidy<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2MemoryStartTidyResponses, V2MemoryStartTidyErrors, ThrowOnError>({
+      url: "/api/memory/tidy/{id}/start",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Revoke and stop a memory task while preserving uncertain charges
+   */
+  public cancelTidy<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2MemoryCancelTidyResponses, V2MemoryCancelTidyErrors, ThrowOnError>({
+      url: "/api/memory/tidy/{id}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+
   /**
    * View and export legacy memory for explicit recovery
    */
