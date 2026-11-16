@@ -21,6 +21,7 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const events = yield* EventV2.Service
+    const status = yield* SessionExecutionStatus.Service
     const announce = yield* FiberSet.makeRuntime<never, void, never>()
     const version = { epoch: Date.now(), revision: 0 }
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError>({
@@ -45,6 +46,7 @@ const layer = Layer.effect(
       }),
     })
 
+    yield* status.track(coordinator.active)
     const unsubscribe = yield* events.listen((event) =>
       event.type === SessionExecution.Wake.type
         ? coordinator.wake(Schema.decodeUnknownSync(SessionExecution.Wake.data)(event.data).sessionID)
@@ -85,7 +87,7 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: SessionExecution.Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node, EventV2.node],
+  deps: [SessionStore.node, LocationServiceMap.node, EventV2.node, SessionExecutionStatus.node],
 })
 
 export const reportFailure = Effect.fn("SessionExecution.reportFailure")(function* (

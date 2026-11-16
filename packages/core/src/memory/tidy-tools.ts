@@ -26,6 +26,7 @@ const permitted: ReadonlySet<string> = new Set([
   "memory_search",
   "memory_review",
   "memory_page",
+  "memory_extract",
 ])
 const denied: ReadonlySet<string> = new Set()
 

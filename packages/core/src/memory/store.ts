@@ -7,6 +7,7 @@ import { Database } from "../database/database"
 import { ProjectV2 } from "../project"
 import { makeGlobalNode } from "../effect/app-node"
 import { SessionSchema } from "../session/schema"
+import { SessionMessage } from "../session/message"
 import { SessionMessageTable, SessionTable } from "../session/sql"
 import { Hash } from "../util/hash"
 import { MemoryFileEvidence } from "./file-evidence"
@@ -34,6 +35,8 @@ export interface WriteInput {
   readonly verification?: string
   readonly sessionID?: SessionSchema.ID
   readonly seq?: number
+  /** Host-validated historical source. One extracted note per message, independent of model wording. */
+  readonly extractedMessageID?: SessionMessage.ID
 }
 
 export interface EditInput {
@@ -690,10 +693,19 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               if ((yield* frozen(input.scope)) || (input.origin !== "user" && (yield* automaticFrozen(input.scope))))
                 return undefined
               const text = input.text.trim()
-              if (yield* suppressed(input.scope, text)) return undefined
+              if (
+                input.extractedMessageID &&
+                (input.origin !== "consolidation" || !input.sessionID || input.seq === undefined)
+              )
+                return undefined
+              // Keep the source key after edits/deletion without retaining readable provenance.
+              // Quotes, digests and model wording must not let a retry escape its tombstone.
+              const key = input.extractedMessageID
+                ? `extracted:${Hash.sha256(JSON.stringify([input.sessionID, input.extractedMessageID, input.seq]))}`
+                : `text:${textHash(text)}`
+              if (yield* suppressed(input.scope, text, key)) return undefined
               if (!text) return undefined
               if (yield* find(input.scope, deletedTextPrefix + textHash(text))) return undefined
-              const key = `text:${textHash(text)}`
               const existing = yield* find(input.scope, key)
               if (existing?.time_deleted) return undefined
               if (existing)
