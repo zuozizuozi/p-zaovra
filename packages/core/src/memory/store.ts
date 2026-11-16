@@ -105,6 +105,7 @@ export interface Interface {
   /** Internal host-only storage. No route/tool exposes these calls or grants read permission. */
   readonly bindFiles: (input: MemoryFileEvidence.Bind) => Effect.Effect<boolean>
   readonly checkFiles: (input: MemoryFileEvidence.Check) => Effect.Effect<boolean>
+  readonly canCheckFiles: (scope: Memory.Scope) => Effect.Effect<boolean>
   /** Watcher hints only downgrade evidence; they do not read files or confirm deletion. */
   readonly invalidateFiles: (input: {
     readonly scope: Memory.Scope
@@ -1020,6 +1021,10 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         write,
         bindFiles: fileUpdate,
         checkFiles: fileUpdate,
+        canCheckFiles: (scope) =>
+          Effect.gen(function* () {
+            return !silent.has(scope) && !(yield* frozen(scope)) && !(yield* automaticFrozen(scope))
+          }),
         invalidateFiles,
         edit,
         remove,

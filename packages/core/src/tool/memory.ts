@@ -58,6 +58,9 @@ const layer = Layer.effectDiscard(
             ),
             notes: Schema.Array(
               Schema.Struct({
+                id: Memory.ID,
+                fileRevision: Schema.Int,
+                layer: Schema.Literals(["project", "user"]),
                 kind: Schema.String,
                 text: Schema.String,
                 status: Schema.String,
@@ -96,6 +99,9 @@ const layer = Layer.effectDiscard(
                     status: page.status,
                   })),
                 notes: found.notes.map((note) => ({
+                  id: note.id,
+                  fileRevision: note.fileRevision ?? 0,
+                  layer: note.scope === Memory.Scope.user ? ("user" as const) : ("project" as const),
                   kind: note.kind,
                   text: note.text,
                   status: note.status,

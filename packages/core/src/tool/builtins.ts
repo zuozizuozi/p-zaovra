@@ -8,6 +8,7 @@ import { BrowserTool } from "./browser"
 import { VerificationReviewTool } from "./verification-review"
 import { ApplyPatchTool } from "./apply-patch"
 import { EvidenceTool } from "./evidence"
+import { MemoryCheckTool } from "./memory-check"
 import { MemoryTool } from "./memory"
 import { MemoryPageTool } from "../memory/pages-tool"
 import { MemoryExtractTool } from "../memory/extract-tool"
@@ -48,6 +49,7 @@ export const node = makeLocationNode({
     EditTool.node,
     EvidenceTool.node,
     MemoryTool.node,
+    MemoryCheckTool.node,
     MemoryPageTool.node,
     MemoryExtractTool.node,
     GlobTool.node,
