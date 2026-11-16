@@ -61,13 +61,26 @@ export function practice(input: { command: string; declared?: string; cwd?: stri
 const standing =
   /以后[^。！？!?\n]{0,12}?(?:都|不要|别|请|要|只|用|记得|一律)|今后|从现在(?:起|开始)|记住|永远不要|一律|from now on|going forward|remember (?:that|to)\b|\balways (?:use|run|reply|answer|write|ask)\b|\bnever (?:use|run|commit|push|delete)\b|\b(?:do not|don't) ever\b/i
 
-/** Sentences in which the user states how things should be done from here on, word for word. */
+/** Keep the instruction's identity when retaining its adjacent, explicit reason. */
 export function standingInstructions(text: string) {
-  return text
-    .slice(0, 4000)
-    .split(/(?<=[。！？!?\n])|(?<=\.)\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length >= 4 && sentence.length <= 200 && standing.test(sentence))
+  const input = text.slice(0, 4000)
+  const sentences = Array.from(input.matchAll(/[\s\S]+?(?:[。！？!?\n]|(?<=\.)\s+|$)/g))
+  return sentences
+    .flatMap((sentence, index) => {
+      const instruction = sentence[0].trim()
+      if (instruction.length < 4 || instruction.length > 200 || !standing.test(instruction)) return []
+      const next = sentences[index + 1]
+      if (
+        !next ||
+        /[\r\n]/.test(sentence[0]) ||
+        !/^(?:原因(?:是|在于)|这是因为|the reason (?:is\b|for this is\b)|this is because\b)/i.test(next[0].trim()) ||
+        standing.test(next[0]) ||
+        (text.length > input.length && next.index + next[0].length === input.length)
+      )
+        return [{ instruction, text: instruction }]
+      const joined = input.slice(sentence.index, next.index + next[0].length).trim()
+      return [{ instruction, text: joined.length <= 200 ? joined : instruction }]
+    })
     .slice(0, 3)
 }
 
@@ -154,8 +167,9 @@ const layer = Layer.effectDiscard(
             store.observe({
               scope,
               kind: "preference",
-              key: `said:${Hash.fast(sentence.toLowerCase().replace(/\s+/g, " "))}`,
-              text: sentence,
+              key: `said:${Hash.fast(sentence.instruction.toLowerCase().replace(/\s+/g, " "))}`,
+              text: sentence.text,
+              ...(sentence.text === sentence.instruction ? {} : { sourceText: sentence.instruction }),
               verification: MemoryStore.said,
               sessionID: event.data.sessionID,
               seq: event.durable?.seq,

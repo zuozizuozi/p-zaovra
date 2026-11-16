@@ -17,6 +17,7 @@ import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionMessageTable, SessionTable } from "@zaovra-ai/core/session/sql"
 import { DateTime } from "effect"
 import { testEffect } from "./lib/effect"
+import { Hash } from "@zaovra-ai/core/util/hash"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, MemoryStore.node, MemoryRecorder.node])),
@@ -300,16 +301,172 @@ describe("memory recorder", () => {
 
   test("keeps only sentences where the user says how things should be done from now on", () => {
     expect(MemoryRecorder.standingInstructions("帮我修这个 bug。以后都用 pnpm，不要用 npm。谢谢")).toEqual([
-      "以后都用 pnpm，不要用 npm。",
+      { instruction: "以后都用 pnpm，不要用 npm。", text: "以后都用 pnpm，不要用 npm。" },
     ])
     expect(
       MemoryRecorder.standingInstructions("From now on reply in Chinese. The button never works on mobile."),
-    ).toEqual(["From now on reply in Chinese."])
+    ).toEqual([{ instruction: "From now on reply in Chinese.", text: "From now on reply in Chinese." }])
     expect(MemoryRecorder.standingInstructions("这个按钮不要了，删掉")).toEqual([])
     expect(MemoryRecorder.standingInstructions("以后回答我都用英文，并且第一行以 SUMMARY: 开头。现在看看目录")).toEqual(
-      ["以后回答我都用英文，并且第一行以 SUMMARY: 开头。"],
+      [
+        {
+          instruction: "以后回答我都用英文，并且第一行以 SUMMARY: 开头。",
+          text: "以后回答我都用英文，并且第一行以 SUMMARY: 开头。",
+        },
+      ],
     )
   })
+
+  test("retains one explicit adjacent reason with the original instruction identity", () => {
+    for (const [instruction, reason] of [
+      ["记住：导出时用制表符分隔。", "原因是旧分析器不支持带逗号的字段。"],
+      ["以后都用英文回答。", "这是因为我的同事不懂中文。"],
+      ["From now on use UTC timestamps.", "The reason is that reports span several regions."],
+      ["Always use the local cache.", "This is because the remote service is metered."],
+    ]) {
+      expect(MemoryRecorder.standingInstructions(`${instruction} ${reason} 无关的第三句。`)).toEqual([
+        { instruction, text: `${instruction} ${reason}` },
+      ])
+    }
+  })
+
+  test("does not absorb unrelated, distant, new-block or separately standing sentences", () => {
+    const instruction = "记住：默认使用本地数据。"
+    for (const suffix of [
+      "今天需要修按钮。",
+      "谢谢。原因是远端限流。",
+      "\n\n原因是远端限流。",
+      "\n- 原因是远端限流。",
+      " # 原因是远端限流。",
+      " 另外，原因是远端限流。",
+      " 原因是远端限流，而且以后都用缓存。",
+    ]) {
+      expect(MemoryRecorder.standingInstructions(instruction + suffix)[0]).toEqual({ instruction, text: instruction })
+    }
+    expect(MemoryRecorder.standingInstructions("原因是远端限流。请检查日志。")).toEqual([])
+  })
+
+  test("keeps complete instructions when the combined reason or input boundary is too long", () => {
+    const instruction = "记住：默认使用本地数据。"
+    expect(MemoryRecorder.standingInstructions(instruction + "原因是" + "长".repeat(200) + "。")[0]).toEqual({
+      instruction,
+      text: instruction,
+    })
+    const prefix = " ".repeat(4000 - instruction.length - 8)
+    expect(MemoryRecorder.standingInstructions(prefix + instruction + "原因是外部数据不完整。")[0]).toEqual({
+      instruction,
+      text: instruction,
+    })
+    expect(MemoryRecorder.standingInstructions("记住：" + "长".repeat(200) + "。")).toEqual([])
+    expect(
+      MemoryRecorder.standingInstructions(
+        "记住：甲要保留。原因是甲有用。记住：乙要保留。原因是乙有用。记住：丙要保留。原因是丙有用。记住：丁要保留。",
+      ),
+    ).toHaveLength(3)
+  })
+
+  it.live("records a reason with original provenance and stable identity, preserving later user edits", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const events = yield* EventV2.Service
+      const store = yield* MemoryStore.Service
+      const instruction = "记住：输出日期要用 ISO 格式。"
+      const text = instruction + "原因是下游按固定格式解析。"
+      const published = yield* events.publish(SessionEvent.Prompted, {
+        timestamp: DateTime.makeUnsafe(1),
+        sessionID: first,
+        messageID: SessionMessage.ID.make("msg_reason"),
+        prompt: { text, files: [], agents: [] },
+        delivery: "steer",
+      } as never)
+      yield* Effect.sleep("200 millis")
+      const note = (yield* store.list(project)).find((entry) => entry.text === text)
+      expect(note).toBeDefined()
+      expect(note?.kind).toBe("preference")
+      expect(note?.status).toBe("verified")
+      expect(note?.verification).toBe(MemoryStore.said)
+      expect(note?.sessionID).toBe(first)
+      expect(note?.seq).toBe(published.durable?.seq)
+      const input = {
+        scope: project,
+        kind: "preference" as const,
+        key: `said:${Hash.fast(instruction.toLowerCase().replace(/\s+/g, " "))}`,
+        text,
+        sourceText: instruction,
+        verification: MemoryStore.said,
+        sessionID: first,
+        seq: 3,
+        settled: true,
+      }
+      expect((yield* store.observe(input))?.id).toBe(note!.id)
+      yield* store.edit(note!.id, { text: "用户修订：用短日期。" })
+      expect((yield* store.observe({ ...input, text: instruction + "原因是另一个新理由。" }))?.text).toBe(
+        "用户修订：用短日期。",
+      )
+      expect((yield* store.list(project)).filter((entry) => entry.id === note!.id)).toHaveLength(1)
+    }),
+  )
+
+  it.live("does not restore a reason-bearing instruction through either old text or identity tombstones", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const store = yield* MemoryStore.Service
+      for (const mode of ["key", "short-text", "full-text"] as const) {
+        const instruction = `记住：导出采用 ${mode} 规则。`
+        const input = {
+          scope: project,
+          kind: "preference" as const,
+          key: `said:${Hash.fast(instruction.toLowerCase().replace(/\s+/g, " "))}`,
+          text: instruction + "原因是旧系统需要该格式。",
+          sourceText: instruction,
+          verification: MemoryStore.said,
+          sessionID: first,
+          seq: 3,
+          settled: true,
+        }
+        const note =
+          mode === "key"
+            ? yield* store.observe({ ...input, text: instruction, sourceText: undefined })
+            : yield* store.write({
+                scope: project,
+                kind: "preference",
+                text: mode === "short-text" ? instruction : input.text,
+                origin: "user",
+                status: "verified",
+              })
+        yield* store.remove(note!.id)
+        expect(yield* store.observe(input)).toBeUndefined()
+      }
+    }),
+  )
+
+  it.live("keeps protected legacy wording and refuses reason capture while the scope is off", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const store = yield* MemoryStore.Service
+      const instruction = "记住：审阅前先导出报告。"
+      const input = {
+        scope: project,
+        kind: "preference" as const,
+        key: `said:${Hash.fast(instruction.toLowerCase().replace(/\s+/g, " "))}`,
+        text: instruction,
+        verification: MemoryStore.said,
+        sessionID: first,
+        settled: true,
+      }
+      const legacy = yield* store.observe(input)
+      expect(
+        (yield* store.observe({ ...input, sourceText: instruction, text: instruction + "原因是审阅者需要离线版本。" }))
+          ?.text,
+      ).toBe(instruction)
+      yield* store.silence(project, true)
+      expect(
+        yield* store.observe({ ...input, sourceText: instruction, text: instruction + "原因是保留审计依据。" }),
+      ).toBeUndefined()
+      yield* store.silence(project, false)
+      expect((yield* store.get(legacy!.id))?.text).toBe(instruction)
+    }),
+  )
 
   it.live("records a passed check and a standing instruction from the event stream", () =>
     Effect.gen(function* () {

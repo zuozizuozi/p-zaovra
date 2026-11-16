@@ -19,6 +19,8 @@ export interface ObserveInput {
   /** Identity of the fact: the same key observed again strengthens the note instead of adding one. */
   readonly key: string
   readonly text: string
+  /** Original standing sentence, supplied only by the host recorder to preserve deletion suppression. */
+  readonly sourceText?: string
   readonly verification: string
   readonly sessionID: SessionSchema.ID
   readonly seq?: number
@@ -689,7 +691,15 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                 silent.has(input.scope) ||
                 (yield* frozen(input.scope)) ||
                 (yield* automaticFrozen(input.scope)) ||
-                (yield* suppressed(input.scope, input.text, input.key))
+                (yield* suppressed(input.scope, input.text, input.key)) ||
+                (input.sourceText !== undefined &&
+                  (input.kind !== "preference" ||
+                    input.verification !== said ||
+                    input.sourceText.length < 4 ||
+                    input.sourceText.length > 200 ||
+                    input.text.length > 200 ||
+                    !input.text.startsWith(input.sourceText) ||
+                    (yield* suppressed(input.scope, input.sourceText, input.key))))
               )
                 return undefined
               if (input.key.startsWith(deletedTextPrefix)) return undefined
