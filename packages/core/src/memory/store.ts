@@ -37,6 +37,8 @@ export interface WriteInput {
   readonly seq?: number
   /** Host-validated historical source. One extracted note per message, independent of model wording. */
   readonly extractedMessageID?: SessionMessage.ID
+  /** Host-validated prior Read evidence, inserted atomically with a new model note. */
+  readonly readFiles?: ReadonlyArray<Memory.FileBinding>
 }
 
 export interface EditInput {
@@ -693,6 +695,17 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               if ((yield* frozen(input.scope)) || (input.origin !== "user" && (yield* automaticFrozen(input.scope))))
                 return undefined
               const text = input.text.trim()
+              const files = input.readFiles === undefined ? undefined : MemoryFileEvidence.bindings(input.readFiles)
+              if (
+                input.readFiles !== undefined &&
+                (!files ||
+                  input.origin !== "model" ||
+                  input.status !== "unverified" ||
+                  !input.sessionID ||
+                  !Number.isSafeInteger(input.seq) ||
+                  files.files.some((file) => file.sessionID !== input.sessionID || file.seq >= input.seq!))
+              )
+                return undefined
               if (
                 input.extractedMessageID &&
                 (input.origin !== "consolidation" || !input.sessionID || input.seq === undefined)
@@ -708,6 +721,19 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               if (yield* find(input.scope, deletedTextPrefix + textHash(text))) return undefined
               const existing = yield* find(input.scope, key)
               if (existing?.time_deleted) return undefined
+              if (existing && files) {
+                // Never backfill an old or user-owned note merely because its
+                // wording matches. An exact source retry keeps the original row.
+                const previous = MemoryFileEvidence.decode(existing.files)
+                return existing.origin === "model" &&
+                  existing.text === text &&
+                  existing.session_id === input.sessionID &&
+                  existing.seq === input.seq &&
+                  Option.isSome(previous) &&
+                  JSON.stringify(previous.value.files) === JSON.stringify(files.files)
+                  ? note(existing)
+                  : undefined
+              }
               if (existing)
                 return input.origin === "user" && !protectedByUser(existing)
                   ? yield* edit(existing.id, { text, kind: input.kind, status: input.status })
@@ -724,6 +750,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                 session_id: input.sessionID,
                 seq: input.seq,
                 time_observed: Date.now(),
+                ...(files ? { files, file_revision: 1 } : {}),
               })
             }),
           )

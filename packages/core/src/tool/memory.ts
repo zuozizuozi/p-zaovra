@@ -16,6 +16,7 @@ import { Location } from "../location"
 import { MemoryStore } from "../memory/store"
 import { MemoryPages } from "../memory/pages"
 import { MemoryFileEvidence } from "../memory/file-evidence"
+import { MemoryReadSource } from "../memory/read-source"
 import { MemoryTidyStore } from "../memory/tidy-store"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -126,6 +127,7 @@ const layer = Layer.effectDiscard(
             basis: Schema.optional(Schema.String).annotate({
               description: "How you know: the user's words, a command and its result, or a file you read",
             }),
+            file: Schema.optional(MemoryReadSource.Selection),
           }),
           output: Schema.Struct({ kept: Schema.Boolean, reason: Schema.optional(Schema.String) }),
           execute: (input, context) =>
@@ -167,6 +169,13 @@ const layer = Layer.effectDiscard(
                         sql`json_extract(${EventTable.data}, '$.tool') = 'memory_note'`,
                         sql`json_extract(${EventTable.data}, '$.input.kind') = ${input.kind}`,
                         sql`json_extract(${EventTable.data}, '$.input.text') = ${input.text}`,
+                        sql`json_extract(${EventTable.data}, '$.provider.executed') = 0`,
+                        ...(input.file
+                          ? [
+                              sql`json_extract(${EventTable.data}, '$.input.file.callID') = ${input.file.callID}`,
+                              sql`json_extract(${EventTable.data}, '$.input.file.path') = ${input.file.path}`,
+                            ]
+                          : [sql`json_type(${EventTable.data}, '$.input.file') IS NULL`]),
                       ),
                     )
                     .get()
@@ -204,6 +213,23 @@ const layer = Layer.effectDiscard(
                       reason:
                         "Memory writing is not enabled for this task's evaluated model. Keep the suggestion in the conversation for a confirmed tidy task.",
                     }
+                  const files = input.file
+                    ? yield* MemoryReadSource.resolve(
+                        database,
+                        location,
+                        {
+                          sessionID: context.sessionID,
+                          seq: source.seq,
+                        },
+                        input.file,
+                      )
+                    : undefined
+                  if (input.file && !files)
+                    return {
+                      kept: false,
+                      reason:
+                        "Memory was not saved: the selected earlier Read has no matching complete local project receipt. Do not invent evidence or reread automatically.",
+                    }
                   // Admission is the final policy check. This atomic write may
                   // finish after a later model/config change; no implicit retry.
                   const note = yield* store.write({
@@ -215,6 +241,7 @@ const layer = Layer.effectDiscard(
                     verification: input.basis?.trim().slice(0, 200) || undefined,
                     sessionID: context.sessionID,
                     seq: source.seq,
+                    ...(files ? { readFiles: files } : {}),
                   })
                   return note
                     ? { kept: true }

@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { LLMEvent } from "@zaovra-ai/llm"
+import { eq, sql } from "drizzle-orm"
 import { DateTime, Effect, Layer, Scope } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Config } from "../src/config"
@@ -20,6 +23,12 @@ import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
 import { MemoryTool } from "../src/tool/memory"
 import { ToolRegistry } from "../src/tool/registry"
+import { ReadTool } from "../src/tool/read"
+import { PermissionV2 } from "../src/permission"
+import { ReadReceiptTable } from "../src/read-receipt.sql"
+import { EventTable } from "../src/event/sql"
+import { MemoryFileEvidence } from "../src/memory/file-evidence"
+import { createLLMEventPublisher } from "../src/session/runner/publish-llm-event"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { toolIdentity } from "./lib/tool"
@@ -39,6 +48,7 @@ const setup = Effect.gen(function* () {
   const registry = yield* ToolRegistry.Service
   const catalog = yield* Catalog.Service
   const writing = yield* MemoryWritePolicy.Service
+  const database = yield* Database.Service
   yield* catalog.transform((draft) => {
     draft.provider.update(model.providerID, (provider) => {
       provider.integrationID = undefined
@@ -80,7 +90,39 @@ const setup = Effect.gen(function* () {
         invocation: { ...context, call: { type: "tool-call" as const, id: callID, name, input } },
       }
     })
-  return { sessions, store, events, captured, project, create, call, catalog, writing }
+  const read = (sessionID: SessionV2.ID, input: { path: string; limit?: number }, providerExecuted = false) =>
+    Effect.gen(function* () {
+      const publisher = createLLMEventPublisher(events, {
+        sessionID,
+        agent: toolIdentity.agent,
+        model,
+        inputSequence: 0,
+        contextEpoch: 0,
+      })
+      const event = LLMEvent.toolCall({ id: randomUUID(), name: "read", input, providerExecuted })
+      yield* publisher.publish(event)
+      const assistantMessageID = yield* publisher.assistantMessageID(event.id)
+      const result = yield* captured.settle({ sessionID, assistantMessageID, agent: toolIdentity.agent, call: event })
+      expect(result.result.type).not.toBe("error")
+      yield* publisher.publish(
+        LLMEvent.toolResult({ id: event.id, name: "read", result: result.result, output: result.output }),
+      )
+      return { callID: event.id, path: input.path }
+    })
+  return {
+    sessions,
+    store,
+    events,
+    captured,
+    project,
+    create,
+    call,
+    catalog,
+    writing,
+    database,
+    read,
+    directory: here.directory,
+  }
 })
 
 test("main memory_note resolves its durable source and remains unverified; user edits stay authoritative", () =>
@@ -291,6 +333,252 @@ test("Recorder ignores child success and correlates identical call IDs by sessio
     }),
   ))
 
+const windows = process.platform === "win32" && process.arch === "x64" ? test : test.skip
+
+for (const content of ["original evidence", "\ufeff原始内容", ""])
+  windows(`memory file source uses the real Read receipt and remains unknown: ${JSON.stringify(content)}`, () =>
+    withMemory(
+      (h) =>
+        Effect.gen(function* () {
+          const session = yield* h.create()
+          const absolute = path.join(h.directory, "source.txt")
+          yield* Effect.promise(() => writeFile(absolute, content))
+          const file = yield* h.read(session.id, { path: "source.txt" })
+          // No path lookup is needed to consume the historical read. Deleting it must
+          // not falsely turn the historical receipt into a current/missing verdict.
+          yield* Effect.promise(() => unlink(absolute))
+          const called = yield* h.call(session.id, {
+            kind: "decision",
+            text: "Retain the reason behind this choice",
+            file,
+            digest: "forged",
+            verified: true,
+          })
+          expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: true })
+          const notes = yield* h.store.list(h.project)
+          expect(notes).toHaveLength(1)
+          expect(notes[0]).toMatchObject({ origin: "model", status: "unverified", fileRevision: 1 })
+          expect(MemoryFileEvidence.state(notes[0]!)).toBe("unknown")
+          expect(notes[0]!.files).toMatchObject({
+            version: 1,
+            state: "unknown",
+            files: [
+              {
+                path: "source.txt",
+                directory: h.directory,
+                sessionID: session.id,
+                digest: createHash("sha256").update(Buffer.from(content)).digest("hex"),
+                bytes: Buffer.byteLength(content),
+              },
+            ],
+          })
+          const receipt = yield* h.database.db
+            .select()
+            .from(ReadReceiptTable)
+            .where(eq(ReadReceiptTable.call_id, file.callID))
+            .get()
+          expect(notes[0]!.files).toMatchObject({ files: [{ seq: receipt!.success_seq }] })
+          expect(notes[0]!.seq).toBeGreaterThan(receipt!.success_seq)
+          expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: true })
+          expect(yield* h.store.list(h.project)).toEqual(notes)
+          yield* h.store.remove(notes[0]!.id)
+          expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: false })
+          expect(yield* h.store.list(h.project)).toEqual([])
+        }),
+      true,
+    ),
+  )
+
+for (const mode of [
+  "cross-session",
+  "child",
+  "partial",
+  "provider",
+  "external",
+  "missing",
+  "path",
+  "late",
+  "workspace",
+  "project",
+  "directory",
+  "event",
+  "digest",
+  "selection",
+  "ambiguous",
+  "event-provider",
+  "event-author",
+  "event-tool",
+  "event-text",
+] as const)
+  windows(`memory file source rejects ${mode} without leaving a note`, () =>
+    withMemory(
+      (h) =>
+        Effect.gen(function* () {
+          const parent = yield* h.create()
+          const session = mode === "child" ? yield* h.create(parent.id) : parent
+          const absolute = path.join(h.directory, "source.txt")
+          const external = path.join(path.dirname(h.directory), path.basename(h.directory) + "-outside.txt")
+          yield* Effect.promise(() => writeFile(mode === "external" ? external : absolute, "original evidence"))
+          const file = yield* h.read(
+            session.id,
+            { path: mode === "external" ? external : "source.txt", ...(mode === "partial" ? { limit: 1 } : {}) },
+            mode === "provider",
+          )
+          if (mode === "external") yield* Effect.promise(() => unlink(external))
+          const target = mode === "cross-session" ? yield* h.create() : session
+          const input = {
+            kind: "decision",
+            text: "Evidence cannot grant itself authority",
+            file: { ...file, ...(mode === "path" ? { path: "another.txt" } : {}) },
+          }
+          const called = yield* h.call(target.id, input)
+          if (mode === "missing")
+            yield* h.database.db.delete(ReadReceiptTable).where(eq(ReadReceiptTable.call_id, file.callID)).run()
+          if (mode === "late")
+            yield* h.database.db
+              .update(ReadReceiptTable)
+              .set({ success_seq: called.source.durable!.seq })
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .run()
+          if (mode === "workspace")
+            yield* h.database.db
+              .update(ReadReceiptTable)
+              .set({ workspace_id: "foreign" })
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .run()
+          if (mode === "project")
+            yield* h.database.db
+              .update(ReadReceiptTable)
+              .set({ project_id: "foreign" })
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .run()
+          if (mode === "directory")
+            yield* h.database.db
+              .update(ReadReceiptTable)
+              .set({ directory: "foreign" })
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .run()
+          if (mode === "digest")
+            yield* h.database.db
+              .update(ReadReceiptTable)
+              .set({ digest: "0".repeat(64) })
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .run()
+          if (mode === "event") {
+            const receipt = yield* h.database.db
+              .select()
+              .from(ReadReceiptTable)
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .get()
+            yield* h.database.db
+              .delete(EventTable)
+              .where(sql`${EventTable.aggregate_id} = ${session.id} AND ${EventTable.seq} = ${receipt!.success_seq}`)
+              .run()
+          }
+          if (mode === "ambiguous") {
+            const receipt = yield* h.database.db
+              .select()
+              .from(ReadReceiptTable)
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .get()
+            yield* h.database.db
+              .insert(ReadReceiptTable)
+              .values({ ...receipt!, id: randomUUID(), assistant_message_id: "another-assistant" })
+              .run()
+          }
+          if (mode === "event-provider" || mode === "event-author" || mode === "event-tool" || mode === "event-text") {
+            const receipt = yield* h.database.db
+              .select()
+              .from(ReadReceiptTable)
+              .where(eq(ReadReceiptTable.call_id, file.callID))
+              .get()
+            const key =
+              mode === "event-tool"
+                ? "$.tool"
+                : mode === "event-author"
+                  ? "$.assistantMessageID"
+                  : mode === "event-provider"
+                    ? "$.provider.executed"
+                    : "$.structured.content"
+            const value = mode === "event-provider" ? 1 : "substituted"
+            yield* h.database.db
+              .update(EventTable)
+              .set({ data: sql`json_set(${EventTable.data}, ${key}, ${value})` })
+              .where(
+                sql`${EventTable.aggregate_id} = ${session.id} AND ${EventTable.seq} = ${mode === "event-tool" ? receipt!.called_seq : receipt!.success_seq}`,
+              )
+              .run()
+          }
+          const invocation =
+            mode === "selection"
+              ? {
+                  ...called.invocation,
+                  call: { ...called.invocation.call, input: { ...input, file: { ...file, callID: "substituted" } } },
+                }
+              : called.invocation
+          expect((yield* h.captured.settle(invocation)).output?.structured).toMatchObject({ kept: false })
+          expect(yield* h.store.list(h.project)).toEqual([])
+        }),
+      true,
+    ),
+  )
+
+windows("a real Read does not grant an unknown model memory writing", () =>
+  withMemory((h) =>
+    Effect.gen(function* () {
+      const session = yield* h.create()
+      yield* Effect.promise(() => writeFile(path.join(h.directory, "source.txt"), "real file"))
+      const file = yield* h.read(session.id, { path: "source.txt" })
+      const called = yield* h.call(session.id, { kind: "decision", text: "No evaluated profile", file })
+      expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: false })
+      expect(yield* h.store.list(h.project)).toEqual([])
+    }),
+  ),
+)
+
+for (const origin of ["model", "user"] as const)
+  windows(`file association never backfills an existing ${origin} note`, () =>
+    withMemory(
+      (h) =>
+        Effect.gen(function* () {
+          const session = yield* h.create()
+          const text = "Keep the existing note unchanged"
+          const existing = yield* h.store.write({
+            scope: h.project,
+            kind: "decision",
+            text,
+            origin,
+            status: origin === "user" ? "verified" : "unverified",
+          })
+          yield* Effect.promise(() => writeFile(path.join(h.directory, "source.txt"), "real file"))
+          const file = yield* h.read(session.id, { path: "source.txt" })
+          const called = yield* h.call(session.id, { kind: "decision", text, file })
+          expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: false })
+          expect(yield* h.store.get(existing!.id)).toEqual(existing)
+        }),
+      true,
+    ),
+  )
+
+windows("file binding insert failure leaves neither an unlinked note nor a partial binding", () =>
+  withMemory(
+    (h) =>
+      Effect.gen(function* () {
+        const session = yield* h.create()
+        yield* Effect.promise(() => writeFile(path.join(h.directory, "source.txt"), "real file"))
+        const file = yield* h.read(session.id, { path: "source.txt" })
+        const called = yield* h.call(session.id, { kind: "decision", text: "Atomic storage failure", file })
+        yield* h.database.db.run(
+          sql`CREATE TRIGGER reject_file_note BEFORE INSERT ON memory_note WHEN NEW.files IS NOT NULL BEGIN SELECT RAISE(ABORT, 'fixture file binding rejection'); END`,
+        )
+        const result = yield* h.captured.settle(called.invocation).pipe(Effect.exit)
+        expect(result._tag).toBe("Failure")
+        expect(yield* h.store.list(h.project)).toEqual([])
+      }),
+    true,
+  ),
+)
+
 async function withMemory(
   body: (h: Effect.Success<typeof setup>, settings: { enabled: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
   evaluated = false,
@@ -307,6 +595,7 @@ async function withMemory(
             Catalog.node,
             MemoryWritePolicy.node,
             MemoryTool.node,
+            ReadTool.node,
             MemoryRecorder.node,
             Database.node,
             EventV2.node,
@@ -317,6 +606,20 @@ async function withMemory(
             ToolRegistry.node,
           ]),
           [
+            [
+              PermissionV2.node,
+              Layer.succeed(
+                PermissionV2.Service,
+                PermissionV2.Service.of({
+                  assert: () => Effect.void,
+                  ask: () => Effect.die("unused"),
+                  reply: () => Effect.die("unused"),
+                  get: () => Effect.die("unused"),
+                  forSession: () => Effect.die("unused"),
+                  list: () => Effect.die("unused"),
+                }),
+              ),
+            ],
             [
               ModelMemoryProfile.node,
               Layer.succeed(
