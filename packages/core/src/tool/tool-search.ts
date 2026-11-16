@@ -67,7 +67,7 @@ const layer = Layer.effectDiscard(
       .register({
         [name]: Tool.make({
           description:
-            "Discover additional tools before using them (browser, task/delegation, web, publishing and other registered capabilities). Supply exact names or query words. Queries ignore common function words and return up to ten matches ranked by informative matching words. Only highest-score matches are activated; lower matches remain listed. Empty or unmatched queries list the available catalog without activating tools. Activated tools are offered with their full input schemas on the next turn and remain available on continuation. This only discovers tools; it does not execute them or grant permissions.",
+            "Discover additional tools before using them (browser, task/delegation, web, publishing and other registered capabilities). Supply exact names or query words. Queries ignore common function words and return up to ten matches ranked by matching word count; ties prefer words that distinguish fewer tools. Only highest-count matches are activated; lower matches remain listed. Empty or unmatched queries list the available catalog without activating tools. Activated tools are offered with their full input schemas on the next turn and remain available on continuation. This only discovers tools; it does not execute them or grant permissions.",
           observation: true,
           input: Schema.Struct({
             names: Schema.optional(Schema.Array(Schema.String)),
@@ -101,18 +101,30 @@ const layer = Layer.effectDiscard(
               const terms = [...new Set(input.query?.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])].filter(
                 (term) => !stopwords.has(term),
               )
+              const candidates = catalog.map((tool) => ({
+                tool,
+                words: new Set((tool.name + " " + tool.description).toLowerCase().match(/[\p{L}\p{N}]+/gu)),
+              }))
+              // Repeated permission vocabulary must not crowd a distinctive
+              // capability out as the built-in catalog grows.
+              const weights = terms.map((term) => ({
+                term,
+                weight: 1 / Math.max(1, candidates.filter((item) => item.words.has(term)).length),
+              }))
               const matches = input.names?.length
                 ? catalog.filter((tool) => input.names!.includes(tool.name)).map((tool) => ({ tool, score: 1 }))
                 : terms.length
-                  ? catalog
-                      .map((tool) => {
-                        const words = new Set(
-                          (tool.name + " " + tool.description).toLowerCase().match(/[\p{L}\p{N}]+/gu),
-                        )
-                        return { tool, score: terms.filter((term) => words.has(term)).length }
-                      })
+                  ? candidates
+                      .map((item) => ({
+                        tool: item.tool,
+                        score: terms.filter((term) => item.words.has(term)).length,
+                        specificity: weights.reduce(
+                          (sum, word) => sum + (item.words.has(word.term) ? word.weight : 0),
+                          0,
+                        ),
+                      }))
                       .filter((match) => match.score > 0)
-                      .sort((a, b) => b.score - a.score)
+                      .sort((a, b) => b.score - a.score || b.specificity - a.specificity)
                       .slice(0, 10)
                   : []
               return {

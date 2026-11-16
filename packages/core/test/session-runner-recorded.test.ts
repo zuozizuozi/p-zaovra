@@ -93,6 +93,7 @@ const config = Layer.succeed(
         new Config.Document({
           type: "document",
           info: new Config.Info({
+            memory: { taskSearch: false },
             experimental: new ConfigExperimental.Experimental({
               quality_progress: { facts: false, stagnation_log: false },
             }),

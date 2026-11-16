@@ -3,6 +3,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { EffectDrizzleSqlite } from "@zaovra-ai/effect-drizzle-sqlite"
 import { DatabaseMigration } from "@zaovra-ai/core/database/migration"
 import memoryMigration from "@zaovra-ai/core/database/migration/20261113202309_agent-memory"
+import fileMigration from "@zaovra-ai/core/database/migration/20261115184829_memory-file-links"
 import { Effect } from "effect"
 import { sql } from "drizzle-orm"
 
@@ -64,9 +65,12 @@ describe("agent memory migration", () => {
         Effect.gen(function* () {
           const db = yield* EffectDrizzleSqlite.makeWithDefaults()
           if (fresh) yield* DatabaseMigration.apply(db)
-          if (!fresh) yield* DatabaseMigration.applyOnly(db, [memoryMigration])
+          if (!fresh) yield* DatabaseMigration.applyOnly(db, [memoryMigration, fileMigration])
           return {
-            columns: yield* db.all(sql`PRAGMA table_info(memory_note)`),
+            // ALTER TABLE appends columns; physical ordinal is not part of the
+            // named-column contract. Compare every logical constraint instead.
+            columns: yield* db.all(sql`SELECT name, type, "notnull", dflt_value, pk
+              FROM pragma_table_info('memory_note') ORDER BY name`),
             indexes: yield* db.all(
               sql`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'memory_note' ORDER BY name`,
             ),
