@@ -125,8 +125,12 @@ export interface Interface {
     scope: Memory.Scope,
     decisions: ReadonlyArray<Decision>,
   ) => Effect.Effect<ReadonlyArray<{ readonly id: Memory.ID; readonly result: string }>>
-  /** Turns recording for one scope off or back on; what is already kept stays. */
-  readonly silence: (scope: Memory.Scope, silent: boolean) => Effect.Effect<void>
+  /** Location config controls only its own recordings; omitted placement mutes the whole scope. */
+  readonly silence: (
+    scope: Memory.Scope,
+    silent: boolean,
+    place?: { readonly directory: string; readonly workspaceID?: string },
+  ) => Effect.Effect<void>
   readonly search: (input: SearchInput) => Effect.Effect<{
     readonly notes: ReadonlyArray<Memory.Note>
     readonly sessions: ReadonlyArray<Memory.SessionMatch>
@@ -677,8 +681,15 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
       })
 
       const silent = new Set<Memory.Scope>()
-      const silence = (scope: Memory.Scope, off: boolean) =>
+      const silentLocations = new Set<string>()
+      const silence: Interface["silence"] = (scope, off, place) =>
         Effect.sync(() => {
+          if (place) {
+            const key = JSON.stringify([scope, place.directory, place.workspaceID ?? null])
+            if (off) silentLocations.add(key)
+            else silentLocations.delete(key)
+            return
+          }
           if (off) silent.add(scope)
           else silent.delete(scope)
         })
@@ -687,6 +698,19 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         db
           .transaction(() =>
             Effect.gen(function* () {
+              // Notes are shared by project, but two Locations may have different
+              // recording settings. Resolve the host source, not the most recently
+              // initialized Location's setting for that project.
+              if (silentLocations.size) {
+                const source = yield* db
+                  .select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
+                  .from(SessionTable)
+                  .where(eq(SessionTable.id, input.sessionID))
+                  .get()
+                  .pipe(Effect.orDie)
+                if (source && silentLocations.has(JSON.stringify([input.scope, source.directory, source.workspaceID])))
+                  return undefined
+              }
               if (
                 silent.has(input.scope) ||
                 (yield* frozen(input.scope)) ||

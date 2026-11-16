@@ -107,7 +107,7 @@ const layer = Layer.effectDiscard(
     const scope = yield* store.scope({ project: location.project.id, directory: location.directory })
     const options = Config.latest(yield* config.entries(), "memory")
     const off = options?.enabled === false
-    yield* store.silence(scope, off)
+    yield* store.silence(scope, off, location)
     if (off || options?.index?.enabled === false) return
     const limits = { maxLines: options?.index?.maxLines ?? maxLines, maxBytes: options?.index?.maxBytes ?? maxBytes }
     const read = Effect.all([
