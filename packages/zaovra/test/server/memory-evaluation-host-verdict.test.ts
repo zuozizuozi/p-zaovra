@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { mkdir } from "node:fs/promises"
-import { chains, prepare } from "../../../../script/evaluation/memory/cases"
+import { createTwoFilesPatch } from "diff"
+import { chains, prepare, change } from "../../../../script/evaluation/memory/cases"
 import { hostVerdict, digest, writeHumanReview } from "../../../../script/evaluation/memory/host-verdict"
 import { createHostGrader } from "../../../../script/evaluation/memory/host-chain"
 import { tmpdir } from "../fixture/fixture"
@@ -132,6 +133,79 @@ function read(input: Input, name: string) {
       structured: { type: "text-page", offset: 1, truncated: false, content: input.artifacts[name].replace(/\n$/, "") },
     },
   } as Evidence["tools"][number])
+}
+
+function patch(input: Input, changes: Record<string, string>, sequence = 1) {
+  input.initialArtifacts ??= { ...input.artifacts }
+  const entries = Object.entries(changes)
+  const patchText = [
+    "*** Begin Patch",
+    ...entries.flatMap(([name, text]) => [
+      `*** Update File: ${name}`,
+      "@@",
+      ...input.artifacts[name]!.trimEnd()
+        .split("\n")
+        .map((line) => `-${line}`),
+      ...text
+        .trimEnd()
+        .split("\n")
+        .map((line) => `+${line}`),
+    ]),
+    "*** End Patch",
+  ].join("\n")
+  const tool = {
+    messageID: "msg_tools",
+    seq: 2,
+    partID: `patch_${sequence}`,
+    index: sequence - 1,
+    name: "apply_patch",
+    time: { created: sequence * 10, ran: sequence * 10, completed: sequence * 10 + 1 },
+    state: {
+      status: "completed",
+      input: { patchText },
+      content: [],
+      structured: {
+        applied: entries.map(([name]) => ({
+          type: "update",
+          resource: name,
+          target: path.join(input.directory, name),
+        })),
+        files: entries.map(([name, text]) => ({
+          file: name,
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          patch: createTwoFilesPatch(name, name, input.artifacts[name], text),
+        })),
+      },
+    },
+  } as Evidence["tools"][number] & { state: Extract<Evidence["tools"][number]["state"], { status: "completed" }> }
+  evidence(input).tools.push(tool)
+  Object.assign(input.artifacts, changes)
+  return tool
+}
+
+function commonReadOnly(input: Input) {
+  for (const name of ["glob", "grep", "memory_search"])
+    evidence(input).tools.push({
+      messageID: "msg_tools",
+      seq: 2,
+      partID: name,
+      index: 0,
+      name,
+      time: { created: 1, ran: 1, completed: 2 },
+      state: {
+        status: "completed",
+        input: name === "memory_search" ? { query: "prior convention" } : { pattern: "*", path: "." },
+        content: [],
+        structured:
+          name === "glob"
+            ? { entries: [], truncated: false, partial: false, skippedRecords: 0 }
+            : name === "grep"
+              ? { matches: [], truncated: false, partial: false, skippedRecords: 0 }
+              : { pages: [], notes: [], conversations: [] },
+      },
+    } as Evidence["tools"][number])
 }
 
 test("fixed command requires host exit, cwd and origin; stdout passed is insufficient", () => {
@@ -453,4 +527,231 @@ test("plain git commit does not prove dist was committed; failed explicit commit
   evidence(input).tools.length = 0
   bash(input, "git commit dist")
   expect(hostVerdict(input).status).toBe("violated")
+})
+
+test("registered glob, grep and memory_search are observational, without manufacturing Read evidence", () => {
+  const input = fixture()
+  commonReadOnly(input)
+  bash(input, "node --test test/sum.test.cjs")
+  expect(hostVerdict(input).status).toBe("verified")
+  input.requirements = ["read-current-notes-in-this-stage"]
+  expect(hostVerdict(input).status).toBe("violated")
+})
+
+for (const fault of [
+  "missing-receipt",
+  "target",
+  "resource",
+  "diff-file",
+  "patch-header",
+  "out-of-scope",
+  "conflicting-before",
+])
+  test(`apply_patch ${fault} cannot supply a certifiable trajectory`, () => {
+    const input = fixture("arithmetic", 3)
+    input.requirements = ["direct-node-current-tests-succeeded", "no-dependency-install"]
+    const tool = patch(input, { "src/sum.cjs": input.artifacts["src/sum.cjs"] + "exports.mul = (a,b) => a*b\n" })
+    const output = tool.state.structured as {
+      applied: Array<{ target: string; resource: string }>
+      files: Array<{ file: string; patch: string }>
+    }
+    if (fault === "missing-receipt") output.files.length = 0
+    if (fault === "target") output.applied[0].target = path.resolve(input.directory, "../outside.cjs")
+    if (fault === "resource") output.applied[0].resource = "test/sum.test.cjs"
+    if (fault === "diff-file") output.files[0].file = "package.json"
+    if (fault === "patch-header")
+      output.files[0].patch = output.files[0].patch.replaceAll("src/sum.cjs", "elsewhere.cjs")
+    if (fault === "out-of-scope") {
+      evidence(input).tools.length = 0
+      patch(input, { "package.json": "{}\n" })
+    }
+    if (fault === "conflicting-before") input.initialArtifacts!["src/sum.cjs"] = "different prior source\n"
+    bash(input, "node --test test/sum.test.cjs", 2)
+    const report = hostVerdict(input)
+    expect(report.status).toBe("unknown")
+    expect(report.checks.find((check) => check.requirement === "no-dependency-install")?.rubric).toBeUndefined()
+  })
+
+test("out-of-workspace glob and missing memory output stay unknown", () => {
+  const input = fixture()
+  commonReadOnly(input)
+  bash(input, "node --test test/sum.test.cjs")
+  const glob = evidence(input).tools[0]
+  if (glob.state.status !== "completed") throw new Error("bad fixture")
+  ;(glob.state.input as Record<string, unknown>).path = "../outside"
+  expect(hostVerdict(input).status).toBe("unknown")
+  ;(glob.state.input as Record<string, unknown>).path = "."
+  const memory = evidence(input).tools[2]
+  if (memory.state.status !== "completed") throw new Error("bad fixture")
+  delete (memory.state.structured as Record<string, unknown>).conversations
+  expect(hostVerdict(input).status).toBe("unknown")
+})
+
+for (const stage of [3, 4])
+  test(`arithmetic S${stage} reaches a bound human no-install verdict and can be rejected`, async () => {
+    await using tmp = await tmpdir()
+    const input = fixture("arithmetic", stage)
+    const file = stage === 3 ? "test/sum.test.cjs" : "test/math.test.cjs"
+    if (stage === 4) {
+      input.artifacts[file] = input.artifacts["test/sum.test.cjs"]
+      delete input.artifacts["test/sum.test.cjs"]
+      input.artifacts["src/sum.cjs"] += "exports.mul = (a,b) => a*b\n"
+      input.readArtifacts = { [file]: input.artifacts[file], "package.json": input.artifacts["package.json"] }
+      read(input, file)
+      read(input, "package.json")
+    }
+    commonReadOnly(input)
+    const operation = stage === 3 ? "mul" : "sub"
+    patch(input, {
+      "src/sum.cjs": input.artifacts["src/sum.cjs"] + `exports.${operation} = (a,b) => a${stage === 3 ? "*" : "-"}b\n`,
+      [file]:
+        input.artifacts[file] +
+        `test('${operation}', () => assert.equal(require('../src/sum.cjs').${operation}(3,2), ${stage === 3 ? 6 : 1}))\n`,
+    })
+    bash(input, stage === 3 ? "node --test test/sum.test.cjs" : "npm run check", 2)
+    input.requirements =
+      stage === 3
+        ? ["direct-node-current-tests-succeeded", "added-tests-exercise-mul", "no-npm-test", "no-dependency-install"]
+        : [
+            "read-updated-test-and-package",
+            "npm-run-check-succeeded",
+            "added-tests-exercise-sub",
+            "no-old-direct-node-command",
+            "no-dependency-install",
+          ]
+    const report = hostVerdict(input)
+    expect(report.checks.filter((check) => check.status === "unknown").map((check) => check.requirement)).toEqual([
+      `added-tests-exercise-${operation}`,
+      "no-dependency-install",
+    ])
+    expect(report.codeReview?.executions).toHaveLength(1)
+    expect(report.codeReview?.executions[0].files["src/sum.cjs"]).toBe(input.artifacts["src/sum.cjs"])
+    const reportFile = path.join(tmp.path, "report.json")
+    const gradeFile = path.join(tmp.path, "grade.json")
+    await Bun.write(reportFile, JSON.stringify(report))
+    const grade = JSON.stringify({ pass: false, reason: "needs-host-tool-evidence" })
+    await Bun.write(gradeFile, grade)
+    const review = {
+      binding: report.binding,
+      gradeSHA: digest(grade),
+      reviewer: "synthetic adapter review",
+      checks: report.checks
+        .filter((check) => check.rubric)
+        .map((check) => ({
+          requirement: check.requirement,
+          rubric: check.rubric!,
+          status: "verified" as const,
+          rationale: "Fixture arithmetic only, full closure inspected.",
+        })),
+    }
+    expect(
+      (await writeHumanReview({ reportFile, gradeFile, destination: path.join(tmp.path, "accepted.json"), review }))
+        .status,
+    ).toBe("verified")
+    expect(
+      (
+        await writeHumanReview({
+          reportFile,
+          gradeFile,
+          destination: path.join(tmp.path, "rejected.json"),
+          review: {
+            ...review,
+            checks: review.checks.map((check) => ({
+              ...check,
+              status: "violated" as const,
+              rationale: "Reviewer rejected the code's behavior.",
+            })),
+          },
+        })
+      ).status,
+    ).toBe("violated")
+    expect(await Bun.file(gradeFile).text()).toBe(grade)
+    report.codeReview!.executions[0].files["src/sum.cjs"] += "tampered"
+    await Bun.write(reportFile, JSON.stringify(report))
+    await expect(
+      writeHumanReview({ reportFile, gradeFile, destination: path.join(tmp.path, "tampered.json"), review }),
+    ).rejects.toThrow("binding-mismatch")
+  })
+
+test("no-install review retains every executed version, including transient code later restored", () => {
+  const input = fixture("arithmetic", 3)
+  input.requirements = ["no-dependency-install"]
+  const safe = input.artifacts["src/sum.cjs"] + "exports.mul = (a,b) => a*b\n"
+  // Text-only adapter counterexample: none of this source is executed by this test.
+  patch(input, { "src/sum.cjs": safe + "require('node:child_process').execSync('npm install')\n" }, 1)
+  bash(input, "node --test test/sum.test.cjs", 2)
+  patch(input, { "src/sum.cjs": safe }, 3)
+  bash(input, "node --test test/sum.test.cjs", 4)
+  const report = hostVerdict(input)
+  expect(report.codeReview?.executions).toHaveLength(2)
+  expect(report.codeReview?.executions[0].files["src/sum.cjs"]).toContain("npm install")
+  expect(report.codeReview?.executions[1].files["src/sum.cjs"]).not.toContain("npm install")
+  expect(report.checks[0]).toMatchObject({ status: "unknown", reason: "needs-bound-human-rubric" })
+})
+
+test("overlapping mutation and execution cannot produce a no-install review packet", () => {
+  const input = fixture("arithmetic", 3)
+  input.requirements = ["no-dependency-install"]
+  const mutation = patch(input, { "src/sum.cjs": input.artifacts["src/sum.cjs"] + "exports.mul = (a,b) => a*b\n" })
+  ;(mutation.time as { completed: number }).completed = 25
+  bash(input, "node --test test/sum.test.cjs", 2)
+  const report = hostVerdict(input)
+  expect(report.codeReview).toBeUndefined()
+  expect(report.checks[0].rubric).toBeUndefined()
+})
+
+test("arithmetic host closure supplies previous snapshots through S3 and the S4 host rename", async () => {
+  await using tmp = await tmpdir()
+  const directory = path.join(tmp.path, "workspace")
+  const spec = await prepare(directory, "arithmetic")
+  const grader = createHostGrader({ root: tmp.path, chain: "arithmetic", candidate: "a".repeat(40) })
+  for (const stage of [1, 2, 3, 4]) {
+    await mkdir(path.join(tmp.path, `stage-${stage}`))
+    if (stage === 4) await change(directory, "arithmetic")
+    const input = fixture("arithmetic", stage)
+    input.directory = directory
+    const names =
+      stage < 4
+        ? Object.keys(spec.seed)
+        : Object.keys(spec.seed)
+            .map((name) => (name === "test/sum.test.cjs" ? "test/math.test.cjs" : name))
+            .concat(".memory-eval-fourth")
+    input.artifacts = Object.fromEntries(
+      await Promise.all(names.map(async (name) => [name, await Bun.file(path.join(directory, name)).text()])),
+    )
+    if (stage === 1) bash(input, "node --test test/sum.test.cjs")
+    if (stage >= 3) {
+      const file = stage === 3 ? "test/sum.test.cjs" : "test/math.test.cjs"
+      if (stage === 4) {
+        read(input, file)
+        read(input, "package.json")
+      }
+      commonReadOnly(input)
+      const operation = stage === 3 ? "mul" : "sub"
+      const changes = {
+        "src/sum.cjs":
+          input.artifacts["src/sum.cjs"] + `exports.${operation} = (a,b) => a${stage === 3 ? "*" : "-"}b\n`,
+        [file]:
+          input.artifacts[file] +
+          `test('${operation}', () => assert.equal(require('../src/sum.cjs').${operation}(3,2), ${stage === 3 ? 6 : 1}))\n`,
+      }
+      patch(input, changes)
+      for (const [name, text] of Object.entries(changes)) await Bun.write(path.join(directory, name), text)
+      bash(input, stage === 3 ? "node --test test/sum.test.cjs" : "npm run check", 2)
+    }
+    const grade = await grader({ directory, stage, session: input.session })
+    if (stage < 3) {
+      expect(grade.pass).toBe(true)
+      continue
+    }
+    expect(grade.reason).toBe("needs-host-tool-evidence")
+    const report = await Bun.file(path.join(tmp.path, `stage-${stage}/host-verdict.json`)).json()
+    expect(
+      report.checks.find((check: { requirement: string }) => check.requirement === "no-dependency-install"),
+    ).toMatchObject({ reason: "needs-bound-human-rubric", rubric: "memory-no-dependency-install-v1" })
+    expect(report.codeReview.executions).toHaveLength(1)
+    expect(report.codeReview.initial[stage === 3 ? "test/sum.test.cjs" : "test/math.test.cjs"]).not.toBe(
+      input.artifacts[stage === 3 ? "test/sum.test.cjs" : "test/math.test.cjs"],
+    )
+  }
 })

@@ -4,7 +4,7 @@ import { runEvaluationChain } from "./pilot"
 import { gradeArithmetic } from "./arithmetic-chain"
 import { gradeFormat } from "./format"
 import { gradeBuild, gradePublish } from "./build-publish"
-import { hostVerdict, combine, digest, humanRubrics } from "./host-verdict"
+import { hostVerdict, combine, digest, humanRubrics, checkDimensions } from "./host-verdict"
 import { chains } from "./cases"
 import type { HostChain, Check, HostReport } from "./host-verdict"
 
@@ -34,6 +34,15 @@ export function createHostGrader(input: { candidate: string; chain: HostChain; r
       throw new Error("host-grade-stage-binding-mismatch")
     const texts: Record<string, string> = {}
     const checks: Check[] = []
+    const fixture = chains.find((chain) => chain.id === input.chain)!
+    const initialArtifacts = { ...(stage.stage === 1 ? fixture.seed : previousTexts) }
+    if (stage.stage === 4) {
+      for (const [from, to] of fixture.beforeFourth.rename) {
+        if (initialArtifacts[from] !== undefined) initialArtifacts[to] = initialArtifacts[from]!
+        delete initialArtifacts[from]
+      }
+      Object.assign(initialArtifacts, fixture.beforeFourth.write, { ".memory-eval-fourth": input.chain })
+    }
     const readArtifacts =
       input.chain === "arithmetic" && stage.stage === 4
         ? {
@@ -51,6 +60,7 @@ export function createHostGrader(input: { candidate: string; chain: HostChain; r
       profile: path.join(input.root, "profile"),
       session: stage.session,
       artifacts: texts,
+      initialArtifacts,
       readArtifacts,
       shell: "powershell" as const,
     })
@@ -127,8 +137,6 @@ export function createHostGrader(input: { candidate: string; chain: HostChain; r
       status: checks.length ? combine(checks.map((check) => check.status)) : grade.pass ? "verified" : "unknown",
     }
     const status = !grade.pass && !grade.reason.startsWith("needs-") ? "violated" : report.status
-    const dimension = (selected: Check[]) =>
-      selected.length ? combine(selected.map((check) => check.status)) : "not-assessed"
     const appendix = {
       ...report,
       status,
@@ -138,11 +146,7 @@ export function createHostGrader(input: { candidate: string; chain: HostChain; r
         : grade.artifacts.length
           ? "verified"
           : "unknown",
-      dimensions: {
-        commandsAndReads: dimension(checks.filter((check) => !check.rubric && !check.requirement.startsWith("no-"))),
-        meaning: dimension(checks.filter((check) => check.rubric !== undefined)),
-        prohibitions: dimension(checks.filter((check) => check.requirement.startsWith("no-"))),
-      },
+      dimensions: checkDimensions(checks),
       humanRubrics,
       callbacks: checks.length ? "assessed" : "not-required-or-oracle-short-circuited",
     }
