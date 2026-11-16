@@ -588,6 +588,9 @@ const otherSessionID = SessionV2.ID.make("ses_runner_other")
 const insertSession = (id: SessionV2.ID) =>
   Effect.gen(function* () {
     const { db } = yield* Database.Service
+    // Use the fixture clock for durable dates too. A wall-clock SQL default
+    // makes TestClock.setTime replay decades of Integration maintenance ticks.
+    const timestamp = DateTime.toEpochMillis(yield* DateTime.now)
     yield* db
       .insert(SessionTable)
       .values({
@@ -597,6 +600,8 @@ const insertSession = (id: SessionV2.ID) =>
         directory: "/project",
         title: "test",
         version: "test",
+        time_created: timestamp,
+        time_updated: timestamp,
         metadata: { budgetMode: "interactive" },
       })
       .onConflictDoNothing()
@@ -6147,7 +6152,10 @@ describe("SessionRunnerLLM", () => {
       streamFailure = undefined
       streamGate = undefined
       streamStarted = undefined
-      yield* Effect.yieldNow
+      const execution = yield* SessionExecution.Service
+      // Observe the automatically scheduled successor; one scheduler yield does
+      // not guarantee that its asynchronous preparation has reached the provider.
+      yield* execution.wait!(sessionID)
 
       expect(requests).toHaveLength(2)
       expect(userTexts(requests[1]!)).toEqual(["Start working", "Recover with this"])
