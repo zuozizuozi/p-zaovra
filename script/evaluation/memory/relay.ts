@@ -4,6 +4,7 @@ import path from "node:path"
 import { Option, Schema } from "effect"
 import { OpenAIChat } from "../../../packages/llm/src/protocols/openai-chat"
 import { OpenAIResponses } from "../../../packages/llm/src/protocols/openai-responses"
+import { observeUsage } from "./usage"
 
 const owned = new WeakMap<
   object,
@@ -161,12 +162,20 @@ export function startEvaluationRelay(options: {
             return new Response(null, { status: response.status })
           }
           let received = 0
+          const usage = observeUsage(input.protocol)
+          let usageRecorded = false
+          const recordUsage = (end: "eof" | "incomplete" | "cancelled") => {
+            if (closed || usageRecorded) return
+            usageRecorded = true
+            log({ id, phase: "usage-observed", end, ...usage.result() })
+          }
           return new Response(
             new ReadableStream<Uint8Array>({
               async pull(stream) {
                 try {
                   const chunk = await reader.read()
                   if (chunk.done) {
+                    recordUsage("eof")
                     if (!closed) log({ id, phase: "eof", bytes: received, usage: "unknown" })
                     active.delete(controller)
                     stream.close()
@@ -174,8 +183,10 @@ export function startEvaluationRelay(options: {
                   }
                   received += chunk.value.length
                   if (received > 4194304) throw new Error("response-limit")
+                  usage.feed(chunk.value)
                   stream.enqueue(chunk.value)
                 } catch {
+                  recordUsage("incomplete")
                   controller.abort()
                   active.delete(controller)
                   if (!closed) log({ id, phase: "incomplete", usage: "unknown" })
@@ -183,6 +194,7 @@ export function startEvaluationRelay(options: {
                 }
               },
               async cancel() {
+                recordUsage("cancelled")
                 controller.abort()
                 await reader.cancel().catch(() => {})
                 active.delete(controller)
