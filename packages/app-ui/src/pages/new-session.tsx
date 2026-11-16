@@ -89,8 +89,13 @@ export default function NewSessionPage() {
     if (project && sdk().directory !== project.worktree) return sdk().directory
     return "main"
   })
-  const projectRoot = createMemo(() => sync().project?.worktree ?? sdk().directory)
-  const localBranch = createMemo(() => serverSync().child(projectRoot())[0].vcs?.branch)
+  const projectRoot = createMemo(() =>
+    sync().project?.vcs === "git" ? (sync().project?.worktree ?? sdk().directory) : sdk().directory,
+  )
+  // Non-Git projects share global metadata whose worktree is "/", not the open folder.
+  const localBranch = createMemo(() =>
+    sync().project?.vcs === "git" ? serverSync().child(projectRoot())[0].vcs?.branch : undefined,
+  )
   const selectedBranch = createMemo(() => {
     const worktree = newSessionWorktree()
     if (worktree === "main" || worktree === "create") return localBranch()
