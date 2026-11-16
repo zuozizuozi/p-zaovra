@@ -102,6 +102,11 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
   if (goalBudget?.properties?.maxDurationMs) {
     goalBudget.properties.maxDurationMs = nullable(goalBudget.properties.maxDurationMs)
   }
+  // These fields are explicit NullOr contracts, not legacy optional fields.
+  const memoryTime = spec.components?.schemas?.MemoryTidyTask?.properties?.time?.properties
+  if (memoryTime?.finished) memoryTime.finished = nullable(memoryTime.finished)
+  const automatic = spec.components?.schemas?.MemoryAutomaticPreference?.properties
+  if (automatic?.currentRun) automatic.currentRun = nullable(automatic.currentRun)
   normalizeComponentDescriptions(spec)
   addLegacyErrorSchemas(spec)
   delete spec.components?.securitySchemes
@@ -146,6 +151,16 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
         for (const content of Object.values(response.content ?? {})) {
           if (content.schema) content.schema = stripOptionalNull(structuredClone(content.schema))
         }
+      }
+      // Restore only the memory endpoints whose successful data is explicitly NullOr.
+      if (
+        (path === "/api/memory" && method === "post") ||
+        (path === "/api/memory/{id}" && method === "patch") ||
+        (path === "/api/memory/pages/{id}" && method === "get") ||
+        (path === "/api/memory/automatic" && method === "get")
+      ) {
+        const properties = operation.responses?.["200"]?.content?.["application/json"]?.schema?.properties
+        if (properties?.data) properties.data = nullable(properties.data)
       }
       if (!isV2Api) {
         // Auth is still runtime middleware outside the legacy public OpenAPI

@@ -5981,9 +5981,9 @@ export class Memory extends HeyApiClient {
         workspace?: string
       }
       layer?: "project" | "user"
-      summary?: string
-      body?: string
-      expected?: string
+      summary: string
+      body: string
+      expected: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6314,14 +6314,14 @@ export class Memory extends HeyApiClient {
    * Add a note written by the user. Returns null while legacy recovery is pending, when deletion protection matches, or when the text is empty.
    */
   public create<ThrowOnError extends boolean = false>(
-    parameters?: {
+    parameters: {
       location?: {
         directory?: string
         workspace?: string
       }
       layer?: "project" | "user"
-      kind?: "practice" | "convention" | "pitfall" | "preference" | "decision"
-      text?: string
+      kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+      text: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6476,12 +6476,12 @@ export class Memory extends HeyApiClient {
    * Revoke automatic consent and stop its owned tidy task
    */
   public disableAutomatic<ThrowOnError extends boolean = false>(
-    parameters?: {
+    parameters: {
       location?: {
         directory?: string
         workspace?: string
       }
-      expected?: string
+      expected: string
     },
     options?: Options<never, ThrowOnError>,
   ) {

@@ -7573,7 +7573,7 @@ export type MemoryTidyTask = {
   }
   time: {
     created: number
-    finished: number
+    finished: number | null
   }
 }
 
@@ -7626,7 +7626,7 @@ export type MemoryAutomaticPreference = {
   model: ModelRef
   tokens: number
   dailyTokens: number
-  currentRun: string
+  currentRun: string | null
   confirmedAt: number
 }
 
@@ -17270,7 +17270,7 @@ export type V2MemoryGetPageResponses = {
    * Success
    */
   200: {
-    data: MemoryPage
+    data: MemoryPage | null
   }
 }
 
@@ -17708,7 +17708,7 @@ export type V2MemoryCreateResponses = {
    * Success
    */
   200: {
-    data: MemoryNote
+    data: MemoryNote | null
   }
 }
 
@@ -17776,7 +17776,7 @@ export type V2MemoryUpdateResponses = {
    * Success
    */
   200: {
-    data: MemoryNote
+    data: MemoryNote | null
   }
 }
 
@@ -17812,7 +17812,7 @@ export type V2MemoryGetAutomaticResponses = {
    * Success
    */
   200: {
-    data: MemoryAutomaticPreference
+    data: MemoryAutomaticPreference | null
   }
 }
 
