@@ -5,6 +5,7 @@ import { Location } from "@zaovra-ai/core/location"
 import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { ModelMemoryProfile } from "@zaovra-ai/core/model-memory-profile"
+import { PluginInternal } from "@zaovra-ai/core/plugin/internal"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
@@ -70,7 +71,7 @@ export function createMemoryHost(value: string, generation: string) {
     const locations = yield* LocationServiceMap.Service
     const model = yield* Effect.gen(function* () {
       const plugins = yield* PluginV2.Service
-      yield* plugins.wait()
+      yield* plugins.wait(PluginInternal.readyID)
       const catalog = yield* Catalog.Service
       return yield* catalog.model.get(ProviderV2.ID.make(input.model.providerID), ModelV2.ID.make(input.model.id))
     }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(input.directory) }))))
