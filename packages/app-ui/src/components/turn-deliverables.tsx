@@ -33,6 +33,8 @@ export function TurnDeliverables(props: {
   )
   // Do not carry a previous turn's file verification into a new turn or directory.
   const files = () => {
+    // File inspection must not suspend the surrounding transcript or composer.
+    if (availability.loading) return undefined
     const value = availability()
     return value?.directory === props.directory && value.items === props.items ? value.files : undefined
   }
