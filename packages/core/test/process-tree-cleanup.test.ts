@@ -26,7 +26,8 @@ async function ready(file: string) {
 async function alive(pid: number) {
   if (process.platform === "linux") {
     const data = await readFile("/proc/" + pid + "/stat", "utf8").catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return ""
+      // procfs can lose the process between opening stat and reading it.
+      if (error.code === "ENOENT" || error.code === "ESRCH") return ""
       throw error
     })
     return !!data && !["Z", "X"].includes(data.slice(data.lastIndexOf(") ") + 2).split(" ")[0])
