@@ -126,3 +126,52 @@ test.skipIf(process.platform !== "win32")(
   },
   240000,
 )
+
+test.skipIf(process.platform !== "win32")(
+  "billing pilot separates a failed Session from four unrun stages",
+  async () => {
+    await using tmp = await tmpdir()
+    const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim()
+    let calls = 0
+    const provider = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch() {
+        calls++
+        return Response.json(
+          { error: { message: "private-upstream-failure", type: "invalid_request_error" } },
+          { status: 400 },
+        )
+      },
+    })
+    try {
+      const root = path.join(tmp.path, "failure")
+      const result = await runBillingChain({
+        root,
+        candidate,
+        family: "deepseek",
+        modelID: "fixture-model",
+        treatment: "A",
+        baseURL: `http://127.0.0.1:${provider.port}/v1`,
+        reserveTokens: 1,
+        environment: { ZAOVRA_EVAL_API_KEY: "local-fixture-only" },
+      })
+      expect(result.pass).toBe(false)
+      expect(result.counts).toEqual({ planned: 5, entered: 1, completed: 0, notRun: 4 })
+      expect(result.stages[0]).toMatchObject({
+        status: "failed",
+        phase: "session",
+        category: "product-turn",
+        reason: "evaluation-session-not-completed",
+      })
+      expect(result.stages.slice(1).every((stage) => stage.status === "not-run")).toBe(true)
+      expect(JSON.stringify(result)).not.toContain("private-upstream-failure")
+      expect(await Bun.file(path.join(root, "stage-1", "grade.json")).exists()).toBe(false)
+      expect(await Bun.file(path.join(root, "stage-2", "session.json")).exists()).toBe(false)
+      expect(calls).toBe(1)
+    } finally {
+      await provider.stop(true)
+    }
+  },
+  30000,
+)
