@@ -8833,10 +8833,12 @@ export type ModelsListOutput = {
         }
     readonly capabilities: {
       readonly tools: boolean
+      readonly memoryNote?: boolean
       readonly interleavedThinking?: boolean
       readonly input: ReadonlyArray<string>
       readonly output: ReadonlyArray<string>
     }
+    readonly memoryNote?: "auto" | "off"
     readonly request: {
       readonly headers: { readonly [x: string]: string }
       readonly body: { readonly [x: string]: JsonValue }

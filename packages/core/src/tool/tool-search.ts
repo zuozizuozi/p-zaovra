@@ -6,6 +6,7 @@ import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { MemoryWritePolicy } from "../memory/write-policy"
 export const name = "tool_search"
 const stopwords = new Set([
   "a",
@@ -63,6 +64,7 @@ const layer = Layer.effectDiscard(
     const registry = yield* ToolRegistry.Service
     const agents = yield* AgentV2.Service
     const permissions = yield* PermissionV2.Service
+    const memoryWriting = yield* MemoryWritePolicy.Service
     yield* tools
       .register({
         [name]: Tool.make({
@@ -91,8 +93,9 @@ const layer = Layer.effectDiscard(
                 })
                 .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
               const agent = yield* agents.get(context.agent)
+              const memoryNoteAllowed = yield* memoryWriting.allowed(context.sessionID)
               const catalog = (yield* registry.materialize(agent?.permissions)).definitions.filter(
-                (tool) => tool.name !== name,
+                (tool) => tool.name !== name && (tool.name !== "memory_note" || memoryNoteAllowed),
               )
               if (input.names?.some((requested) => !catalog.some((tool) => tool.name === requested)))
                 return yield* new Tool.Failure({
@@ -143,5 +146,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/search",
   layer,
-  deps: [ToolRegistry.node, ToolRegistry.toolsNode, AgentV2.node, PermissionV2.node],
+  deps: [ToolRegistry.node, ToolRegistry.toolsNode, AgentV2.node, PermissionV2.node, MemoryWritePolicy.node],
 })

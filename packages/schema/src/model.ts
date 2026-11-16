@@ -24,6 +24,9 @@ export type Family = typeof Family.Type
 export interface Capabilities extends Schema.Schema.Type<typeof Capabilities> {}
 export const Capabilities = Schema.Struct({
   tools: Schema.Boolean,
+  memoryNote: Schema.Boolean.pipe(optional).annotate({
+    description: "Host evaluation result for memory writing; unknown is not reliable. Not a user capability override.",
+  }),
   interleavedThinking: Schema.Boolean.pipe(optional).annotate({
     description:
       "Supports manual interleaved thinking. Unknown means unsupported; explicit user configuration overrides the catalog.",
@@ -75,6 +78,9 @@ export const Info = Schema.Struct({
   name: Schema.String,
   api: Api,
   capabilities: Capabilities,
+  memoryNote: Schema.Literals(["auto", "off"]).pipe(optional).annotate({
+    description: "Memory writing policy. Auto still requires a trusted evaluation profile; off disables writing.",
+  }),
   request: Schema.Struct({
     ...Provider.Request.fields,
     variant: Schema.String.pipe(optional),

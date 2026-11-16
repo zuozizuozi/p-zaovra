@@ -13,9 +13,14 @@ import { ToolOutputStore } from "../src/tool-output-store"
 import { Tool } from "../src/tool/tool"
 import { ToolRegistry } from "../src/tool/registry"
 import { ToolSearch } from "../src/tool/tool-search"
+import { MemoryWritePolicy } from "../src/memory/write-policy"
 import { testEffect } from "./lib/effect"
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([ToolSearch.node, ToolRegistry.node, AgentV2.node, ApplicationTools.node]), [
+    [
+      MemoryWritePolicy.node,
+      Layer.succeed(MemoryWritePolicy.Service, MemoryWritePolicy.Service.of({ allowed: () => Effect.succeed(false) })),
+    ],
     [PermissionV2.node, Layer.mock(PermissionV2.Service, { assert: () => Effect.void })],
     [
       ToolOutputStore.node,
@@ -45,6 +50,22 @@ const query = (registry: ToolRegistry.Interface, input: Record<string, unknown>)
       ),
     )
 describe("canonical tool discovery", () => {
+  it.effect("does not list or activate memory_note for an unknown session model", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        memory_note: Tool.make({
+          description: "memory note",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          execute: () => Effect.die("must not execute"),
+        }),
+      })
+      for (const input of [{}, { query: "unmatched-token" }])
+        expect((yield* query(registry, input)).output?.structured).toEqual({ activated: [], available: [] })
+      expect((yield* query(registry, { names: ["memory_note"] })).result).toMatchObject({ type: "error" })
+    }),
+  )
   it.effect("lists and activates complete registered capabilities without executing them", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

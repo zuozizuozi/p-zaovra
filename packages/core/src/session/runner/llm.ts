@@ -47,6 +47,7 @@ import { Config } from "../../config"
 import { MemoryTidyTools } from "../../memory/tidy-tools"
 import { MemoryTidyExecution } from "../../memory/tidy-execution"
 import { MemoryTaskContext } from "../../memory/task-context"
+import { MemoryWritePolicy } from "../../memory/write-policy"
 import { SessionMemoryContext } from "../memory-context"
 import { ShellIdentity } from "../../shell-identity"
 import { Database } from "../../database/database"
@@ -169,6 +170,7 @@ const layer = Layer.effect(
     const tidyTools = yield* MemoryTidyTools.Service
     const tidyExecution = yield* MemoryTidyExecution.Service
     const taskMemory = yield* MemoryTaskContext.Service
+    const memoryWriting = yield* MemoryWritePolicy.Service
     const snapshots = yield* Snapshot.Service
     const fs = yield* FSUtil.Service
     const lsp = yield* LSP.Service
@@ -977,9 +979,11 @@ const layer = Layer.effect(
       const toolMaterialization =
         isLastStep || textOnlyRecovery || deliveryReport ? undefined : yield* tools.materialize(agent.info?.permissions)
       const tidyAllowed = yield* tidyTools.allowed(session.id)
+      const memoryNoteAllowed = yield* memoryWriting.allowed(session.id)
       const deliveryTools = ToolProfile.select(
         (toolMaterialization?.definitions ?? []).filter(
           (tool) =>
+            (tool.name !== "memory_note" || memoryNoteAllowed) &&
             (!deliveryReview || DeliveryContract.repairTools.has(tool.name)) &&
             (!tidyAllowed || (tidyAllowed.has(tool.name) && !toolMaterialization?.custom?.includes(tool.name))),
         ),
@@ -3025,6 +3029,7 @@ export const node = makeLocationNode({
     MemoryTidyTools.node,
     MemoryTidyExecution.node,
     MemoryTaskContext.node,
+    MemoryWritePolicy.node,
     Snapshot.node,
     FSUtil.node,
     LSP.node,

@@ -16,12 +16,17 @@ import { MemoryRecorder } from "../src/memory/recorder"
 import { MemoryTool } from "../src/tool/memory"
 import { ToolRegistry } from "../src/tool/registry"
 import { Config } from "../src/config"
+import { Catalog } from "../src/catalog"
+import { ModelV2 } from "../src/model"
+import { ProviderV2 } from "../src/provider"
+import { ModelMemoryProfile } from "../src/model-memory-profile"
 import { Location } from "../src/location"
 import { AbsolutePath } from "../src/schema"
 import { ProjectTable } from "../src/project/sql"
 import { SessionTable } from "../src/session/sql"
 import { SessionEvent } from "../src/session/event"
 import { SessionMessage } from "../src/session/message"
+import { SessionProjector } from "../src/session/projector"
 import { toolIdentity } from "./lib/tool"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
@@ -214,6 +219,17 @@ test("real Recorder and memory_note tool cannot bypass pending legacy recovery",
       const store = yield* MemoryStore.Service
       const events = yield* EventV2.Service
       const registry = yield* ToolRegistry.Service
+      const catalog = yield* Catalog.Service
+      const model = { id: ModelV2.ID.make("recovery-fixture"), providerID: ProviderV2.ID.make("recovery-fixture") }
+      yield* catalog.transform((draft) => {
+        draft.provider.update(model.providerID, (provider) => {
+          provider.integrationID = undefined
+        })
+        draft.model.update(model.providerID, model.id, (entry) => {
+          entry.enabled = true
+          entry.capabilities.tools = true
+        })
+      })
       const target = SessionSchema.ID.make("ses_recovery_blocked")
       const control = SessionSchema.ID.make("ses_recovery_control")
       yield* database.db
@@ -232,6 +248,7 @@ test("real Recorder and memory_note tool cannot bypass pending legacy recovery",
             directory: left.directory,
             title: "target",
             version: "test",
+            model,
           },
           {
             id: control,
@@ -245,6 +262,13 @@ test("real Recorder and memory_note tool cannot bypass pending legacy recovery",
         .run()
         .pipe(Effect.orDie)
       const captured = yield* registry.materialize()
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID: target,
+        assistantMessageID: toolIdentity.assistantMessageID,
+        agent: toolIdentity.agent,
+        timestamp: DateTime.makeUnsafe(0),
+        model,
+      })
       yield* events.publish(SessionEvent.Tool.Called, {
         sessionID: target,
         assistantMessageID: toolIdentity.assistantMessageID,
@@ -289,9 +313,23 @@ test("real Recorder and memory_note tool cannot bypass pending legacy recovery",
             MemoryRecorder.node,
             MemoryStore.node,
             MemoryTool.node,
+            SessionProjector.node,
+            Catalog.node,
             ToolRegistry.node,
           ]),
           [
+            [
+              ModelMemoryProfile.node,
+              Layer.succeed(
+                ModelMemoryProfile.Service,
+                ModelMemoryProfile.Service.of({
+                  memoryNote: (entry, variant) =>
+                    entry.providerID === "recovery-fixture" && entry.id === "recovery-fixture" && variant === undefined
+                      ? true
+                      : undefined,
+                }),
+              ),
+            ],
             [MemoryStore.node, MemoryStore.layerWith("linux")],
             [
               Location.node,

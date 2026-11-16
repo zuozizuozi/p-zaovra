@@ -4,6 +4,7 @@ import { makeLocationNode } from "./effect/app-node"
 import { Array, Context, Effect, Layer, Option, Order, pipe, Schema } from "effect"
 import { Catalog } from "@zaovra-ai/schema/catalog"
 import { ModelV2 } from "./model"
+import { ModelMemoryProfile } from "./model-memory-profile"
 import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
 import { Policy } from "./policy"
@@ -69,6 +70,7 @@ const layer = Layer.effect(
     const events = yield* EventV2.Service
     const policy = yield* Policy.Service
     const integrations = yield* Integration.Service
+    const profiles = yield* ModelMemoryProfile.Service
 
     const available = (provider: ProviderV2.Info, integration: Integration.Info | undefined) => {
       if (provider.disabled) return false
@@ -92,10 +94,16 @@ const layer = Layer.effect(
         body: { ...provider.request.body, ...model.request.body },
         variant: model.request.variant,
       }
-      return ModelV2.Info.make({
+      const projected = ModelV2.Info.make({
         ...model,
         api,
         request,
+      })
+      // Project after every plugin/config transform. Mutable draft capabilities
+      // are not evidence that a model passed a host evaluation.
+      return ModelV2.Info.make({
+        ...projected,
+        capabilities: { ...projected.capabilities, memoryNote: profiles.memoryNote(projected, request.variant) },
       })
     }
 
@@ -309,8 +317,13 @@ const layer = Layer.effect(
 const SMALL_MODEL_RE = /\b(nano|flash|lite|mini|haiku|small|fast)\b/
 
 export const locationLayer = layer.pipe(
+  Layer.provideMerge(ModelMemoryProfile.layer),
   Layer.provideMerge(Integration.locationLayer),
   Layer.provideMerge(Policy.locationLayer),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, Policy.node, Integration.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer,
+  deps: [EventV2.node, Policy.node, Integration.node, ModelMemoryProfile.node],
+})

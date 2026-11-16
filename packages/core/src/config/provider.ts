@@ -57,7 +57,13 @@ class Model extends Schema.Class<Model>("ConfigV2.Model")({
   family: ModelV2.Family.pipe(Schema.optional),
   name: Schema.String.pipe(Schema.optional),
   api: ModelApi.pipe(Schema.optional),
-  capabilities: ModelV2.Capabilities.pipe(Schema.optional),
+  memoryNote: Schema.Literals(["auto", "off"]).pipe(Schema.optional),
+  capabilities: Schema.Struct({
+    tools: ModelV2.Capabilities.fields.tools,
+    interleavedThinking: ModelV2.Capabilities.fields.interleavedThinking,
+    input: ModelV2.Capabilities.fields.input,
+    output: ModelV2.Capabilities.fields.output,
+  }).pipe(Schema.optional),
   request: Schema.Struct({
     ...Request.fields,
     variant: Schema.String.pipe(Schema.optional),

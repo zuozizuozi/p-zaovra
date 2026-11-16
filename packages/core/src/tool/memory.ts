@@ -6,7 +6,9 @@ import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { EventTable } from "../event/sql"
 import { SessionEvent } from "../session/event"
-import { SessionTable } from "../session/sql"
+import { SessionTable, SessionMessageTable } from "../session/sql"
+import { ModelV2 } from "../model"
+import { MemoryWritePolicy } from "../memory/write-policy"
 import { Config } from "../config"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { makeLocationNode } from "../effect/app-node"
@@ -30,6 +32,7 @@ const layer = Layer.effectDiscard(
     const tidy = yield* MemoryTidyStore.Service
     const location = yield* Location.Service
     const config = yield* Config.Service
+    const writing = yield* MemoryWritePolicy.Service
     if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
     const place = { project: location.project.id, directory: location.directory }
     const scope = yield* store.scope(place)
@@ -174,6 +177,35 @@ const layer = Layer.effectDiscard(
                       reason:
                         "Memory was not saved: the original durable tool call could not be verified. Return the suggestion to the main conversation; do not invent a source or retry automatically.",
                     }
+                  const author = yield* database.db
+                    .select()
+                    .from(SessionMessageTable)
+                    .where(
+                      and(
+                        eq(SessionMessageTable.id, context.assistantMessageID),
+                        eq(SessionMessageTable.session_id, context.sessionID),
+                        eq(SessionMessageTable.type, "assistant"),
+                      ),
+                    )
+                    .get()
+                    .pipe(Effect.orDie)
+                  // The active Assistant can contain an unsettled tool part. Its
+                  // host-projected model reference is the authority needed here.
+                  const message =
+                    author && Schema.decodeUnknownOption(Schema.Struct({ model: ModelV2.Ref }))(author.data)
+                  if (!message || message._tag === "None")
+                    return {
+                      kept: false,
+                      reason: "Memory was not saved: the durable Assistant model could not be verified.",
+                    }
+                  if (!(yield* writing.allowed(context.sessionID, message.value.model)))
+                    return {
+                      kept: false,
+                      reason:
+                        "Memory writing is not enabled for this task's evaluated model. Keep the suggestion in the conversation for a confirmed tidy task.",
+                    }
+                  // Admission is the final policy check. This atomic write may
+                  // finish after a later model/config change; no implicit retry.
                   const note = yield* store.write({
                     scope,
                     kind: input.kind,
@@ -295,5 +327,6 @@ export const node = makeLocationNode({
     MemoryTidyStore.node,
     Location.node,
     Config.node,
+    MemoryWritePolicy.node,
   ],
 })

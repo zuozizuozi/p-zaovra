@@ -60,6 +60,40 @@ function request(headers: Record<string, string>, variant?: string) {
 const decode = Schema.decodeUnknownSync(Config.Info)
 
 describe("ConfigProviderPlugin.Plugin", () => {
+  it.effect("memory policy overrides do not grant reliability or replace transport capabilities", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const provider = ProviderV2.ID.make("memory-fixture")
+      const id = ModelV2.ID.make("synthetic")
+      yield* catalog.transform((draft) =>
+        draft.model.update(provider, id, (model) => {
+          model.capabilities.tools = true
+          model.capabilities.input = ["text", "image"]
+          model.capabilities.output = ["text"]
+          model.capabilities.memoryNote = true
+        }),
+      )
+      yield* addPlugin(
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({
+                type: "document",
+                info: decode({
+                  providers: { [provider]: { models: { [id]: { memoryNote: "off" } } } },
+                }),
+              }),
+            ]),
+        }),
+      )
+      const model = required(yield* catalog.model.get(provider, id))
+      expect(model.memoryNote).toBe("off")
+      expect(model.capabilities.tools).toBe(true)
+      expect(model.capabilities.input).toEqual(["text", "image"])
+      expect(model.capabilities.memoryNote).toBeUndefined()
+      expect(() => decode({ providers: { [provider]: { models: { [id]: { memoryNote: true } } } } })).toThrow()
+    }),
+  )
   ;[
     {
       name: "provider allowlist",

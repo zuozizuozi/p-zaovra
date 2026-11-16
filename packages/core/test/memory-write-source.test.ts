@@ -11,6 +11,9 @@ import { Location } from "../src/location"
 import { MemoryStore } from "../src/memory/store"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { ModelV2 } from "../src/model"
+import { Catalog } from "../src/catalog"
+import { ModelMemoryProfile } from "../src/model-memory-profile"
+import { MemoryWritePolicy } from "../src/memory/write-policy"
 import { ProviderV2 } from "../src/provider"
 import { AbsolutePath } from "../src/schema"
 import { SessionV2 } from "../src/session"
@@ -34,6 +37,19 @@ const setup = Effect.gen(function* () {
   const events = yield* EventV2.Service
   const here = yield* Location.Service
   const registry = yield* ToolRegistry.Service
+  const catalog = yield* Catalog.Service
+  const writing = yield* MemoryWritePolicy.Service
+  yield* catalog.transform((draft) => {
+    draft.provider.update(model.providerID, (provider) => {
+      provider.integrationID = undefined
+    })
+    draft.model.update(model.providerID, model.id, (entry) => {
+      entry.enabled = true
+      entry.capabilities.tools = true
+      // Deliberately untrusted declaration: only the host fixture profile can allow it.
+      entry.capabilities.memoryNote = true
+    })
+  })
   const captured = yield* registry.materialize()
   const project = yield* store.scope({ project: here.project.id, directory: here.directory })
   const create = (parentID?: SessionV2.ID) =>
@@ -43,11 +59,12 @@ const setup = Effect.gen(function* () {
     input: Record<string, unknown>,
     name = "memory_note",
     callID: string = randomUUID(),
+    author: ModelV2.Ref = model,
   ) =>
     Effect.gen(function* () {
       const context = { sessionID, assistantMessageID: SessionMessage.ID.create(), agent: toolIdentity.agent }
       const timestamp = yield* DateTime.now
-      yield* events.publish(SessionEvent.Step.Started, { ...context, timestamp, model })
+      yield* events.publish(SessionEvent.Step.Started, { ...context, timestamp, model: author })
       yield* events.publish(SessionEvent.Tool.Input.Started, { ...context, timestamp, callID, name })
       const source = yield* events.publish(SessionEvent.Tool.Called, {
         ...context,
@@ -63,29 +80,120 @@ const setup = Effect.gen(function* () {
         invocation: { ...context, call: { type: "tool-call" as const, id: callID, name, input } },
       }
     })
-  return { sessions, store, events, captured, project, create, call }
+  return { sessions, store, events, captured, project, create, call, catalog, writing }
 })
 
 test("main memory_note resolves its durable source and remains unverified; user edits stay authoritative", () =>
+  withMemory(
+    (h) =>
+      Effect.gen(function* () {
+        const main = yield* h.create()
+        const input = { kind: "decision", text: "Keep the local fixture offline", basis: "user approved", seq: 999999 }
+        const called = yield* h.call(main.id, input)
+        expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: true })
+        const notes = yield* h.store.list(h.project)
+        expect(notes).toHaveLength(1)
+        expect(notes[0]).toMatchObject({
+          origin: "model",
+          status: "unverified",
+          sessionID: main.id,
+          seq: called.source.durable?.seq,
+        })
+        expect(notes[0].seq).toBeGreaterThan(0)
+        expect(notes[0].seq).not.toBe(999999)
+        yield* h.store.edit(notes[0].id, { text: "User correction stays authoritative" })
+        expect((yield* h.store.get(notes[0].id))?.text).toBe("User correction stays authoritative")
+      }),
+    true,
+  ))
+
+test("unknown profile refuses a catalog self-declaration without preventing search", () =>
   withMemory((h) =>
     Effect.gen(function* () {
-      const main = yield* h.create()
-      const input = { kind: "decision", text: "Keep the local fixture offline", basis: "user approved", seq: 999999 }
-      const called = yield* h.call(main.id, input)
-      expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: true })
-      const notes = yield* h.store.list(h.project)
-      expect(notes).toHaveLength(1)
-      expect(notes[0]).toMatchObject({
-        origin: "model",
-        status: "unverified",
-        sessionID: main.id,
-        seq: called.source.durable?.seq,
-      })
-      expect(notes[0].seq).toBeGreaterThan(0)
-      expect(notes[0].seq).not.toBe(999999)
-      yield* h.store.edit(notes[0].id, { text: "User correction stays authoritative" })
-      expect((yield* h.store.get(notes[0].id))?.text).toBe("User correction stays authoritative")
+      const session = yield* h.create()
+      expect((yield* h.catalog.model.get(model.providerID, model.id))?.capabilities.memoryNote).toBeUndefined()
+      expect(yield* h.writing.allowed(session.id)).toBe(false)
+      const call = yield* h.call(session.id, { kind: "decision", text: "Untrusted catalog claim" })
+      expect((yield* h.captured.settle(call.invocation)).output?.structured).toMatchObject({ kept: false })
+      expect(yield* h.store.list(h.project)).toEqual([])
+      expect(h.captured.definitions.some((item) => item.name === "memory_search")).toBe(true)
     }),
+  ))
+
+for (const change of ["disabled", "off", "tools", "provider", "model", "variant"] as const)
+  test(`captured memory leaf rechecks ${change} at admission`, () =>
+    withMemory(
+      (h, settings) =>
+        Effect.gen(function* () {
+          const session = yield* h.create()
+          const call = yield* h.call(session.id, { kind: "decision", text: "Only the evaluated author may write" })
+          expect(yield* h.writing.allowed(session.id)).toBe(true)
+          if (change === "disabled") settings.enabled = false
+          if (change === "off" || change === "tools")
+            yield* h.catalog.transform((draft) =>
+              draft.model.update(model.providerID, model.id, (entry) => {
+                if (change === "off") entry.memoryNote = "off"
+                if (change === "tools") entry.capabilities.tools = false
+              }),
+            )
+          if (change === "provider")
+            yield* h.catalog.transform((draft) =>
+              draft.provider.update(model.providerID, (entry) => {
+                entry.disabled = true
+              }),
+            )
+          if (change === "model")
+            yield* h.sessions.switchModel({
+              sessionID: session.id,
+              model: { ...model, id: ModelV2.ID.make("unknown") },
+            })
+          if (change === "variant")
+            yield* h.sessions.switchModel({
+              sessionID: session.id,
+              model: { ...model, variant: ModelV2.VariantID.make("other") },
+            })
+          expect((yield* h.captured.settle(call.invocation)).output?.structured).toMatchObject({ kept: false })
+          expect(yield* h.store.list(h.project)).toEqual([])
+        }),
+      true,
+    ))
+
+test("switching an unknown author's session to a reliable model cannot launder its old call", () =>
+  withMemory(
+    (h) =>
+      Effect.gen(function* () {
+        const session = yield* h.create()
+        const unknown = { ...model, id: ModelV2.ID.make("unknown") }
+        yield* h.sessions.switchModel({ sessionID: session.id, model: unknown })
+        const call = yield* h.call(
+          session.id,
+          { kind: "decision", text: "Original author must match" },
+          "memory_note",
+          randomUUID(),
+          unknown,
+        )
+        yield* h.sessions.switchModel({ sessionID: session.id, model })
+        expect(yield* h.writing.allowed(session.id)).toBe(true)
+        expect((yield* h.captured.settle(call.invocation)).output?.structured).toMatchObject({ kept: false })
+        expect(yield* h.store.list(h.project)).toEqual([])
+      }),
+    true,
+  ))
+
+test("another session's unknown model does not unregister the reliable session's memory tool", () =>
+  withMemory(
+    (h) =>
+      Effect.gen(function* () {
+        const reliable = yield* h.create()
+        const unknown = yield* h.create()
+        yield* h.sessions.switchModel({ sessionID: unknown.id, model: { ...model, id: ModelV2.ID.make("unknown") } })
+        expect(yield* h.writing.allowed(reliable.id)).toBe(true)
+        expect(yield* h.writing.allowed(unknown.id)).toBe(false)
+        const call = yield* h.call(reliable.id, { kind: "decision", text: "Isolated reliable session" })
+        expect((yield* h.captured.settle(call.invocation)).output?.structured).toMatchObject({ kept: true })
+        expect(yield* h.store.list(h.project)).toHaveLength(1)
+      }),
+    true,
   ))
 
 for (const mismatch of ["missing", "call", "assistant", "session", "tool", "input"] as const)
@@ -185,6 +293,7 @@ test("Recorder ignores child success and correlates identical call IDs by sessio
 
 async function withMemory(
   body: (h: Effect.Success<typeof setup>, settings: { enabled: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
+  evaluated = false,
 ) {
   await using tmp = await tmpdir()
   const settings = { enabled: true }
@@ -195,6 +304,8 @@ async function withMemory(
       Effect.provide(
         AppNodeBuilder.build(
           LayerNode.group([
+            Catalog.node,
+            MemoryWritePolicy.node,
             MemoryTool.node,
             MemoryRecorder.node,
             Database.node,
@@ -206,6 +317,18 @@ async function withMemory(
             ToolRegistry.node,
           ]),
           [
+            [
+              ModelMemoryProfile.node,
+              Layer.succeed(
+                ModelMemoryProfile.Service,
+                ModelMemoryProfile.Service.of({
+                  memoryNote: (entry, variant) =>
+                    evaluated && entry.providerID === model.providerID && entry.id === model.id && variant === undefined
+                      ? true
+                      : undefined,
+                }),
+              ),
+            ],
             [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
             [
               Global.node,

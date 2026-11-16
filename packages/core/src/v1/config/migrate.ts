@@ -255,6 +255,7 @@ function migrateModel(
           ? undefined
           : { id: info.id },
     capabilities,
+    memoryNote: info.memoryNote,
     request: (info.headers || request) && {
       headers: info.headers,
       body: request,

@@ -2332,6 +2332,7 @@ export type ProviderConfig = {
       reasoning?: boolean
       temperature?: boolean
       tool_call?: boolean
+      memoryNote?: "auto" | "off"
       interleaved?:
         | true
         | {
@@ -7239,6 +7240,7 @@ export type ModelApi =
 
 export type ModelCapabilities = {
   tools: boolean
+  memoryNote?: boolean
   interleavedThinking?: boolean
   input: Array<string>
   output: Array<string>
@@ -7251,6 +7253,7 @@ export type ModelV2Info = {
   name: string
   api: ModelApi
   capabilities: ModelCapabilities
+  memoryNote?: "auto" | "off"
   request: {
     headers: {
       [key: string]: string
