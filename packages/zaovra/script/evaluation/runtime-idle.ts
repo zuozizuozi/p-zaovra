@@ -10,12 +10,18 @@ import { SessionRuntime } from "../../src/effect/session-runtime"
 /** In-process evaluation host only. Keep this layer scoped alongside the actual Server.
  * Never substitute AppRuntime's legacy, InstanceState-wrapped BackgroundJob registry.
  */
-export const layer = SessionRuntime.share(
-  AppNodeBuilderV1.build(
-    LayerNode.group([MemoryAutomaticIdle.node, MemoryTidyTasks.node, BackgroundJob.node]),
-    SessionRuntime.replacements,
-  ),
-).pipe(Layer.provideMerge(SessionRuntime.layer))
+export function createLayer(runtime: SessionRuntime.Host = SessionRuntime) {
+  return runtime
+    .share(
+      AppNodeBuilderV1.build(
+        LayerNode.group([MemoryAutomaticIdle.node, MemoryTidyTasks.node, BackgroundJob.node]),
+        runtime.replacements,
+      ),
+    )
+    .pipe(Layer.provideMerge(runtime.layer))
+}
+
+export const layer = createLayer()
 
 export type Observation = {
   idle: boolean

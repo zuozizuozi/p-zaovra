@@ -218,6 +218,7 @@ const app = LayerNode.group([
 
 export function createRoutes(
   corsOptions?: CorsOptions & { readonly hostname?: string },
+  runtime: SessionRuntime.Host = SessionRuntime,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
   const v2Runtime = AppNodeBuilderV1.build(
@@ -231,7 +232,7 @@ export function createRoutes(
       MemoryPages.node,
       MemoryTidyTasks.node,
     ]),
-    SessionRuntime.replacements,
+    runtime.replacements,
   )
 
   return Layer.mergeAll(
@@ -249,7 +250,12 @@ export function createRoutes(
       corsVaryFix,
       fenceLayer,
       requestOriginLayer.pipe(Layer.provide(ServerAuth.Config.layer)),
-      AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, sharedLocationServiceMap]]),
+      AppNodeBuilderV1.build(
+        MoveSession.node,
+        (runtime === SessionRuntime ? [] : runtime.replacements).concat([
+          [LocationServiceMap.node, sharedLocationServiceMap],
+        ]),
+      ),
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
@@ -257,10 +263,10 @@ export function createRoutes(
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
-    Layer.provide(SessionRuntime.share(v2Runtime)),
+    Layer.provide(runtime.share(v2Runtime)),
 
-    Layer.provide(SessionRuntime.share(AppNodeBuilderV1.build(app, SessionRuntime.replacements))),
-    Layer.provide(SessionRuntime.layer),
+    Layer.provide(runtime.share(AppNodeBuilderV1.build(app, runtime.replacements))),
+    Layer.provide(runtime.layer),
     // Must stay last: layers provided later in this pipe build beneath earlier ones,
     // so Observability must come after every service graph. Otherwise eagerly forked
     // fibers (e.g. the ModelsDev background refresh) capture Effect's default stdout
