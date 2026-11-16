@@ -5,6 +5,7 @@ import { Option, Schema } from "effect"
 import { OpenAIChat } from "../../../packages/llm/src/protocols/openai-chat"
 import { OpenAIResponses } from "../../../packages/llm/src/protocols/openai-responses"
 import { observeUsage } from "./usage"
+import { SessionHostState } from "../../../packages/schema/src/session-host-state"
 
 const owned = new WeakMap<
   object,
@@ -31,11 +32,14 @@ export function startEvaluationRelay(options: {
   maxRequests: number
   maxRequestBytes: number
   maxOutput: number
+  /** B3 wire template evidence only; never authenticates host provenance. */
+  b3HostHints?: boolean
 }) {
   // Keep transport ownership fixed even if the caller later edits its option object.
   const input = { ...options }
   const endpoint = new URL(input.baseURL)
   if (
+    (input.b3HostHints !== undefined && typeof input.b3HostHints !== "boolean") ||
     !path.isAbsolute(input.journal) ||
     !input.apiKey ||
     !input.model ||
@@ -145,6 +149,16 @@ export function startEvaluationRelay(options: {
           output,
           usage: "unknown",
         })
+        if (input.b3HostHints)
+          log({
+            id,
+            phase: "b3-host-hints",
+            ordinal: sent + 1,
+            bodySHA256: createHash("sha256").update(bytes).digest("hex"),
+            evidence: "template-match",
+            origin: "unverified",
+            matches: b3Hints(body, input.protocol),
+          })
         sent++
         const controller = new AbortController()
         active.add(controller)
@@ -275,4 +289,166 @@ function localText(value: unknown): boolean {
   const object = value as Record<string, unknown>
   if (["input_image", "image_url", "item_reference"].includes(String(object.type))) return false
   return Object.values(object).every(localText)
+}
+
+// Fixed B3 vocabulary, deliberately independent of ambient experiment environment.
+// Drift produces an empty match, never a guessed variant or user-text dump.
+const b3Facts = [
+  {
+    kind: "execution",
+    style: "original",
+    language: "en",
+    text: "executableRemainingMs ends provider/tool admission before the host cleanup reserve. remainingMs includes that reserve; finish necessary checks and report actual job states before executionDeadline. Never restart running or unknown jobs.",
+  },
+  {
+    kind: "execution",
+    style: "short",
+    language: "en",
+    text: "executableRemainingMs stops provider/tool admission before cleanup reserve; remainingMs includes reserve. Finish required checks and report actual job states before executionDeadline. Never restart running/unknown jobs.",
+  },
+  {
+    kind: "execution",
+    style: "original",
+    language: "zh",
+    text: "executableRemainingMs在宿主清理预留时间之前结束provider/工具准入；remainingMs包含该预留时间。请在executionDeadline前完成必要检查并报告实际任务状态，绝不重新启动运行中或状态未知的任务。",
+  },
+  {
+    kind: "execution",
+    style: "short",
+    language: "zh",
+    text: "executableRemainingMs截止即停止provider/工具准入，早于清理预留段；remainingMs含预留段。executionDeadline前完成必需检查并如实报任务状态；不重启运行中/未知任务。",
+  },
+  {
+    kind: "advisory",
+    style: "original",
+    language: "en",
+    text: "The advisory deadline is a planning reminder, not a stop condition. remainingMs, when present, is the enforced wall-clock budget.",
+  },
+  {
+    kind: "advisory",
+    style: "short",
+    language: "en",
+    text: "Advisory deadline: planning only, not a stop. remainingMs, if present, is the enforced wall-clock budget.",
+  },
+  {
+    kind: "advisory",
+    style: "original",
+    language: "zh",
+    text: "建议截止时间仅用于规划提醒，不是停止条件。若有remainingMs，它表示强制执行的墙钟预算。",
+  },
+  {
+    kind: "advisory",
+    style: "short",
+    language: "zh",
+    text: "建议截止仅供规划，不触发停止；remainingMs（若有）是强制墙钟预算。",
+  },
+  {
+    kind: "gap",
+    style: "original",
+    language: "en",
+    text: "Preserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation.",
+  },
+  {
+    kind: "gap",
+    style: "short",
+    language: "en",
+    text: "Keep the runnable artifact; fix the smallest acceptance gap first. Omit no requirements or necessary validation.",
+  },
+  {
+    kind: "gap",
+    style: "original",
+    language: "zh",
+    text: "保留当前可运行产物，优先处理最小验收缺口；不得省略要求或必要验证。",
+  },
+  { kind: "gap", style: "short", language: "zh", text: "保留可运行产物，先补最小验收缺口；不省要求或必要验证。" },
+] as const
+
+function b3Hints(body: Record<string, unknown>, protocol: "openai-chat" | "openai-responses") {
+  const messages = protocol === "openai-chat" ? body.messages : body.input
+  if (!Array.isArray(messages)) return []
+  return messages.flatMap((message: unknown, messageIndex) => {
+    if (
+      !message ||
+      typeof message !== "object" ||
+      !("role" in message) ||
+      message.role !== "user" ||
+      !("content" in message)
+    )
+      return []
+    if (protocol === "openai-responses" && (!("type" in message) || message.type !== "message")) return []
+    const content =
+      typeof message.content === "string" ? [message.content] : Array.isArray(message.content) ? message.content : []
+    return content.flatMap((part: unknown, partIndex) => {
+      const text =
+        typeof part === "string"
+          ? part
+          : part &&
+              typeof part === "object" &&
+              "type" in part &&
+              part.type === (protocol === "openai-chat" ? "text" : "input_text") &&
+              "text" in part &&
+              typeof part.text === "string"
+            ? part.text
+            : undefined
+      if (text === undefined) return []
+      // Both actual lowerers send chronological updates as user text. Even exact
+      // wrappers can be user-forged: these records never authenticate a host.
+      const matches: Array<{
+        kind: string
+        style?: string
+        language?: string
+        scale?: string
+        offset: number
+        bytes: number
+        sha256: string
+        containerSHA256?: string
+        containerBytes?: number
+      }> = []
+      const checkpoint =
+        /^(Wall-clock delivery checkpoint: ([0-9]+(?:\.[0-9]+)?)ms remain\. Save a version that meets basic requested acceptance before improving it\.( Choose training or build scale from the remaining time, preserve necessary validation, and do not label a partial artifact complete\.)?)(?=\n<system-update>\n|$)/.exec(
+          text,
+        )
+      if (checkpoint && Number.isFinite(Number(checkpoint[2])) && Number(checkpoint[2]) > 0)
+        matches.push({
+          kind: "budget-checkpoint",
+          scale: checkpoint[3] ? "on" : "off",
+          offset: 0,
+          bytes: Buffer.byteLength(checkpoint[1]),
+          sha256: createHash("sha256").update(checkpoint[1]).digest("hex"),
+        })
+      for (const wrapper of text.matchAll(
+        /(?:^|\n)(<system-update>\n(Current task facts \(host observations, not new requirements\): [^\n]+)\n([^<]*?)\n<\/system-update>)(?=\n<system-update>\n|$)/g,
+      )) {
+        const json = wrapper[2]
+          .slice("Current task facts (host observations, not new requirements): ".length)
+          .replaceAll("&lt;", "<")
+          .replaceAll("&gt;", ">")
+          .replaceAll("&amp;", "&")
+        if (
+          Option.isNone(
+            Schema.decodeUnknownOption(Schema.UnknownFromJsonString.pipe(Schema.decodeTo(SessionHostState.Facts)), {
+              onExcessProperty: "error",
+            })(json),
+          )
+        )
+          continue
+        const hints = wrapper[3].split("\n").map((line) => b3Facts.find((hint) => hint.text === line))
+        if (!hints.length || hints.some((hint) => hint === undefined)) continue
+        for (const hint of hints) {
+          if (!hint) continue
+          matches.push({
+            kind: hint.kind,
+            style: hint.style,
+            language: hint.language,
+            offset: wrapper.index + wrapper[0].indexOf(wrapper[1]),
+            bytes: Buffer.byteLength(hint.text),
+            sha256: createHash("sha256").update(hint.text).digest("hex"),
+            containerSHA256: createHash("sha256").update(wrapper[1]).digest("hex"),
+            containerBytes: Buffer.byteLength(wrapper[1]),
+          })
+        }
+      }
+      return matches.map((match) => ({ ...match, role: "user", messageIndex, partIndex }))
+    })
+  })
 }
