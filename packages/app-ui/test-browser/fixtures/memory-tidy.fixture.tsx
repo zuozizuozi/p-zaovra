@@ -257,6 +257,27 @@ test("automatic consent has a separate confirmation, idempotent retry and an exp
   expect(localWrites).toBe(0)
 })
 
+test("lost automatic confirmation can be disabled without retrying its grant", async () => {
+  await mount()
+  await choose()
+  await until(() => !button("Review automatic project tidy").disabled)
+  button("Review automatic project tidy").click()
+  failure = "automatic"
+  button("Confirm and enable automatic tidy").click()
+  await until(() => button("Retry this confirmation")?.disabled === false)
+  expect(calls).toHaveLength(1)
+  const confirmed = calls[0].body
+  expect(button("Disable automatic tidy and stop its task").disabled).toBe(false)
+  button("Disable automatic tidy and stop its task").click()
+  await until(() => button("Review automatic project tidy")?.disabled === false)
+  expect(calls.map((call) => call.path)).toEqual(["/api/memory/automatic", "/api/memory/automatic/disable"])
+  expect(calls[1].body).toEqual({ expected: confirmed.requestID })
+  expect(document.querySelector('[data-slot="memory-tidy-confirm"]')).toBeNull()
+  expect(automatic).toMatchObject({ generation: confirmed.requestID, enabled: false })
+  expect(tasks).toEqual([])
+  expect(localWrites).toBe(0)
+})
+
 test("chosen model and explicit confirmation use the budgeted SDK without changing the current chat", async () => {
   await mount()
   expect(action().disabled).toBe(true)

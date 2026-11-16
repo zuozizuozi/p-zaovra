@@ -22,6 +22,7 @@ test("exposes every standard HTTP API group", () => {
     "commands",
     "skills",
     "memory",
+    "server.memoryAutomatic",
     "events",
     "ptys",
     "questions",
@@ -39,6 +40,11 @@ test("exposes every standard HTTP API group", () => {
     "attemptCancel",
   ])
   expect(Object.keys(client.files)).toEqual(["list", "find"])
+  expect(Object.keys(client["server.memoryAutomatic"])).toEqual([
+    "getAutomatic",
+    "confirmAutomatic",
+    "disableAutomatic",
+  ])
   expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "remove"])
 })
 

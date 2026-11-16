@@ -106,9 +106,13 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     const preference = automatic()
     if (state.busy || !preference) return
     setState({ busy: true, error: false })
-    await client
-      .disableAutomatic({ location, expected: preference.generation }, { throwOnError: true })
-      .catch(() => setState("error", true))
+    await client.disableAutomatic({ location, expected: preference.generation }, { throwOnError: true }).then(
+      () => {
+        if (state.automatic && state.request?.requestID === preference.generation)
+          setState({ request: undefined, sent: false })
+      },
+      () => setState("error", true),
+    )
     await Promise.resolve(automaticActions.refetch()).catch(() => setState("error", true))
     await Promise.resolve(actions.refetch()).catch(() => setState("error", true))
     setState("busy", false)
@@ -263,7 +267,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
             {automatic()?.model.id} · {automatic()?.tokens} / {automatic()?.dailyTokens} tokens
           </p>
           <p class="text-xs">{language.t("settings.memory.automatic.interrupted")}</p>
-          <ButtonV2 variant="neutral" disabled={state.busy || !!state.request} onClick={() => void disableAutomatic()}>
+          <ButtonV2 variant="neutral" disabled={state.busy} onClick={() => void disableAutomatic()}>
             {language.t("settings.memory.automatic.disable")}
           </ButtonV2>
         </Show>
