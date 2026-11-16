@@ -46,6 +46,7 @@ jobs:
         env:
           ZAOVRA_TEST_REPORT_DIR: ${{ runner.temp }}/zaovra-test-reports
           ZAOVRA_SERVER_TEST_DIR: ${{ runner.temp }}/zaovra-server-routes
+          ZAOVRA_766_TEST_ROOT: ${{ runner.temp }}/zaovra-customization766-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +60,8 @@ jobs:
           # Desktop UI state, composer and timeline logic. These suites guard the main conversation path.
           (cd packages/session-ui && bun run test)
           (cd packages/app-ui && bun run test:unit)
+          # A supplied, fresh profile enables the real HTTP/MCP restart fixture.
+          test ! -e "$ZAOVRA_766_TEST_ROOT"
           (cd packages/app-ui && bun run test:browser)
           # Recorded real sessions replayed through the desktop sync layer (specs/v2/desktop-sync.md).
           (cd packages/app-ui && bun run test:replay)
@@ -68,6 +71,18 @@ jobs:
         with:
           name: zaovra-test-reports
           path: ${{ runner.temp }}/zaovra-test-reports
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Preserve customization HTTP and MCP evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: customization766-evidence
+          path: |
+            ${{ runner.temp }}/zaovra-customization766-${{ github.run_id }}-${{ github.run_attempt }}/runtime-*/stdout.log
+            ${{ runner.temp }}/zaovra-customization766-${{ github.run_id }}-${{ github.run_attempt }}/runtime-*/stderr.log
+            ${{ runner.temp }}/zaovra-customization766-${{ github.run_id }}-${{ github.run_attempt }}/runtime-*/stopped.json
+            ${{ runner.temp }}/zaovra-customization766-${{ github.run_id }}-${{ github.run_attempt }}/mcp.ndjson
           if-no-files-found: warn
           retention-days: 7
 

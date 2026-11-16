@@ -56,6 +56,7 @@ integration(
       child.exited,
     ])
     expect(code, out + err).toBe(0)
+    console.log(out + err)
   },
   180000,
 )

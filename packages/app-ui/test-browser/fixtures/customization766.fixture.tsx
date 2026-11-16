@@ -98,10 +98,22 @@ async function start(index: number | string) {
   )
   const out = new Response(child.stdout).text()
   const err = new Response(child.stderr).text()
+  let url = ""
   try {
     await until(async () => {
       if (child.exitCode !== null) throw new Error("HTTP fixture exited: " + child.exitCode + "\n" + (await err))
-      return Bun.file(path.join(runtime, "listening.json")).exists()
+      const file = Bun.file(path.join(runtime, "listening.json"))
+      if (!(await file.exists())) return false
+      // Bun.write can create the file before its JSON is complete.
+      try {
+        const listening = await file.json()
+        if (typeof listening.url !== "string") throw new Error("HTTP fixture listener URL missing")
+        url = listening.url
+        return true
+      } catch (error) {
+        if (error instanceof SyntaxError) return false
+        throw error
+      }
     }, "HTTP fixture listener")
   } catch (error) {
     child.kill()
@@ -110,26 +122,32 @@ async function start(index: number | string) {
     await fs.writeFile(path.join(runtime, "stderr.log"), await err)
     throw error
   }
-  const { url } = (await Bun.file(path.join(runtime, "listening.json")).json()) as { url: string }
   const client = createZaovraClient({ baseUrl: url, fetch: request, throwOnError: true })
   let closed = false
   const stop = async () => {
     if (closed) return
     closed = true
-    mounted?.()
-    mounted = undefined
-    document.body.replaceChildren()
-    await request(new URL("/__766/stop", url), { method: "POST" })
-    const exit = await Promise.race([
-      child.exited,
-      Bun.sleep(15000).then(() => {
-        throw new Error("Backend did not exit")
-      }),
-    ])
-    await fs.writeFile(path.join(runtime, "stdout.log"), await out)
-    await fs.writeFile(path.join(runtime, "stderr.log"), await err)
-    expect(exit).toBe(0)
-    expect(await Bun.file(path.join(runtime, "stopped.json")).exists()).toBe(true)
+    try {
+      mounted?.()
+      mounted = undefined
+      document.body.replaceChildren()
+      const exit = await Promise.race([
+        request(new URL("/__766/stop", url), { method: "POST" }).then(() => child.exited),
+        Bun.sleep(15000).then(() => {
+          throw new Error("Backend did not exit")
+        }),
+      ])
+      expect(exit).toBe(0)
+      expect(await Bun.file(path.join(runtime, "stopped.json")).exists()).toBe(true)
+    } finally {
+      // Stop only this fixture's child; forced cleanup must not turn a failure green.
+      if (child.exitCode === null) child.kill("SIGKILL")
+      await child.exited
+      await Promise.all([
+        out.then((text) => fs.writeFile(path.join(runtime, "stdout.log"), text)),
+        err.then((text) => fs.writeFile(path.join(runtime, "stderr.log"), text)),
+      ])
+    }
   }
   return { client, stop }
 }
