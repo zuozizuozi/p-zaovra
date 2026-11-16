@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test"
+import { ErrorBoundary } from "solid-js"
 import { createStore } from "solid-js/store"
 import { render } from "solid-js/web"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
@@ -21,6 +22,8 @@ mock.module("../../src/components/settings-v2/memory-pages", () => ({
 const { SettingsMemoryV2 } = await import("../../src/components/settings-v2/memory")
 let dispose: (() => void) | undefined
 let move: (value: { server?: string; directory?: string }) => void
+let failedRead: "project" | "user" | undefined
+const renderErrors: unknown[] = []
 let response: "ok" | "null" | "failure" = "ok"
 let held: ReturnType<typeof Promise.withResolvers<void>> | undefined
 const calls: {
@@ -95,7 +98,11 @@ async function mount() {
                   notes: [],
                 },
               })
-            if (url.pathname === "/api/memory") return Response.json({ data: [note] })
+            if (url.pathname === "/api/memory") {
+              if (url.searchParams.get("layer") === failedRead)
+                return Response.json({ message: "Read unavailable" }, { status: 503 })
+              return Response.json({ data: [note] })
+            }
             throw new Error("Unexpected read: " + url.pathname)
           }
           const body = request.method === "DELETE" ? {} : await request.json()
@@ -122,11 +129,19 @@ async function mount() {
   dispose = render(
     () => (
       <I18nProvider value={language}>
-        <SettingsMemoryV2 directory={state.directory} />
+        <ErrorBoundary
+          fallback={(error) => {
+            renderErrors.push(error)
+            return <p data-slot="unexpected-boundary">Unexpected note read error</p>
+          }}
+        >
+          <SettingsMemoryV2 directory={state.directory} />
+        </ErrorBoundary>
       </I18nProvider>
     ),
     node,
   )
+  if (failedRead) return
   await until(
     () =>
       !!button("common.edit") &&
@@ -142,6 +157,8 @@ afterEach(() => {
   calls.length = 0
   reads.length = 0
   response = "ok"
+  failedRead = undefined
+  renderErrors.length = 0
 })
 
 for (const change of ["directory", "server"] as const) {
@@ -224,4 +241,40 @@ test("user clear remains user scoped and rejects duplicate pending confirmation"
   held.resolve()
   await until(() => !busy())
   expect(section("user").textContent).not.toContain(dict["settings.memory.clear.confirm"])
+})
+
+for (const layer of ["project", "user"] as const) {
+  test(`${layer} note read failure stays local and can reload without a write`, async () => {
+    failedRead = layer
+    await mount()
+    await until(() => renderErrors.length > 0 || !!section(layer)?.querySelector('[role="alert"]'))
+    expect(renderErrors).toEqual([])
+    expect(section(layer).textContent).not.toContain(dict["settings.memory.empty"])
+    expect(section(layer).querySelector("fieldset")?.disabled).toBe(true)
+    expect(calls).toHaveLength(0)
+    const refresh = section(layer).querySelector<HTMLButtonElement>('[data-action="reload-memory-notes"]')!
+    expect(refresh).not.toBeNull()
+    failedRead = undefined
+    refresh.click()
+    await until(() => !!button("common.edit", layer) && !section(layer).querySelector("fieldset")?.disabled)
+    expect(section(layer).querySelector('[role="alert"]')).toBeNull()
+    expect(calls).toHaveLength(0)
+  })
+}
+
+test("accepted note write followed by a failed refresh reports a read error without repeating the write", async () => {
+  await mount()
+  fill("Accepted draft")
+  failedRead = "project"
+  button("settings.memory.add").click()
+  await until(() => !!section().querySelector('[data-action="reload-memory-notes"]'))
+  expect(renderErrors).toEqual([])
+  expect(calls).toHaveLength(1)
+  expect(input().value).toBe("")
+  expect(section().textContent).toContain(dict["settings.memory.read.failed"])
+  expect(section().textContent).not.toContain(dict["settings.memory.note.failed"])
+  failedRead = undefined
+  section().querySelector<HTMLButtonElement>('[data-action="reload-memory-notes"]')!.click()
+  await until(() => !section().querySelector('[role="alert"]'))
+  expect(calls).toHaveLength(1)
 })

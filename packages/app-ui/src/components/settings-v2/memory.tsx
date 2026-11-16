@@ -173,7 +173,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
         setState("confirming", undefined)
         setState("pagesRevision", (value) => value + 1)
       }
-      await reload(layer)
+      await Promise.resolve(reload(layer)).catch(() => undefined)
     } catch {
       if (current()) setState("noteError", layer)
     } finally {
@@ -185,15 +185,15 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
   )
   const pagesTarget = createMemo(() => ({ directory: directory(), server: serverSdk().scope }))
 
-  const section = (layer: Layer, notes: () => Awaited<ReturnType<typeof read>> | undefined) => (
+  const section = (layer: Layer, notes: typeof project) => (
     <section data-slot="settings-memory-section" data-layer={layer} class="flex flex-col gap-3">
-      <fieldset disabled={state.noteBusy || (layer === "project" ? project.loading : user.loading)} class="contents">
+      <fieldset disabled={state.noteBusy || notes.loading || !!notes.error} class="contents">
         <div class="flex items-center justify-between gap-4">
           <div class="flex flex-col gap-1">
             <h3 class="text-sm font-medium">{language.t(`settings.memory.${layer}.title`)}</h3>
             <p class="text-xs text-v2-text-text-muted">{language.t(`settings.memory.${layer}.description`)}</p>
           </div>
-          <Show when={(notes()?.length ?? 0) > 0}>
+          <Show when={!notes.error && (notes()?.length ?? 0) > 0}>
             <Show
               when={confirmed(layer)}
               fallback={
@@ -219,10 +219,14 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
         </div>
         <SettingsListV2>
           <Show
-            when={(notes()?.length ?? 0) > 0}
-            fallback={<p class="text-xs text-v2-text-text-muted">{language.t("settings.memory.empty")}</p>}
+            when={!notes.error && (notes()?.length ?? 0) > 0}
+            fallback={
+              <Show when={!notes.error && !notes.loading}>
+                <p class="text-xs text-v2-text-text-muted">{language.t("settings.memory.empty")}</p>
+              </Show>
+            }
           >
-            <For each={notes()}>
+            <For each={notes.error ? [] : notes()}>
               {(note) => (
                 <div data-slot="settings-memory-note" class="settings-v2-servers-row">
                   <Show
@@ -313,6 +317,17 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           </ButtonV2>
         </div>
       </fieldset>
+      <Show when={notes.error}>
+        <p role="alert">{language.t("settings.memory.read.failed")}</p>
+        <ButtonV2
+          variant="neutral"
+          data-action="reload-memory-notes"
+          disabled={notes.loading}
+          onClick={() => void Promise.resolve(reload(layer)).catch(() => undefined)}
+        >
+          {language.t("settings.memory.reload")}
+        </ButtonV2>
+      </Show>
       <Show when={state.noteError === layer}>
         <p role="alert">{language.t("settings.memory.note.failed")}</p>
       </Show>
