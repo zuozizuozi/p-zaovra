@@ -241,36 +241,46 @@ test("another session's unknown model does not unregister the reliable session's
 
 for (const mismatch of ["missing", "call", "assistant", "session", "tool", "input"] as const)
   test(`memory_note rejects ${mismatch} provenance without writing`, () =>
-    withMemory((h) =>
-      Effect.gen(function* () {
-        const main = yield* h.create()
-        const other = yield* h.create()
-        const input = { kind: "decision", text: "A durable call must own this note" }
-        if (mismatch === "missing") {
-          const result = yield* h.captured.settle({
-            sessionID: main.id,
-            ...toolIdentity,
-            call: { type: "tool-call", id: randomUUID(), name: "memory_note", input },
+    withMemory(
+      (h) =>
+        Effect.gen(function* () {
+          const main = yield* h.create()
+          const other = yield* h.create()
+          expect(yield* h.writing.allowed(main.id)).toBe(true)
+          expect(yield* h.writing.allowed(other.id)).toBe(true)
+          const input = { kind: "decision", text: "A durable call must own this note" }
+          if (mismatch === "missing") {
+            const result = yield* h.captured.settle({
+              sessionID: main.id,
+              ...toolIdentity,
+              call: { type: "tool-call", id: randomUUID(), name: "memory_note", input },
+            })
+            expect(result.output?.structured).toMatchObject({
+              kept: false,
+              reason: expect.stringContaining("original durable tool call"),
+            })
+            expect(yield* h.store.list(h.project)).toEqual([])
+            return
+          }
+          const called = yield* h.call(main.id, input, mismatch === "tool" ? "memory_search" : "memory_note")
+          const invocation = {
+            ...called.invocation,
+            ...(mismatch === "session" ? { sessionID: other.id } : {}),
+            ...(mismatch === "assistant" ? { assistantMessageID: SessionMessage.ID.create() } : {}),
+            call: {
+              ...called.invocation.call,
+              name: "memory_note",
+              ...(mismatch === "call" ? { id: randomUUID() } : {}),
+              ...(mismatch === "input" ? { input: { ...input, text: "different note" } } : {}),
+            },
+          }
+          expect((yield* h.captured.settle(invocation)).output?.structured).toMatchObject({
+            kept: false,
+            reason: expect.stringContaining("original durable tool call"),
           })
-          expect(result.output?.structured).toMatchObject({ kept: false })
           expect(yield* h.store.list(h.project)).toEqual([])
-          return
-        }
-        const called = yield* h.call(main.id, input, mismatch === "tool" ? "memory_search" : "memory_note")
-        const invocation = {
-          ...called.invocation,
-          ...(mismatch === "session" ? { sessionID: other.id } : {}),
-          ...(mismatch === "assistant" ? { assistantMessageID: SessionMessage.ID.create() } : {}),
-          call: {
-            ...called.invocation.call,
-            name: "memory_note",
-            ...(mismatch === "call" ? { id: randomUUID() } : {}),
-            ...(mismatch === "input" ? { input: { ...input, text: "different note" } } : {}),
-          },
-        }
-        expect((yield* h.captured.settle(invocation)).output?.structured).toMatchObject({ kept: false })
-        expect(yield* h.store.list(h.project)).toEqual([])
-      }),
+        }),
+      true,
     ))
 
 test("a real child session cannot save notes but can search and return evidence to its parent", () =>
