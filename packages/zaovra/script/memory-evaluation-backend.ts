@@ -26,8 +26,14 @@ export async function startEvaluationBackend(replacements?: LayerNode.Replacemen
   const { Server } = await import("../src/server/server")
   const { createLayer, observeRuntime } = await import("./evaluation/runtime-idle")
   const { SessionRuntime } = await import("../src/effect/session-runtime")
-  const host = replacements === undefined ? SessionRuntime : SessionRuntime.create(replacements)
+  const { createMemoryHost } = await import("./evaluation/memory-host")
+  const experiment = process.env.ZAOVRA_EVAL_MEMORY_HOST
+    ? createMemoryHost(process.env.ZAOVRA_EVAL_MEMORY_HOST, generation)
+    : undefined
+  if (experiment && replacements !== undefined) throw new Error("conflicting-evaluation-host-inputs")
+  const host = experiment?.host ?? (replacements === undefined ? SessionRuntime : SessionRuntime.create(replacements))
   const runtime = ManagedRuntime.make(createLayer(host), { memoMap })
+  if (experiment) await runtime.runPromise(experiment.initialize)
   const listener = await Server.listen({ hostname: "127.0.0.1", port: 0, runtime: host })
   if (!(await runtime.runPromise(observeRuntime)).idle) throw new Error("evaluation-runtime-not-idle-at-start")
   if (fixtureFile) {
@@ -76,6 +82,7 @@ export async function startEvaluationBackend(replacements?: LayerNode.Replacemen
   } catch {
     await monitor.stop(true)
     await listener.stop(true)
+    experiment?.revoke()
     await runtime.dispose()
     throw new Error("evaluation-host-ready-failed")
   }

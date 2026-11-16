@@ -6,6 +6,7 @@ import { Zaovra } from "@zaovra-ai/client"
 import { openJob } from "./job"
 import { observe, validCapture } from "./observe"
 import type { CaptureBounds } from "./observe"
+import type { createMemoryAuthority } from "./memory-authority"
 import { collectHistory } from "./history"
 
 /** One new Session in an isolated, persistent profile; no retry admits another prompt.
@@ -20,6 +21,7 @@ export async function runEvaluationSession(input: {
   prompt: string
   seconds?: number
   providerEnvironment?: Record<string, string>
+  memoryAuthority?: ReturnType<typeof createMemoryAuthority>
   poison?: { chain: string; sourceSessionID: string }
   /** Opt-in sensitive own-turn projection; delivered only after final consistency and empty Job. */
   capture?: CaptureBounds
@@ -34,7 +36,11 @@ export async function runEvaluationSession(input: {
     !input.prompt.trim()
   )
     throw new Error("invalid-evaluation-session")
-  if (Object.keys(input.providerEnvironment ?? {}).some((name) => !/^ZAOVRA_EVAL_[A-Z0-9_]+$/.test(name)))
+  if (
+    Object.keys(input.providerEnvironment ?? {}).some(
+      (name) => !/^ZAOVRA_EVAL_[A-Z0-9_]+$/.test(name) || name.startsWith("ZAOVRA_EVAL_MEMORY_"),
+    )
+  )
     throw new Error("invalid-evaluation-provider-environment")
   const paths = [input.directory, input.profile, input.stage].map((value) => path.resolve(value).toLowerCase())
   if (
@@ -63,6 +69,7 @@ export async function runEvaluationSession(input: {
   }
   await mkdir(input.stage)
   const generation = randomUUID()
+  await using memoryStage = input.memoryAuthority?.openStage(generation, input.directory)
   const readyFile = path.join(input.stage, "ready.json")
   const bunConfig = path.join(input.stage, "bunfig.toml")
   await Bun.write(bunConfig, "preload = []\n")
@@ -104,6 +111,7 @@ export async function runEvaluationSession(input: {
     environment[key] = directory
   }
   Object.assign(environment, input.providerEnvironment, {
+    ...(memoryStage ? { ZAOVRA_EVAL_MEMORY_HOST: memoryStage.environment } : {}),
     ZAOVRA_DB: path.join(input.profile, "sessions.sqlite"),
     ZAOVRA_DISABLE_MODELS_FETCH: "true",
     ZAOVRA_EXPERIMENTAL_EVENT_SYSTEM: "true",

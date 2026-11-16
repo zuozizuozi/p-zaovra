@@ -5,6 +5,18 @@ import { Option, Schema } from "effect"
 import { OpenAIChat } from "../../../packages/llm/src/protocols/openai-chat"
 import { OpenAIResponses } from "../../../packages/llm/src/protocols/openai-responses"
 
+const owned = new WeakMap<
+  object,
+  () => { baseURL: string; apiKey: string; model: string; protocol: string; endpointHash: string }
+>()
+
+/** Only a live handle returned here can establish a C host's transport ownership. */
+export function evaluationRelayBinding(relay: object) {
+  const read = owned.get(relay)
+  if (!read) throw new Error("evaluation-relay-not-owned")
+  return read()
+}
+
 /** Evaluation-only physical send guard, NOT a token counter or a settlement engine.
  * One host owns it across all Sessions in a chain. Unknown token reservations remain in the outer ledger.
  * The product receives only the ephemeral local key; the real credential never enters its tools' environment.
@@ -196,7 +208,7 @@ export function startEvaluationRelay(input: {
     }
   })()
   let stopping: Promise<void> | undefined
-  return {
+  const handle = {
     baseURL: `http://127.0.0.1:${server.port}/v1`,
     apiKey: key,
     stop() {
@@ -211,6 +223,17 @@ export function startEvaluationRelay(input: {
       })())
     },
   }
+  owned.set(handle, () => {
+    if (closed) throw new Error("evaluation-relay-closed")
+    return {
+      baseURL: handle.baseURL,
+      apiKey: key,
+      model: input.model,
+      protocol: input.protocol,
+      endpointHash: manifest.endpointHash,
+    }
+  })
+  return handle
 }
 
 function localText(value: unknown): boolean {

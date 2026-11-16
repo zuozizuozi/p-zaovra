@@ -6,6 +6,7 @@ import { chains, prepare, change } from "./cases"
 import { gradeBilling } from "./billing"
 import { runEvaluationSession } from "./session"
 import { validCapture } from "./observe"
+import { createMemoryAuthority } from "./memory-authority"
 import type { CaptureBounds } from "./observe"
 
 type Input = {
@@ -13,7 +14,8 @@ type Input = {
   candidate: string
   family: "gpt" | "deepseek"
   modelID: string
-  treatment: "A" | "B"
+  treatment: "A" | "B" | "C"
+  relay?: object
   baseURL: string
   reserveTokens: number
   relayKey: string
@@ -51,7 +53,7 @@ export async function runEvaluationChain(
     !path.isAbsolute(input.root) ||
     !/^[a-f0-9]{40}$/.test(input.candidate) ||
     !["gpt", "deepseek"].includes(input.family) ||
-    !["A", "B"].includes(input.treatment) ||
+    !["A", "B", "C"].includes(input.treatment) ||
     !chains.some((chain) => chain.id === input.chainID) ||
     typeof input.grade !== "function" ||
     !validCapture(input.capture) ||
@@ -66,6 +68,17 @@ export async function runEvaluationChain(
     !(endpoint.protocol === "http:" && endpoint.hostname === "127.0.0.1")
   )
     throw new Error("invalid-billing-pilot")
+  const authority =
+    input.treatment === "C"
+      ? createMemoryAuthority({
+          relay: input.relay ?? {},
+          baseURL: input.baseURL,
+          relayKey: input.relayKey,
+          modelID: input.modelID,
+          providerID: `evaluation-${input.family}`,
+          protocol: input.family === "gpt" ? "openai-responses" : "openai-chat",
+        })
+      : undefined
   const source = path.resolve(import.meta.dir, "../../..")
   const environment = Object.fromEntries(
     ["PATH", "Path", "SystemRoot", "WINDIR", "HOME", "USERPROFILE"].flatMap((key) =>
@@ -95,7 +108,7 @@ export async function runEvaluationChain(
     shell: "powershell",
     formatter: false,
     lsp: false,
-    memory: { enabled: input.treatment === "B", taskSearch: false, index: { enabled: true } },
+    memory: { enabled: input.treatment !== "A", taskSearch: input.treatment === "C", index: { enabled: true } },
     agent: { build: { steps: 8 } },
     permission: { "*": "allow", external_directory: "deny", task: "deny", webfetch: "deny", websearch: "deny" },
     provider: {
@@ -131,8 +144,9 @@ export async function runEvaluationChain(
     outputLimit: 4096,
     stageDeadlineSeconds: 180,
     budget: { reserved: input.reserveTokens, status: "unknown", release: false },
-    memoryNoteProfile: "unknown",
-    taskSearch: false,
+    memoryNoteProfile: authority ? "experimental-host-bound" : "unknown",
+    ...(authority ? { upstreamEndpointHash: authority.endpointHash } : {}),
+    taskSearch: input.treatment === "C",
     tidy: false,
     ...(input.capture ? { capture: input.capture } : {}),
   }
@@ -147,6 +161,11 @@ export async function runEvaluationChain(
     category?: string
     evidence?: string[]
   }> = chain.prompts.map((_, index) => ({ stage: index + 1, status: "not-run", pass: false, reason: "not-run" }))
+  await using authorityScope = {
+    async [Symbol.asyncDispose]() {
+      authority?.revoke()
+    },
+  }
   let previousSessionID: string | undefined
   for (const [index, prompt] of chain.prompts.entries()) {
     const stage = path.join(input.root, `stage-${index + 1}`)
@@ -164,6 +183,7 @@ export async function runEvaluationChain(
         model: manifest.model,
         prompt,
         seconds: manifest.stageDeadlineSeconds,
+        ...(authority ? { memoryAuthority: authority } : {}),
         ...(input.capture ? { capture: input.capture } : {}),
         ...(index === 3 ? { poison: { chain: chain.id, sourceSessionID: previousSessionID! } } : {}),
       })
