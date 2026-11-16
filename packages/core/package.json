@@ -39,6 +39,11 @@
       "node": "./src/filesystem/fff.node.ts",
       "default": "./src/filesystem/fff.bun.ts"
     },
+    "#read-pin-native": {
+      "bun": "./src/read-pin-native.bun.ts",
+      "node": "./src/read-pin-native.node.ts",
+      "default": "./src/read-pin-native.node.ts"
+    },
     "#preview-native": {
       "bun": "./src/preview-native.bun.ts",
       "node": "./src/preview-native.node.ts",
