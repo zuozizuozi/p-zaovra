@@ -43,6 +43,8 @@ export async function probeEvaluationText(input: {
   const result = {
     protocol: input.protocol,
     model: input.model,
+    responseModels: [] as string[],
+    responseModelStatus: "not-reported",
     request: {
       bytes: Buffer.byteLength(body),
       sha256: createHash("sha256").update(body).digest("hex"),
@@ -99,6 +101,25 @@ export async function probeEvaluationText(input: {
       const usage = input.protocol === "openai-responses" && record(value.response) ? value.response.usage : value.usage
       return record(usage) ? [usageNumbers(usage)] : []
     })
+    // These are provider-supplied labels, not authentication of the underlying model.
+    // Keep text success separate so a READY reply cannot silently prove model identity.
+    const models = values.flatMap((value) => {
+      const response = input.protocol === "openai-responses" ? value.response : value
+      return record(response) && response.model !== undefined ? [response.model] : []
+    })
+    const labels = models.filter(
+      (model): model is string =>
+        typeof model === "string" && /^[A-Za-z0-9_.:/-]{1,160}$/.test(model) && !model.includes(input.apiKey),
+    )
+    result.responseModels = [...new Set(labels)]
+    result.responseModelStatus =
+      labels.length !== models.length
+        ? "invalid-label"
+        : result.responseModels.length > 1
+          ? "conflicting-labels"
+          : result.responseModels.length === 1
+            ? "reported-label"
+            : "not-reported"
     const answer = input.protocol === "openai-responses" ? responses(values) : chat(values, done)
     result.pass = answer === "READY"
     result.reason =

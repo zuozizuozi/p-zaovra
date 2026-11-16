@@ -49,6 +49,8 @@ for (const protocol of ["openai-chat", "openai-responses"] as const)
       const result = await probeEvaluationText(input)
       expect(result.pass).toBe(true)
       expect(result.reason).toBe("expected-text-matched")
+      expect(result.responseModels).toEqual([])
+      expect(result.responseModelStatus).toBe("not-reported")
       expect(result.usage.status).toBe("unsettled")
       expect(result.usage.reserve).toBe("retain")
       expect(result.usage.observations).toHaveLength(1)
@@ -83,6 +85,65 @@ for (const protocol of ["openai-chat", "openai-responses"] as const)
       expect(requests).toHaveLength(1)
     } finally {
       await provider.stop(true)
+    }
+  })
+
+for (const protocol of ["openai-chat", "openai-responses"] as const)
+  test(`synthetic ${protocol} probe separates response labels from text success`, async () => {
+    await using tmp = await tmpdir()
+    const scenarios = [
+      { models: ["fixture-model"], labels: ["fixture-model"], status: "reported-label" },
+      { models: ["other-model"], labels: ["other-model"], status: "reported-label" },
+      { models: ["fixture-model", "fixture-model"], labels: ["fixture-model"], status: "reported-label" },
+      {
+        models: ["fixture-model", "other-model"],
+        labels: ["fixture-model", "other-model"],
+        status: "conflicting-labels",
+      },
+      { models: [123], labels: [], status: "invalid-label" },
+      { models: ["private-test-key"], labels: [], status: "invalid-label" },
+    ]
+    for (const [index, scenario] of scenarios.entries()) {
+      let calls = 0
+      const provider = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch() {
+          calls++
+          const frames = scenario.models.map((model, position) =>
+            protocol === "openai-chat"
+              ? event({
+                  model,
+                  choices: position === 0 ? [{ index: 0, delta: { content: "READY" }, finish_reason: "stop" }] : [],
+                })
+              : event(
+                  position === scenario.models.length - 1
+                    ? { ...completed, response: { ...completed.response, model } }
+                    : { type: "response.created", response: { model } },
+                ),
+          )
+          return new Response(frames.join("") + (protocol === "openai-chat" ? "data: [DONE]\r\n\r\n" : ""), {
+            headers: { "content-type": "text/event-stream" },
+          })
+        },
+      })
+      try {
+        const result = await probeEvaluationText({
+          baseURL: `http://127.0.0.1:${provider.port}/v1`,
+          apiKey: "private-test-key",
+          model: "fixture-model",
+          protocol,
+          journal: path.join(tmp.path, `${index}.jsonl`),
+        })
+        expect(result.pass).toBe(true)
+        expect(result.responseModels).toEqual(scenario.labels)
+        expect(result.responseModelStatus).toBe(scenario.status)
+        expect(result.usage.reserve).toBe("retain")
+        expect(calls).toBe(1)
+        expect(JSON.stringify(result)).not.toContain("private-test-key")
+      } finally {
+        await provider.stop(true)
+      }
     }
   })
 
