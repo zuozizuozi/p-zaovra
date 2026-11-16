@@ -63,7 +63,7 @@ const layer = Layer.effectDiscard(
         memory_check: Tool.withPermission(
           Tool.make({
             description:
-              "Recheck a kept note's host-bound small local files with Read permission. Select its ID, file revision and layer from memory_search. Reports only a match at this check, a byte/object difference, or unknown. It does not verify the note's meaning, grant ongoing freshness, or change user wording. Do not retry conflicts automatically.",
+              "Recheck a kept note's host-bound small local files with Read permission. Use the note ID, file revision and layer already returned for that note. Reports only a match at this check, a byte/object difference, or unknown. It does not verify the note's meaning, grant ongoing freshness, or change user wording. Do not retry conflicts automatically.",
             input: Input,
             output: Output,
             execute: (input, context) =>

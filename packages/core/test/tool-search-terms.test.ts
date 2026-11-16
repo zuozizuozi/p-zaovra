@@ -312,3 +312,33 @@ async function withSearch(
     ),
   )
 }
+
+for (const input of [{ names: ["memory_check"] }, { query: "memory_check" }])
+  test(`memory recheck remains discoverable without execution: ${JSON.stringify(input)}`, () =>
+    withSearch([], (sessionID) =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const definition = (yield* registry.materialize()).definitions.find((tool) => tool.name === "memory_check")
+        expect(definition).toBeDefined()
+        const actual = (yield* search(registry, sessionID, input)).output?.structured as SearchOutput
+        if ("names" in input) expect(actual.activated).toEqual(["memory_check"])
+        expect(actual.activated).toContain("memory_check")
+        expect(actual.available.map((tool) => tool.name)).toContain("memory_check")
+        // Preserve the real name/description and read policy, but make any attempted execution observable.
+        const executed: string[] = []
+        yield* registry.register({
+          memory_check: Tool.withPermission(
+            Tool.make({
+              description: definition!.description,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.sync(() => executed.push("memory_check")).pipe(Effect.as("must not execute")),
+            }),
+            "read",
+          ),
+        })
+        const observed = (yield* search(registry, sessionID, input)).output?.structured as SearchOutput
+        expect(observed.activated).toEqual(actual.activated)
+        expect(executed).toEqual([])
+      }),
+    ))
