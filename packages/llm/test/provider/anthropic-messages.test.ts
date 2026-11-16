@@ -61,6 +61,41 @@ const expectToolResult = (body: AnthropicMessages.AnthropicMessagesBody): Anthro
 }
 
 describe("Anthropic Messages route", () => {
+  for (const input of [
+    { modelOutput: 0, routeOutput: 0, expected: 4096 },
+    { modelOutput: undefined, routeOutput: 0, expected: 4096 },
+    { modelOutput: 0, routeOutput: 16384, expected: 16384 },
+    { modelOutput: 8192, routeOutput: 16384, expected: 8192 },
+    { modelOutput: 0, routeOutput: 0, maxTokens: 16384, expected: 16384 },
+  ])
+    it.effect(`resolves a positive Anthropic output cap ${JSON.stringify(input)}`, () =>
+      Effect.gen(function* () {
+        const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+          LLM.request({
+            model: model.route.with({ limits: { output: input.routeOutput } }).model({
+              id: model.id,
+              defaults: { limits: { output: input.modelOutput } },
+            }),
+            prompt: "hello",
+            generation: { maxTokens: input.maxTokens },
+            providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 2048 } } },
+          }),
+        )
+        expect(prepared.body.max_tokens).toBe(input.expected)
+        expect(prepared.body.thinking).toEqual({ type: "enabled", budget_tokens: 2048 })
+      }),
+    )
+
+  for (const maxTokens of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    it.effect(`rejects an explicitly invalid Anthropic output cap ${maxTokens}`, () =>
+      Effect.gen(function* () {
+        const failure = yield* LLMClient.prepare(
+          LLM.request({ model, prompt: "hello", generation: { maxTokens } }),
+        ).pipe(Effect.flip)
+        expect(failure.reason._tag).toBe("InvalidRequest")
+      }),
+    )
+
   it.effect("prepares Anthropic Messages target", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare(request)

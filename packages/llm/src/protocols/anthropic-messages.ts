@@ -610,7 +610,15 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
       : undefined
   const generation = request.generation
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
-  const outputLimit = request.model.defaults?.limits?.output ?? request.model.route.defaults.limits?.output ?? 4096
+  if (generation?.maxTokens !== undefined && (!Number.isSafeInteger(generation.maxTokens) || generation.maxTokens <= 0))
+    return yield* invalid("Anthropic maxTokens must be a positive safe integer")
+  // Catalog zero means unknown capacity, not a valid wire output limit.
+  const outputLimit =
+    generation?.maxTokens ??
+    [request.model.defaults?.limits?.output, request.model.route.defaults.limits?.output].find(
+      (limit) => limit !== undefined && Number.isSafeInteger(limit) && limit > 0,
+    ) ??
+    4096
   // Allocate the 4-breakpoint budget in invalidation order: tools → system →
   // messages. Tools live highest in the cache hierarchy, so when callers
   // over-mark we keep their tool hints and shed the message-tail ones first.
@@ -651,12 +659,12 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
     tools,
     tool_choice: toolChoice,
     stream: true as const,
-    max_tokens: generation?.maxTokens ?? outputLimit,
+    max_tokens: outputLimit,
     temperature: generation?.temperature,
     top_p: generation?.topP,
     top_k: generation?.topK,
     stop_sequences: generation?.stop,
-    thinking: yield* lowerThinking(request, generation?.maxTokens ?? outputLimit),
+    thinking: yield* lowerThinking(request, outputLimit),
   }
 })
 

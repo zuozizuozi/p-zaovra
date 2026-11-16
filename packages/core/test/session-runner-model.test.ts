@@ -43,6 +43,23 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
+  for (const maxTokens of [undefined, 16384])
+    it.effect(`compiles unknown Anthropic model capacity with a positive cap ${maxTokens}`, () =>
+      Effect.gen(function* () {
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(
+          ModelV2.Info.make({
+            ...model({ type: "aisdk", package: "@ai-sdk/anthropic", url: "https://example.test/v1" }),
+            limit: { context: 0, output: 0 },
+            request: { headers: {}, body: maxTokens === undefined ? {} : { maxTokens } },
+          }),
+        )
+        const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "hello" }))
+        expect(prepared.body).toMatchObject({ max_tokens: maxTokens ?? 4096 })
+        // An explicit request bound does not invent a known model capacity.
+        expect(resolved.route.defaults.limits?.output).toBe(0)
+      }),
+    )
+
   for (const name of ["max_tokens", "maxTokens", "max_output_tokens", "max_completion_tokens"]) {
     it.effect(`normalizes the explicit output ceiling ${name}`, () =>
       Effect.gen(function* () {
