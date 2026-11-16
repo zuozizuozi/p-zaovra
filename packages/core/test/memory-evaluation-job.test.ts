@@ -76,6 +76,19 @@ const descendant =
   'const child = Bun.spawn([process.execPath,"-e","setInterval(()=>{},1000)"], {stdin:"ignore",stdout:"ignore",stderr:"ignore"}); console.log("child-ready:"+child.pid);'
 
 test.skipIf(process.platform !== "win32")(
+  "stdout backpressure cannot disable the independent process deadline",
+  async () => {
+    await using temp = await tmpdir()
+    await using control = await owner(temp.path, descendant + "setInterval(()=>{},1000)", 1)
+    expect((await control.read()).event).toBe("started")
+    // Fill the bounded control-output pipe, then deliberately never consume another reply.
+    control.child.stdin.write((JSON.stringify({ op: "inspect", nonce: "x".repeat(128) }) + "\n").repeat(5000))
+    expect(await control.child.exited).toBe(124)
+  },
+  10000,
+)
+
+test.skipIf(process.platform !== "win32")(
   "native evaluation Job owns root and descendants before releasing execution",
   async () => {
     await using temp = await tmpdir()

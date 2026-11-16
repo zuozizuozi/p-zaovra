@@ -71,6 +71,8 @@ def run():
     scope = str(uuid.uuid4())
     job = check(native.CreateJobObjectW(None, None))
     process = thread = None
+    done = threading.Event()
+    watchdog = None
     try:
         limits = Limits()
         limits.basic.flags = 0x2000 | 0x10  # kill-on-close and two logical CPUs; no breakaway
@@ -120,6 +122,18 @@ def run():
                 raise ctypes.WinError(ctypes.get_last_error())
             native.CloseHandle(int(thread))
             thread = None
+
+            def supervise():
+                # stdout is a bounded OS pipe: a stopped reader must not disable the deadline.
+                if done.wait(args.seconds):
+                    return
+                native.TerminateJobObject(job, 143)
+                if not done.wait(2):
+                    # Exiting releases the non-inherited kill-on-close Job handle even if emit blocks.
+                    os._exit(124)
+
+            watchdog = threading.Thread(target=supervise, daemon=True)
+            watchdog.start()
             emit("started", pid=pid, assignedBeforeResume=True, killOnClose=True)
             requests = queue.Queue(maxsize=16)
 
@@ -170,6 +184,9 @@ def run():
                     raise ctypes.WinError(ctypes.get_last_error())
                 emit("inspection", nonce, pid=pid, rootAlive=state == 258, members=members())
     finally:
+        done.set()
+        if watchdog:
+            watchdog.join()
         native.TerminateJobObject(job, 143)
         # Also owns a suspended child if assignment itself failed; never kill by a rediscovered PID.
         if process and native.WaitForSingleObject(int(process), 0) == 258:
