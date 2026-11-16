@@ -196,26 +196,18 @@ test.each([{ confirm: true }, { confirm: false }])(
   },
 )
 
+// Happy DOM can miss the final Portal-removal mutation. Check the actual state
+// within the same deadline, including the first open/close in a fresh process.
 async function waitFor(ready: () => boolean) {
-  if (ready()) return
-  await new Promise<void>((resolve, reject) => {
-    const observer = new MutationObserver(() => {
-      if (!ready()) return
-      observer.disconnect()
-      clearTimeout(timeout)
-      resolve()
-    })
-    const timeout = setTimeout(() => {
-      observer.disconnect()
-      reject(
-        new Error(
-          "Confirmation fixture did not reach its expected state; read calls=" +
-            reads.length +
-            "; DOM=" +
-            document.body.textContent?.slice(0, 800),
-        ),
+  const deadline = performance.now() + 2_000
+  while (!ready()) {
+    if (performance.now() >= deadline)
+      throw new Error(
+        "Confirmation fixture did not reach its expected state; read calls=" +
+          reads.length +
+          "; DOM=" +
+          document.body.textContent?.slice(0, 800),
       )
-    }, 2_000)
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
-  })
+    await Bun.sleep(10)
+  }
 }
