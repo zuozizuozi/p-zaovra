@@ -1,0 +1,289 @@
+/// <reference lib="dom" />
+/// <reference lib="dom.iterable" />
+import { createHash } from "node:crypto"
+import { Zaovra } from "@zaovra-ai/client"
+import type { MessagesListOutput, SessionsPromptOutput } from "@zaovra-ai/client"
+import type { Turn } from "./oracle"
+
+type Admission = Pick<SessionsPromptOutput, "sessionID" | "id" | "admittedSeq">
+type Snapshot = {
+  epoch: number
+  revision: number
+  watermark: number
+  messages: MessagesListOutput["data"]
+  fingerprint: string
+  pages: number
+}
+
+/** A trusted host must independently inspect the entire isolated process/job scope.
+ * This is not a model assertion, a tool output, or a proof supplied by the HTTP API.
+ */
+export type BackgroundCheck = {
+  admission: Admission
+  epoch: number
+  revision: number
+  watermark: number
+  toolIDs: string[]
+}
+
+export type Observation = {
+  status: "ready" | "incomplete" | "unknown"
+  artifactReady: boolean
+  admission: Admission
+  reason: string
+  attempts: number
+  evidence: Array<{
+    epoch: number
+    revision: number
+    watermark: number
+    fingerprint: string
+    pages: number
+    messages: number
+  }>
+  turn?: Turn
+}
+
+/** Read-only, bounded sampling of an already admitted isolated Session. */
+export async function observe(input: {
+  client: ReturnType<typeof Zaovra.make>
+  admission: Admission
+  maxPages?: number
+  attempts?: number
+  requestTimeoutMs?: number
+  confirmBackground?: (check: BackgroundCheck, signal: AbortSignal) => Promise<"quiescent" | "active" | "unknown">
+}): Promise<Observation> {
+  const pages = input.maxPages ?? 20
+  const attempts = input.attempts ?? 2
+  const timeout = input.requestTimeoutMs ?? 2_000
+  const evidence: Observation["evidence"] = []
+  const result = (status: Observation["status"], reason: string, attempt: number): Observation => ({
+    status,
+    artifactReady: false,
+    admission: input.admission,
+    reason,
+    attempts: attempt,
+    evidence,
+  })
+  if (
+    !integer(pages, 1, 100) ||
+    !integer(attempts, 1, 3) ||
+    !integer(timeout, 1, 30_000) ||
+    !input.admission.sessionID ||
+    !input.admission.id ||
+    !integer(input.admission.admittedSeq, 1)
+  )
+    return result("unknown", "invalid-observation-bounds-or-admission", 0)
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const before = await snapshot(input.client, input.admission.sessionID, pages, timeout)
+      evidence.push(summary(before))
+      const outcome = await bounded(timeout, (signal) =>
+        input.client.sessions.outcome({ sessionID: input.admission.sessionID }, { signal }),
+      )
+      const after = await snapshot(input.client, input.admission.sessionID, pages, timeout)
+      evidence.push(summary(after))
+      if (!same(before, after)) {
+        if (attempt < attempts) continue
+        return result("unknown", "snapshot-changed", attempt)
+      }
+      const own = after.messages.filter((message) => message.id === input.admission.id)
+      if (own.length !== 1 || own[0].type !== "user") return result("incomplete", "admission-not-promoted", attempt)
+      const user = own[0]
+      if (!integer(user.seq, input.admission.admittedSeq) || (user.turn !== undefined && user.turn !== user.id))
+        return result("unknown", "admission-projection-mismatch", attempt)
+      // outcome is Session-wide; never attribute a later user's outcome to this admission.
+      if (
+        after.messages.some(
+          (message) =>
+            message.type === "user" && message.id !== user.id && (!integer(message.seq) || message.seq >= user.seq!),
+        )
+      )
+        return result("unknown", "outcome-not-exclusive-to-admission", attempt)
+      const assistants = after.messages.filter((message) => message.type === "assistant")
+      if (assistants.some((message) => !message.turn || !integer(message.seq)))
+        return result("unknown", "assistant-turn-or-sequence-missing", attempt)
+      const current = assistants.filter((message) => message.turn === user.id)
+      if (!current.length) return result("incomplete", "no-own-assistant", attempt)
+      if (
+        assistants.some((message) => message.seq! > user.seq! && message.turn !== user.id) ||
+        current.some((message) => message.seq! <= user.seq!)
+      )
+        return result("unknown", "assistant-turn-conflict", attempt)
+      if (
+        assistants.some(
+          (message) =>
+            !integer(message.time?.completed, 0) ||
+            !Array.isArray(message.content) ||
+            message.content.some(
+              (part) =>
+                part.type === "tool" &&
+                (!part.state ||
+                  !["completed", "error"].includes(part.state.status) ||
+                  !integer(part.time?.completed, 0)),
+            ),
+        )
+      )
+        return result("incomplete", "assistant-or-tool-unsettled", attempt)
+      if (current.some((message) => message.error !== undefined || message.termination !== undefined))
+        return result("incomplete", "own-assistant-terminated", attempt)
+      if (
+        !outcome ||
+        outcome.outcomeUnknown !== false ||
+        outcome.termination !== undefined ||
+        !["completed", "completed_verified", "completed_unverified"].includes(outcome.state) ||
+        (outcome.runtime !== undefined && outcome.runtime !== "completed")
+      )
+        return result("incomplete", "outcome-not-completed", attempt)
+      if (!input.confirmBackground) return result("unknown", "background-not-independently-confirmed", attempt)
+      const background = await bounded(timeout, (signal) =>
+        input.confirmBackground!(
+          {
+            admission: input.admission,
+            epoch: after.epoch,
+            revision: after.revision,
+            watermark: after.watermark,
+            toolIDs: assistants.flatMap((message) =>
+              message.content.filter((part) => part.type === "tool").map((part) => part.id),
+            ),
+          },
+          signal,
+        ),
+      )
+      if (background !== "quiescent")
+        return result(background === "active" ? "incomplete" : "unknown", "background-not-quiescent", attempt)
+      // The host job inspection may take time. Bracket it with another complete stable read.
+      const final = await snapshot(input.client, input.admission.sessionID, pages, timeout)
+      evidence.push(summary(final))
+      if (!same(after, final)) {
+        if (attempt < attempts) continue
+        return result("unknown", "snapshot-changed-after-background-check", attempt)
+      }
+      return {
+        ...result("ready", "own-turn-completed-and-host-quiescent", attempt),
+        artifactReady: true,
+        turn: {
+          admitted: true,
+          promoted: true,
+          active: false,
+          pending: 0,
+          assistants: current.length,
+          unsettled: 0,
+          outcome: "completed",
+        },
+      }
+    } catch (error) {
+      // Never retain server error payloads, response headers, or model-controlled text.
+      return result(
+        "unknown",
+        error instanceof ObservationError ? error.message : "observation-request-or-shape-failed",
+        attempt,
+      )
+    }
+  }
+  return result("unknown", "attempt-limit", attempts)
+}
+
+class ObservationError extends Error {}
+
+function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum
+}
+
+async function bounded<T>(timeout: number, read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      read(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new ObservationError("observation-timeout"))
+        }, timeout)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+    controller.abort()
+  }
+}
+
+async function snapshot(
+  client: ReturnType<typeof Zaovra.make>,
+  sessionID: string,
+  maxPages: number,
+  timeout: number,
+): Promise<Snapshot> {
+  const messages: MessagesListOutput["data"][number][] = []
+  const ids = new Set<string>()
+  const cursors = new Set<string>()
+  let cursor: string | undefined
+  let stamp: { epoch: number; revision: number; watermark: number } | undefined
+  for (let index = 0; index < maxPages; index++) {
+    const page = await bounded(timeout, (signal) =>
+      client.messages.list({ sessionID, limit: 100, ...(cursor ? { cursor } : { order: "asc" as const }) }, { signal }),
+    )
+    if (
+      !page ||
+      !Array.isArray(page.data) ||
+      page.data.length > 100 ||
+      !page.cursor ||
+      !Array.isArray(page.pending) ||
+      !page.execution ||
+      !integer(page.execution.epoch) ||
+      !integer(page.execution.revision) ||
+      !integer(page.watermark)
+    )
+      throw new ObservationError("snapshot-fields-missing")
+    if (page.execution.active !== false || page.pending.length !== 0) throw new ObservationError("snapshot-not-idle")
+    const current = { epoch: page.execution.epoch, revision: page.execution.revision, watermark: page.watermark }
+    if (stamp && JSON.stringify(stamp) !== JSON.stringify(current))
+      throw new ObservationError("pagination-state-changed")
+    stamp = current
+    for (const message of page.data) {
+      if (
+        !message ||
+        typeof message.id !== "string" ||
+        !message.id ||
+        ids.has(message.id) ||
+        !integer(message.seq) ||
+        message.seq > page.watermark
+      )
+        throw new ObservationError("invalid-or-duplicate-message")
+      ids.add(message.id)
+      messages.push(message)
+    }
+    if (page.data.length === 0) {
+      if (page.cursor.next != null) throw new ObservationError("empty-page-with-next")
+      return {
+        ...stamp,
+        messages,
+        pages: index + 1,
+        fingerprint: createHash("sha256").update(JSON.stringify(messages)).digest("hex"),
+      }
+    }
+    if (typeof page.cursor.next !== "string" || !page.cursor.next || cursors.has(page.cursor.next))
+      throw new ObservationError("pagination-not-proven-complete")
+    cursors.add(page.cursor.next)
+    cursor = page.cursor.next
+  }
+  throw new ObservationError("page-limit")
+}
+
+function same(a: Snapshot, b: Snapshot) {
+  return (
+    a.epoch === b.epoch && a.revision === b.revision && a.watermark === b.watermark && a.fingerprint === b.fingerprint
+  )
+}
+
+function summary(snapshot: Snapshot): Observation["evidence"][number] {
+  return {
+    epoch: snapshot.epoch,
+    revision: snapshot.revision,
+    watermark: snapshot.watermark,
+    fingerprint: snapshot.fingerprint,
+    pages: snapshot.pages,
+    messages: snapshot.messages.length,
+  }
+}
