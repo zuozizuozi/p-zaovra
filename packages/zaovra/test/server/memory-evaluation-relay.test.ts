@@ -80,7 +80,7 @@ test("evaluation relay validates both wire protocols and bounds concurrent physi
       .split("\n")
       .map((line) => JSON.parse(line))
     expect(records.filter((record) => record.phase === "admitted")).toHaveLength(1)
-    expect(records.at(-1)).toMatchObject({ phase: "eof", usage: "unknown" })
+    expect(records.find((record) => record.phase === "eof")).toMatchObject({ phase: "eof", usage: "unknown" })
     expect(() =>
       startEvaluationRelay({
         baseURL: "https://example.invalid/v1",

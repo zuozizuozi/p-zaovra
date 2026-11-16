@@ -47,6 +47,10 @@ export function startEvaluationRelay(input: {
   let sent = 0
   let closed = false
   const log = (record: object) => appendFileSync(file, JSON.stringify(record) + "\n")
+  const deny = (status: number, reason: string) => {
+    if (!closed) log({ phase: "denied", reason })
+    return new Response(null, { status })
+  }
   log({
     phase: "manifest",
     model: input.model,
@@ -69,22 +73,22 @@ export function startEvaluationRelay(input: {
         url.search ||
         request.headers.get("authorization") !== `Bearer ${key}`
       )
-        return new Response(null, { status: 403 })
+        return deny(403, "local-route-or-authorization")
       const bytes = new Uint8Array(await request.arrayBuffer())
-      if (bytes.length > input.maxRequestBytes) return new Response(null, { status: 413 })
+      if (bytes.length > input.maxRequestBytes) return deny(413, "request-bytes")
       const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
         new TextDecoder("utf-8", { fatal: true }).decode(bytes),
       )
       if (Option.isNone(parsed) || !parsed.value || typeof parsed.value !== "object")
-        return new Response(null, { status: 400 })
+        return deny(400, "invalid-json")
       const body = parsed.value as Record<string, unknown>
       if (
         body.model !== input.model ||
         body.stream !== true ||
         Option.isNone(Schema.decodeUnknownOption(route.body.schema, { onExcessProperty: "error" })(body))
       )
-        return new Response(null, { status: 400 })
-      if (!localText(body.input ?? body.messages)) return new Response(null, { status: 400 })
+        return deny(400, "wire-model-stream-or-schema")
+      if (!localText(body.input ?? body.messages)) return deny(400, "external-input")
       const limits = ["max_tokens", "max_completion_tokens", "max_output_tokens"].filter(
         (name) => body[name] !== undefined,
       )
@@ -99,9 +103,9 @@ export function startEvaluationRelay(input: {
         output <= 0 ||
         output > input.maxOutput
       )
-        return new Response(null, { status: 400 })
+        return deny(400, "wire-output-limit")
       // No await between the limit check and durable admission: concurrent local callers cannot oversubscribe.
-      if (closed || sent >= input.maxRequests) return new Response(null, { status: 429 })
+      if (closed || sent >= input.maxRequests) return deny(429, "physical-request-limit")
       const id = randomUUID()
       log({
         id,

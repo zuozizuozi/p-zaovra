@@ -107,6 +107,7 @@ test.skipIf(process.platform !== "win32")(
           reserveTokens: 1,
           environment: { ZAOVRA_EVAL_API_KEY: relay.apiKey },
         })
+        if (!result.pass) console.error({ stages: result.stages, rounds, relay: await Bun.file(journal).text() })
         expect(result.pass).toBe(true)
         expect(result.counts).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
         expect(rounds).toEqual([3, 1, 3, 3, 3])
