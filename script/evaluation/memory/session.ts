@@ -21,6 +21,11 @@ export async function runEvaluationSession(input: {
   prompt: string
   seconds?: number
   providerEnvironment?: Record<string, string>
+  /** One kernel factor; other factors use the fixed baseline, never ambient environment values. */
+  kernelExperiment?:
+    | { factor: "delivery-repair" | "accuracy-general" | "accuracy-scale"; value: "on" | "off" }
+    | { factor: "host-hint-style"; value: "original" | "short" }
+    | { factor: "host-hint-language"; value: "en" | "zh" }
   memoryAuthority?: ReturnType<typeof createMemoryAuthority>
   poison?: { chain: string; sourceSessionID: string }
   /** Opt-in sensitive own-turn projection; delivered only after final consistency and empty Job. */
@@ -42,6 +47,31 @@ export async function runEvaluationSession(input: {
     )
   )
     throw new Error("invalid-evaluation-provider-environment")
+  const factors = {
+    "delivery-repair": { variable: "ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR", values: ["on", "off"] },
+    "accuracy-general": { variable: "ZAOVRA_EXPERIMENTAL_ACCURACY_GENERAL", values: ["on", "off"] },
+    "accuracy-scale": { variable: "ZAOVRA_EXPERIMENTAL_ACCURACY_SCALE", values: ["on", "off"] },
+    "host-hint-style": { variable: "ZAOVRA_EXPERIMENTAL_HOST_HINT_STYLE", values: ["original", "short"] },
+    "host-hint-language": { variable: "ZAOVRA_EXPERIMENTAL_HOST_HINT_LANGUAGE", values: ["en", "zh"] },
+  }
+  if (
+    input.kernelExperiment !== undefined &&
+    (!record(input.kernelExperiment) ||
+      Object.keys(input.kernelExperiment).length !== 2 ||
+      typeof input.kernelExperiment.factor !== "string" ||
+      typeof input.kernelExperiment.value !== "string" ||
+      !Object.hasOwn(factors, input.kernelExperiment.factor) ||
+      !factors[input.kernelExperiment.factor].values.includes(input.kernelExperiment.value))
+  )
+    throw new Error("invalid-kernel-experiment")
+  const kernelEnvironment = input.kernelExperiment
+    ? Object.fromEntries(
+        Object.entries(factors).map(([factor, entry]) => [
+          entry.variable,
+          factor === input.kernelExperiment!.factor ? input.kernelExperiment!.value : entry.values[0],
+        ]),
+      )
+    : {}
   const paths = [input.directory, input.profile, input.stage].map((value) => path.resolve(value).toLowerCase())
   if (
     paths.some((value, index) =>
@@ -110,13 +140,24 @@ export async function runEvaluationSession(input: {
     await mkdir(directory, { recursive: true })
     environment[key] = directory
   }
-  Object.assign(environment, input.providerEnvironment, {
+  Object.assign(environment, input.providerEnvironment, kernelEnvironment, {
     ...(memoryStage ? { ZAOVRA_EVAL_MEMORY_HOST: memoryStage.environment } : {}),
     ZAOVRA_DB: path.join(input.profile, "sessions.sqlite"),
     ZAOVRA_DISABLE_MODELS_FETCH: "true",
     ZAOVRA_EXPERIMENTAL_EVENT_SYSTEM: "true",
     ZAOVRA_EXPERIMENTAL_WORKSPACES: "true",
   })
+  if (input.kernelExperiment)
+    await writeFile(
+      path.join(input.stage, "kernel-experiment.json"),
+      JSON.stringify({
+        generation,
+        ...input.kernelExperiment,
+        environment: kernelEnvironment,
+        evidence: "launch-input",
+      }),
+      { flag: "wx" },
+    )
   const began = Date.now()
   await using owner = await openJob({
     directory: path.resolve(import.meta.dir, "../../../packages/zaovra"),

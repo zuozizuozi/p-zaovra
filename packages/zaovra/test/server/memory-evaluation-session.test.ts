@@ -87,7 +87,11 @@ test.skipIf(process.platform !== "win32")(
         },
       }),
     )
-    const execute = async (stage: string, sourceSessionID?: string) => {
+    const execute = async (
+      stage: string,
+      sourceSessionID?: string,
+      kernelExperiment?: Parameters<typeof runEvaluationSession>[0]["kernelExperiment"],
+    ) => {
       try {
         return await runEvaluationSession({
           directory,
@@ -96,6 +100,7 @@ test.skipIf(process.platform !== "win32")(
           model: { id: "fixture-model", providerID: "session-fixture" },
           prompt: "Private fixture prompt. Reply once, do not use tools.",
           seconds: 30,
+          kernelExperiment,
           ...(sourceSessionID ? { poison: { chain: "billing", sourceSessionID } } : {}),
         })
       } catch (error) {
@@ -109,8 +114,8 @@ test.skipIf(process.platform !== "win32")(
       }
     }
     try {
-      const first = await execute("first")
-      const second = await execute("second", first.admission.sessionID)
+      const first = await execute("first", undefined, { factor: "accuracy-general", value: "on" })
+      const second = await execute("second", first.admission.sessionID, { factor: "accuracy-general", value: "off" })
       expect(first.admission.sessionID).not.toBe(second.admission.sessionID)
       expect(first.generation).not.toBe(second.generation)
       expect(first.stopped.scope).not.toBe(second.stopped.scope)
@@ -122,6 +127,27 @@ test.skipIf(process.platform !== "win32")(
         expect(JSON.stringify(result)).not.toContain("Private fixture")
       }
       expect(calls).toBe(2)
+      // These are actual requests received from separate backend processes, not manifest echoes.
+      expect(requests[0]).toContain("An ordinary SQLite connection can checkpoint or consume WAL")
+      expect(requests[1]).not.toContain("An ordinary SQLite connection can checkpoint or consume WAL")
+      for (const [stage, value] of [
+        ["first", "on"],
+        ["second", "off"],
+      ]) {
+        const experiment = await Bun.file(path.join(tmp.path, stage, "kernel-experiment.json")).json()
+        expect(experiment).toMatchObject({
+          factor: "accuracy-general",
+          value,
+          evidence: "launch-input",
+          environment: {
+            ZAOVRA_EXPERIMENTAL_ACCURACY_GENERAL: value,
+            ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR: "on",
+            ZAOVRA_EXPERIMENTAL_ACCURACY_SCALE: "on",
+            ZAOVRA_EXPERIMENTAL_HOST_HINT_STYLE: "original",
+            ZAOVRA_EXPERIMENTAL_HOST_HINT_LANGUAGE: "en",
+          },
+        })
+      }
       const seeded = await Bun.file(path.join(tmp.path, "second", "fixture.json")).json()
       expect(seeded).toMatchObject({ chain: "billing", sourceSessionID: first.admission.sessionID })
       expect(seeded.after).toHaveLength(seeded.before.length + 1)
@@ -158,6 +184,8 @@ test.skipIf(process.platform !== "win32")(
       expect(requests[2]).toContain(poisonedNote)
       expect(requests[2]).not.toContain("intentionally false")
       expect(requests[2]).not.toContain("artificial-poison")
+      expect(requests[2]).toContain("An ordinary SQLite connection can checkpoint or consume WAL")
+      expect(await Bun.file(path.join(tmp.path, "indexed", "kernel-experiment.json")).exists()).toBe(false)
       await Bun.write(configFile, JSON.stringify(config))
       const otherProfile = path.join(tmp.path, "other-profile")
       await mkdir(otherProfile)
@@ -234,6 +262,20 @@ test.skipIf(process.platform !== "win32")("profile overlap and database hard lin
   await expect(
     runEvaluationSession({ ...input, providerEnvironment: { OPENAI_API_KEY: "fixture-only" } }),
   ).rejects.toThrow("invalid-evaluation-provider-environment")
+  await expect(
+    runEvaluationSession({ ...input, providerEnvironment: { ZAOVRA_EXPERIMENTAL_ACCURACY_GENERAL: "off" } }),
+  ).rejects.toThrow("invalid-evaluation-provider-environment")
+  for (const kernelExperiment of [
+    null,
+    { factor: "unknown", value: "off" },
+    { factor: "__proto__", value: "off" },
+    { factor: "accuracy-general", value: "zh" },
+    { factor: "accuracy-general", value: "off", extra: "ignored" },
+    { factor: "host-hint-style", value: "off" },
+  ])
+    await expect(runEvaluationSession({ ...input, kernelExperiment: kernelExperiment as never })).rejects.toThrow(
+      "invalid-kernel-experiment",
+    )
   const outside = path.join(tmp.path, "outside.sqlite")
   await Bun.write(outside, "outside unchanged")
   await link(outside, path.join(profile, "sessions.sqlite"))
