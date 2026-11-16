@@ -59,17 +59,32 @@ export function createMemoryAuthority(options: {
             if (typeof body.snapshot !== "string" || body.snapshot.length > 60000) throw new Error("snapshot")
             const model: unknown = deserialize(Buffer.from(body.snapshot, "base64"))
             if (!Schema.is(Model.Info)(model)) throw new Error("model")
-            if (
-              model.providerID !== input.providerID ||
-              model.id !== input.modelID ||
-              model.api.url !== binding.baseURL ||
-              (model.api.settings?.apiKey ?? model.request.body.apiKey) !== binding.apiKey ||
-              model.request.variant !== undefined ||
-              model.request.body.maxTokens !== 4096 ||
-              model.limit.context !== 32000 ||
-              model.limit.output !== 4096
-            )
+            const projection = {
+              provider: model.providerID === input.providerID,
+              model: model.id === input.modelID,
+              url: model.api.url === binding.baseURL,
+              // V1 OpenAI config lowers credentials to headers and maxTokens to
+              // max_tokens. Compatible chat retains the original body fields.
+              authorization:
+                input.protocol === "openai-responses"
+                  ? model.request.headers.Authorization === `Bearer ${binding.apiKey}` &&
+                    model.api.settings?.apiKey === undefined &&
+                    model.request.body.apiKey === undefined
+                  : (model.api.settings?.apiKey ?? model.request.body.apiKey) === binding.apiKey,
+              variant: model.request.variant === undefined,
+              output:
+                input.protocol === "openai-responses"
+                  ? model.request.body.max_tokens === 4096 && model.request.body.maxTokens === undefined
+                  : model.request.body.maxTokens === 4096,
+              contextLimit: model.limit.context === 32000,
+              outputLimit: model.limit.output === 4096,
+            }
+            const rejected = Object.entries(projection).find(([, valid]) => !valid)?.[0]
+            if (rejected) {
+              // Only a fixed condition name; never a value from the snapshot.
+              console.error(`evaluation-memory-projection-rejected:${rejected}`)
               throw new Error("projection")
+            }
             if (!frozen) {
               grant = createEvaluationMemoryProfile({
                 model,
