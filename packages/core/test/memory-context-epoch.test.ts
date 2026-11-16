@@ -69,15 +69,47 @@ test("memory index stays local to an admitted epoch across another session and r
           status: "verified",
         })
         if (!note) throw new Error("fixture note missing")
+        const dependent = (yield* memory.write({
+          scope,
+          kind: "practice",
+          text: "File dependent historical memory",
+          origin: "user",
+          status: "verified",
+        }))!
         const a = yield* sessions.create({ location: { directory: here.directory } })
         const before = yield* SessionContextEpoch.initialize(database.db, registry.load(), a.id)
         if (!before) throw new Error("fixture epoch missing")
         expect(before.baseline).toContain("original memory text")
+        expect(before.baseline).toContain("File dependent historical memory")
+        yield* memory.bindFiles({
+          scope,
+          id: dependent.id,
+          expectedRevision: 0,
+          files: [
+            {
+              path: "source.txt",
+              directory: here.directory,
+              identity: "storage-fixture",
+              digest: "a".repeat(64),
+              bytes: 1,
+              sessionID: a.id,
+              seq: 1,
+            },
+          ],
+        })
+        yield* memory.checkFiles({
+          scope,
+          id: dependent.id,
+          expectedRevision: 1,
+          results: [{ path: "source.txt", state: "unchanged" }],
+        })
+
         yield* memory.edit(note.id, { text: "new memory text" })
         const b = yield* sessions.create({ location: { directory: here.directory } })
         const newer = yield* SessionContextEpoch.initialize(database.db, registry.load(), b.id)
         expect(newer?.baseline).toContain("new memory text")
         expect(newer?.baseline).not.toContain("original memory text")
+        expect(newer?.baseline).not.toContain("File dependent historical memory")
         expect(yield* SessionContextEpoch.prepare(database.db, events, registry.load(), a.id)).toEqual(before)
         expect((yield* sessions.context(a.id)).some((message) => message.type === "system")).toBe(false)
         return { id: a.id, before, note: note.id }

@@ -1,5 +1,6 @@
 export * as MemoryFileEvidence from "./file-evidence"
 
+import path from "node:path"
 import { Option, Schema } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 
@@ -78,4 +79,32 @@ export function edited(value: unknown) {
   const parsed = decode(value)
   if (Option.isNone(parsed) || parsed.value.state !== "current") return value
   return { ...parsed.value, state: "unknown" as const }
+}
+
+/** No process has a complete monitoring/positive recheck contract yet. DB current is not authority. */
+export function untrusted(value: unknown) {
+  const parsed = decode(value)
+  if (Option.isNone(parsed) || parsed.value.state !== "current") return value
+  return { version: parsed.value.version, files: parsed.value.files, state: "unknown" as const }
+}
+
+/** Lexical identity only; watcher hints never stat, resolve symlinks or read protected content. */
+export function affected(
+  links: Memory.FileLinks,
+  input: { readonly directory: string; readonly path?: string },
+  platform: NodeJS.Platform = process.platform,
+) {
+  if (!bindings(links.files)) return false
+  const paths = platform === "win32" ? path.win32 : path.posix
+  const normalize = (value: string) =>
+    platform === "win32" ? paths.normalize(value).toLowerCase() : paths.normalize(value)
+  if (!paths.isAbsolute(input.directory) || (input.path !== undefined && !paths.isAbsolute(input.path))) return false
+  return links.files.some((file) => {
+    if (normalize(file.directory) !== normalize(input.directory)) return false
+    if (input.path === undefined) return true
+    const relative = paths.relative(normalize(input.path), normalize(paths.join(file.directory, file.path)))
+    return (
+      relative === "" || (!relative.startsWith(`..${paths.sep}`) && relative !== ".." && !paths.isAbsolute(relative))
+    )
+  })
 }

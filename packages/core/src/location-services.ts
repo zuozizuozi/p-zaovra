@@ -41,6 +41,7 @@ import { BrowserTool } from "./tool/browser"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { ToolRegistry } from "./tool/registry"
 import { ToolOutputStore } from "./tool-output-store"
+import { MemoryFileInvalidation } from "./memory/file-invalidation"
 import { MemoryContext } from "./memory/context"
 
 export { LocationServiceMap } from "./location-service-map"
@@ -68,6 +69,7 @@ export const locationServices = LayerNode.group([
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
   MemoryContext.node,
+  MemoryFileInvalidation.node,
   LocationMutation.node,
   FileMutation.node,
   PermissionV2.node,

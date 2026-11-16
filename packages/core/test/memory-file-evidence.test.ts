@@ -68,9 +68,17 @@ it.effect("legacy notes stay unassociated; a binding starts unknown and never pr
     expect(MemoryFileEvidence.usable(bound)).toBe(false)
     expect(yield* check(h.store, bound, "unchanged")).toBe(true)
     const current = (yield* h.store.get(h.note.id))!
-    expect(current.files).toMatchObject({ state: "current" })
+    expect(
+      (yield* h.database.db
+        .select()
+        .from(MemoryNoteTable)
+        .where(eq(MemoryNoteTable.id, current.id))
+        .get()
+        .pipe(Effect.orDie))?.files,
+    ).toMatchObject({ state: "current" })
+    expect(current.files).toMatchObject({ state: "unknown" })
     expect(current.status).toBe(h.note.status)
-    expect(MemoryFileEvidence.usable(current)).toBe(true)
+    expect(MemoryFileEvidence.usable(current)).toBe(false)
   }),
 )
 

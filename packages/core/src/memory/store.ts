@@ -105,6 +105,12 @@ export interface Interface {
   /** Internal host-only storage. No route/tool exposes these calls or grants read permission. */
   readonly bindFiles: (input: MemoryFileEvidence.Bind) => Effect.Effect<boolean>
   readonly checkFiles: (input: MemoryFileEvidence.Check) => Effect.Effect<boolean>
+  /** Watcher hints only downgrade evidence; they do not read files or confirm deletion. */
+  readonly invalidateFiles: (input: {
+    readonly scope: Memory.Scope
+    readonly directory: string
+    readonly path?: string
+  }) => Effect.Effect<void>
   readonly edit: (id: Memory.ID, input: EditInput) => Effect.Effect<Memory.Note | undefined>
   readonly remove: (id: Memory.ID) => Effect.Effect<void>
   readonly clear: (scope: Memory.Scope) => Effect.Effect<void>
@@ -212,7 +218,9 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         ...(row.seq === null ? {} : { seq: row.seq }),
         hits: row.hits,
         fileRevision: row.file_revision,
-        ...(row.files === null ? {} : { files: Schema.decodeUnknownSync(Schema.Json)(row.files) }),
+        ...(row.files === null
+          ? {}
+          : { files: Schema.decodeUnknownSync(Schema.Json)(MemoryFileEvidence.untrusted(row.files)) }),
         time: { created: row.time_created, updated: row.time_updated, observed: row.time_observed },
       })
 
@@ -516,6 +524,43 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
             }),
           )
           .pipe(Effect.orDie)
+
+      const invalidateFiles: Interface["invalidateFiles"] = (input) =>
+        db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              // Recovery buckets are immutable. Reading them still masks persisted current.
+              if ((yield* frozen(input.scope)) || (yield* automaticFrozen(input.scope))) return
+              const rows = yield* tx
+                .select()
+                .from(MemoryNoteTable)
+                .where(and(eq(MemoryNoteTable.scope, input.scope), isNull(MemoryNoteTable.time_deleted)))
+                .all()
+              yield* Effect.forEach(rows, (row) =>
+                Effect.gen(function* () {
+                  const held = MemoryFileEvidence.decode(row.files)
+                  if (Option.isNone(held) || !MemoryFileEvidence.affected(held.value, input, platform)) return
+                  // Increment even unknown/alert rows: a check started before this hint must lose CAS.
+                  yield* tx
+                    .update(MemoryNoteTable)
+                    .set({
+                      files: MemoryFileEvidence.untrusted(row.files),
+                      time_updated: row.time_updated,
+                      file_revision: row.file_revision + 1,
+                    })
+                    .where(
+                      and(
+                        eq(MemoryNoteTable.id, row.id),
+                        eq(MemoryNoteTable.file_revision, row.file_revision),
+                        isNull(MemoryNoteTable.time_deleted),
+                      ),
+                    )
+                    .run()
+                }),
+              )
+            }),
+          )
+          .pipe(Effect.orDie, Effect.asVoid)
 
       const insert = (values: typeof MemoryNoteTable.$inferInsert) =>
         db
@@ -963,6 +1008,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         write,
         bindFiles: fileUpdate,
         checkFiles: fileUpdate,
+        invalidateFiles,
         edit,
         remove,
         clear,

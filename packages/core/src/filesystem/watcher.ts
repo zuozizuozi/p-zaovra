@@ -15,6 +15,7 @@ import { Git } from "../git"
 import { Location } from "../location"
 import { lazy } from "../util/lazy"
 import { Ignore } from "./ignore"
+import { WatcherSignal } from "./watcher-signal"
 import { Protected } from "./protected"
 
 declare const ZAOVRA_LIBC: string | undefined
@@ -57,6 +58,9 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/F
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const signals = yield* WatcherSignal.Service
+    yield* signals.publish()
+    yield* Effect.addFinalizer(() => signals.publish())
     if (yield* Flag.ZAOVRA_EXPERIMENTAL_DISABLE_FILEWATCHER) return Service.of({})
 
     const backend = getBackend()
@@ -83,22 +87,27 @@ const layer = Layer.effect(
       Effect.promise(() => Promise.allSettled(subscriptions.map((subscription) => subscription.unsubscribe()))),
     )
 
-    const callback: ParcelWatcher.SubscribeCallback = (_error, updates) => {
-      for (const update of updates) {
-        if (update.type === "create") runFork(events.publish(Event.Updated, { file: update.path, event: "add" }))
-        if (update.type === "update") runFork(events.publish(Event.Updated, { file: update.path, event: "change" }))
-        if (update.type === "delete") runFork(events.publish(Event.Updated, { file: update.path, event: "unlink" }))
-      }
-    }
-
-    const subscribe = (directory: string, ignore: string[]) => {
+    const subscribe = (directory: string, ignore: string[], all = false) => {
+      const callback = subscriptionCallback(
+        (file) => runFork(signals.publish(file)),
+        (update) =>
+          runFork(
+            events.publish(Event.Updated, {
+              file: update.path,
+              event: update.type === "create" ? "add" : update.type === "delete" ? "unlink" : "change",
+            }),
+          ),
+        all,
+      )
       const pending = w.subscribe(directory, callback, { ignore, backend })
       return Effect.promise(() => pending).pipe(
         Effect.tap((subscription) => Effect.sync(() => subscriptions.push(subscription))),
         Effect.timeout(SUBSCRIBE_TIMEOUT_MS),
         Effect.catchCause((cause) => {
           pending.then((subscription) => subscription.unsubscribe()).catch(() => {})
-          return Effect.logError("failed to subscribe", { directory, cause: Cause.pretty(cause) })
+          return signals
+            .publish()
+            .pipe(Effect.andThen(Effect.logError("failed to subscribe", { directory, cause: Cause.pretty(cause) })))
         }),
       )
     }
@@ -119,16 +128,18 @@ const layer = Layer.effect(
         const ignore = (yield* fs.readDirectoryEntries(vcs).pipe(Effect.catch(() => Effect.succeed([])))).flatMap(
           (entry) => (entry.name === "HEAD" ? [] : [entry.name]),
         )
-        yield* Effect.forkScoped(subscribe(vcs, ignore))
+        yield* Effect.forkScoped(subscribe(vcs, ignore, true))
       }
     }
 
     return Service.of({})
   }).pipe(
     Effect.catchCause((cause) => {
-      return Effect.logError("failed to init watcher service", { cause: Cause.pretty(cause) }).pipe(
-        Effect.as(Service.of({})),
-      )
+      return Effect.gen(function* () {
+        const signals = yield* WatcherSignal.Service
+        yield* signals.publish()
+        yield* Effect.logError("failed to init watcher service", { cause: Cause.pretty(cause) })
+      }).pipe(Effect.as(Service.of({})))
     }),
   ),
 )
@@ -136,5 +147,23 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [FSUtil.node, Location.node, Config.node, Git.node, EventV2.node],
+  deps: [WatcherSignal.node, FSUtil.node, Location.node, Config.node, Git.node, EventV2.node],
 })
+
+/** Native callback adapter; even an error without updates must revoke prior evidence. */
+export function subscriptionCallback(
+  invalidate: (file?: string) => void,
+  updated: (event: ParcelWatcher.Event) => void,
+  all = false,
+): ParcelWatcher.SubscribeCallback {
+  return (error, updates) => {
+    if (error) {
+      invalidate()
+      return
+    }
+    for (const update of updates ?? []) {
+      invalidate(all ? undefined : update.path)
+      updated(update)
+    }
+  }
+}

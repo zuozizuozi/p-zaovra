@@ -180,9 +180,11 @@ it.live("knowledge pages reject unchecked, cross-scope, changed and duplicate so
   }),
 )
 
-it.live("file dependency warnings invalidate pages without rewriting the user's note; check time alone does not", () =>
+it.live("persisted current cannot restore page eligibility; user wording and source hashes survive checks", () =>
   Effect.gen(function* () {
     const h = yield* setup
+    const page = yield* h.pages.publish(h.authority, h.input)
+    expect(page.status).toBe("current")
     const files = [
       {
         path: "test/config.ts",
@@ -212,7 +214,8 @@ it.live("file dependency warnings invalidate pages without rewriting the user's 
     })
     const checked = yield* h.memory.get(bound.id)
     if (!checked) throw new Error("checked source missing")
-    const page = yield* h.pages.publish(h.authority, { ...h.input, sources: [MemoryPages.source(checked)] })
+    expect(yield* h.pages.sources(h.authority.scope)).toEqual([])
+    expect(MemoryContext.lines([checked])).toEqual([])
     yield* h.memory.checkFiles({
       scope: h.authority.scope,
       id: checked.id,
@@ -222,7 +225,7 @@ it.live("file dependency warnings invalidate pages without rewriting the user's 
     const rechecked = yield* h.memory.get(checked.id)
     if (!rechecked) throw new Error("rechecked source missing")
     expect(MemoryPages.source(rechecked)).toEqual(MemoryPages.source(checked))
-    expect((yield* h.pages.get(h.authority.scope, page.id))?.status).toBe("current")
+    expect((yield* h.pages.get(h.authority.scope, page.id))?.status).toBe("stale")
     yield* h.memory.checkFiles({
       scope: h.authority.scope,
       id: rechecked.id,

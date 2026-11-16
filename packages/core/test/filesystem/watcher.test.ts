@@ -9,6 +9,13 @@ import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Watcher } from "@zaovra-ai/core/filesystem/watcher"
+import { WatcherSignal } from "@zaovra-ai/core/filesystem/watcher-signal"
+import { MemoryFileInvalidation } from "@zaovra-ai/core/memory/file-invalidation"
+import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { Database } from "@zaovra-ai/core/database/database"
+import { MemoryNoteTable } from "@zaovra-ai/core/memory/sql"
+import { SessionSchema } from "@zaovra-ai/core/session/schema"
+import { eq } from "drizzle-orm"
 import { Location } from "@zaovra-ai/core/location"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { location } from "../fixture/location"
@@ -41,10 +48,20 @@ function provide(directory: string, vcs?: Location.Interface["vcs"]) {
     Location.Service.of(location({ directory: AbsolutePath.make(directory) }, { vcs })),
   )
   return Effect.provide(
-    AppNodeBuilder.build(Watcher.node, [
-      [Config.node, configLayer],
-      [Location.node, locationLayer],
-    ]).pipe(Layer.provide(flagsLayer)),
+    AppNodeBuilder.build(
+      LayerNode.group([
+        Location.node,
+        Watcher.node,
+        WatcherSignal.node,
+        MemoryFileInvalidation.node,
+        MemoryStore.node,
+        Database.node,
+      ]),
+      [
+        [Config.node, configLayer],
+        [Location.node, locationLayer],
+      ],
+    ).pipe(Layer.provide(flagsLayer)),
   )
 }
 
@@ -144,6 +161,72 @@ function ready(directory: string) {
 }
 
 describeWatcher("Watcher", () => {
+  it.live("a real native event reaches memory invalidation and revokes the old check revision", () =>
+    withTmp(
+      (directory) =>
+        Effect.gen(function* () {
+          const memory = yield* MemoryStore.Service
+          const database = yield* Database.Service
+          const signals = yield* WatcherSignal.Service
+          const place = yield* Location.Service
+          const fs = yield* FSUtil.Service
+          const scope = yield* memory.scope({ project: place.project.id, directory })
+          yield* ready(directory)
+          const note = (yield* memory.write({
+            scope,
+            text: "Native event fixture",
+            kind: "practice",
+            origin: "user",
+            status: "verified",
+          }))!
+          const files = [
+            {
+              path: "binding.txt",
+              directory,
+              identity: "storage-fixture",
+              digest: "a".repeat(64),
+              bytes: 1,
+              sessionID: SessionSchema.ID.make("ses_watcher_binding"),
+              seq: 1,
+            },
+          ]
+          yield* memory.bindFiles({ scope, id: note.id, expectedRevision: 0, files })
+          yield* memory.checkFiles({
+            scope,
+            id: note.id,
+            expectedRevision: 1,
+            results: [{ path: "binding.txt", state: "unchanged" }],
+          })
+          const changed = yield* Deferred.make<void>()
+          yield* signals.listen((file) =>
+            file === path.join(directory, "binding.txt")
+              ? Deferred.succeed(changed, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+          )
+          yield* fs.writeFileString(path.join(directory, "binding.txt"), "changed")
+          yield* Deferred.await(changed).pipe(Effect.timeout("5 seconds"))
+          const row = yield* database.db
+            .select()
+            .from(MemoryNoteTable)
+            .where(eq(MemoryNoteTable.id, note.id))
+            .get()
+            .pipe(Effect.orDie)
+          expect(row?.files).toMatchObject({ state: "unknown" })
+          expect(row!.file_revision).toBeGreaterThan(2)
+          expect(row?.text).toBe(note.text)
+          expect(
+            yield* memory.checkFiles({
+              scope,
+              id: note.id,
+              expectedRevision: 2,
+              results: [{ path: "binding.txt", state: "unchanged" }],
+            }),
+          ).toBe(false)
+        }),
+      { git: true, init: (directory) => fs.writeFile(path.join(directory, "binding.txt"), "a") },
+    ),
+  )
+
   it.live("publishes root create, update, and delete events", () =>
     withTmp(
       (directory) =>
