@@ -103,7 +103,27 @@ export async function billingHistory(input: {
   turns: ReadonlyArray<Turn>
   expectedTurns: number
 }): Promise<Result> {
+  return historicalFacts({
+    ...input,
+    expected: {
+      service: "billing",
+      symptom: "upstream_timeout",
+      previousSeconds: 30,
+      chosenSeconds: 45,
+      retryRisk: "duplicate_charge",
+    },
+  })
+}
+
+/** The expected values come from the frozen host manifest, never from the workspace. */
+export async function historicalFacts(input: {
+  directory: string
+  turns: ReadonlyArray<Turn>
+  expectedTurns: number
+  expected: Readonly<Record<string, string | number>>
+}): Promise<Result> {
   if (!completed(input.turns, input.expectedTurns)) return { pass: false, reason: "session-not-completed" }
+  if (!Object.keys(input.expected).length) return { pass: false, reason: "empty-history-expectation" }
   try {
     const file = await open(await artifact(input.directory, "history.json"), "r")
     const text = await (async () => {
@@ -127,11 +147,8 @@ export async function billingHistory(input: {
       return { pass: false, reason: "history-not-object" }
     const fields = value as Record<string, unknown>
     const pass =
-      fields.service === "billing" &&
-      fields.symptom === "upstream_timeout" &&
-      fields.previousSeconds === 30 &&
-      fields.chosenSeconds === 45 &&
-      fields.retryRisk === "duplicate_charge"
+      Object.keys(fields).length === Object.keys(input.expected).length &&
+      Object.entries(input.expected).every(([key, value]) => Object.hasOwn(fields, key) && fields[key] === value)
     return { pass, reason: pass ? "historical-facts-match" : "historical-facts-differ" }
   } catch {
     return { pass: false, reason: "history-artifact-invalid" }
