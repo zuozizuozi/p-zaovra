@@ -3,7 +3,7 @@ export * as WatcherSignal from "./watcher-signal"
 import { Context, Effect, Layer, Scope } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 
-type Listener = (file?: string) => Effect.Effect<void>
+type Listener = (files?: ReadonlyArray<string>) => Effect.Effect<void>
 
 /** Location-local hints. Undefined means coverage was lost or all bindings may have changed. */
 export class Service extends Context.Service<
@@ -19,7 +19,7 @@ export const layer = Layer.effect(
   Effect.sync(() => {
     const listeners = new Set<Listener>()
     return Service.of({
-      publish: (file) => Effect.forEach([...listeners], (listener) => listener(file)).pipe(Effect.asVoid),
+      publish: (files) => Effect.forEach([...listeners], (listener) => listener(files)).pipe(Effect.asVoid),
       listen: (listener) =>
         Effect.gen(function* () {
           listeners.add(listener)

@@ -128,14 +128,88 @@ it.effect("ancestor changes apply; sibling paths, other roots/scopes and relativ
     const h = yield* setup
     const before = yield* raw(h.note.id)
     for (const file of [path.join(directory, "src-other"), path.join(directory, "src/config.ts.bak"), "src/config.ts"])
-      yield* h.store.invalidateFiles({ scope, directory, path: file })
+      yield* h.store.invalidateFiles({ scope, directory, paths: [file] })
     yield* h.store.invalidateFiles({ scope: Memory.Scope.user, directory })
     yield* h.store.invalidateFiles({ scope, directory: path.resolve("/other") })
     expect(yield* raw(h.note.id)).toEqual(before)
-    yield* h.store.invalidateFiles({ scope, directory, path: path.join(directory, "src") })
+    yield* h.store.invalidateFiles({ scope, directory, paths: [path.join(directory, "src")] })
     expect((yield* raw(h.note.id)).file_revision).toBe(before.file_revision + 1)
-    yield* h.store.invalidateFiles({ scope, directory, path: path.dirname(directory) })
+    yield* h.store.invalidateFiles({ scope, directory, paths: [path.dirname(directory)] })
     expect((yield* raw(h.note.id)).file_revision).toBe(before.file_revision + 2)
+  }),
+)
+
+it.effect("one native batch notifies once and increments each matching note once", () =>
+  Effect.gen(function* () {
+    const h = yield* setup
+    yield* Effect.gen(function* () {
+      const before = yield* raw(h.note.id)
+      const pending: Effect.Effect<void>[] = []
+      const hints: (ReadonlyArray<string> | undefined)[] = []
+      const delivered: string[] = []
+      const callback = Watcher.subscriptionCallback(
+        (files) => {
+          hints.push(files)
+          pending.push(h.signals.publish(files))
+        },
+        (event) => delivered.push(event.path),
+      )
+      const leaf = path.join(directory, "src/config.ts")
+      const parent = path.join(directory, "src")
+      callback(null, [
+        { type: "update", path: leaf },
+        { type: "update", path: parent },
+        { type: "delete", path: leaf },
+      ])
+      expect(hints).toEqual([[leaf, parent]])
+      expect(delivered).toEqual([leaf, parent, leaf])
+      yield* Effect.all(pending)
+      expect((yield* raw(h.note.id)).file_revision).toBe(before.file_revision + 1)
+      expect(
+        yield* h.store.checkFiles({
+          scope,
+          id: h.note.id,
+          expectedRevision: before.file_revision,
+          results: [{ path: files[0].path, state: "unchanged" }],
+        }),
+      ).toBe(false)
+      pending.length = 0
+      callback(null, [{ type: "update", path: leaf }])
+      yield* Effect.all(pending)
+      expect((yield* raw(h.note.id)).file_revision).toBe(before.file_revision + 2)
+    }).pipe(Effect.provide(service), Effect.scoped)
+  }),
+)
+
+it.effect("oversized batches revoke all instead of dropping paths; empty callbacks do nothing", () =>
+  Effect.gen(function* () {
+    const h = yield* setup
+    yield* Effect.gen(function* () {
+      const before = yield* raw(h.note.id)
+      const pending: Effect.Effect<void>[] = []
+      const hints: (ReadonlyArray<string> | undefined)[] = []
+      const delivered: string[] = []
+      const callback = Watcher.subscriptionCallback(
+        (files) => {
+          hints.push(files)
+          pending.push(h.signals.publish(files))
+        },
+        (event) => delivered.push(event.path),
+      )
+      callback(null, [])
+      expect(hints).toEqual([])
+      callback(
+        null,
+        Array.from({ length: 129 }, (_, index) => ({
+          type: "update" as const,
+          path: path.join(directory, `unrelated-${index}`),
+        })),
+      )
+      expect(hints).toEqual([undefined])
+      expect(delivered).toHaveLength(129)
+      yield* Effect.all(pending)
+      expect((yield* raw(h.note.id)).file_revision).toBe(before.file_revision + 1)
+    }).pipe(Effect.provide(service), Effect.scoped)
   }),
 )
 

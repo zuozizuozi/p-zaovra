@@ -13,9 +13,9 @@ export const layer = Layer.effectDiscard(
     const store = yield* MemoryStore.Service
     const signals = yield* WatcherSignal.Service
     const scope = yield* store.scope({ project: location.project.id, directory: location.directory })
-    const invalidate = (file?: string) =>
+    const invalidate = (files?: ReadonlyArray<string>) =>
       Effect.forEach([scope, Memory.Scope.user], (scope) =>
-        store.invalidateFiles({ scope, directory: location.directory, path: file }),
+        store.invalidateFiles({ scope, directory: location.directory, paths: files }),
       ).pipe(Effect.asVoid)
     yield* signals.listen(invalidate)
     // Covers hints emitted before subscription. Store projections also reject later cross-process current writes.

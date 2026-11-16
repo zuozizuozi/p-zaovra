@@ -198,8 +198,8 @@ describeWatcher("Watcher", () => {
             results: [{ path: "binding.txt", state: "unchanged" }],
           })
           const changed = yield* Deferred.make<void>()
-          yield* signals.listen((file) =>
-            file === path.join(directory, "binding.txt")
+          yield* signals.listen((files) =>
+            files?.includes(path.join(directory, "binding.txt"))
               ? Deferred.succeed(changed, undefined).pipe(Effect.asVoid)
               : Effect.void,
           )

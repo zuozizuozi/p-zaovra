@@ -89,7 +89,7 @@ const layer = Layer.effect(
 
     const subscribe = (directory: string, ignore: string[], all = false) => {
       const callback = subscriptionCallback(
-        (file) => runFork(signals.publish(file)),
+        (files) => runFork(signals.publish(files)),
         (update) =>
           runFork(
             events.publish(Event.Updated, {
@@ -152,7 +152,7 @@ export const node = makeLocationNode({
 
 /** Native callback adapter; even an error without updates must revoke prior evidence. */
 export function subscriptionCallback(
-  invalidate: (file?: string) => void,
+  invalidate: (files?: ReadonlyArray<string>) => void,
   updated: (event: ParcelWatcher.Event) => void,
   all = false,
 ): ParcelWatcher.SubscribeCallback {
@@ -161,9 +161,10 @@ export function subscriptionCallback(
       invalidate()
       return
     }
-    for (const update of updates ?? []) {
-      invalidate(all ? undefined : update.path)
-      updated(update)
-    }
+    if (!updates?.length) return
+    // One private invalidation per native batch. A large batch revokes all
+    // rather than allocating an unbounded path set or dropping changed paths.
+    invalidate(all || updates.length > 128 ? undefined : [...new Set(updates.map((update) => update.path))])
+    for (const update of updates) updated(update)
   }
 }

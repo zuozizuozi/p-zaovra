@@ -1,6 +1,6 @@
 export * as MemoryStore from "./store"
 
-import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "../database/database"
@@ -109,7 +109,7 @@ export interface Interface {
   readonly invalidateFiles: (input: {
     readonly scope: Memory.Scope
     readonly directory: string
-    readonly path?: string
+    readonly paths?: ReadonlyArray<string>
   }) => Effect.Effect<void>
   readonly edit: (id: Memory.ID, input: EditInput) => Effect.Effect<Memory.Note | undefined>
   readonly remove: (id: Memory.ID) => Effect.Effect<void>
@@ -534,12 +534,24 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               const rows = yield* tx
                 .select()
                 .from(MemoryNoteTable)
-                .where(and(eq(MemoryNoteTable.scope, input.scope), isNull(MemoryNoteTable.time_deleted)))
+                .where(
+                  and(
+                    eq(MemoryNoteTable.scope, input.scope),
+                    isNull(MemoryNoteTable.time_deleted),
+                    isNotNull(MemoryNoteTable.files),
+                  ),
+                )
                 .all()
               yield* Effect.forEach(rows, (row) =>
                 Effect.gen(function* () {
                   const held = MemoryFileEvidence.decode(row.files)
-                  if (Option.isNone(held) || !MemoryFileEvidence.affected(held.value, input, platform)) return
+                  if (Option.isNone(held)) return
+                  if (
+                    !(input.paths ?? [undefined]).some((path) =>
+                      MemoryFileEvidence.affected(held.value, { directory: input.directory, path }, platform),
+                    )
+                  )
+                    return
                   // Increment even unknown/alert rows: a check started before this hint must lose CAS.
                   yield* tx
                     .update(MemoryNoteTable)
