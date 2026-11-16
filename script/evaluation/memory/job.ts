@@ -3,7 +3,13 @@ import path from "node:path"
 import { randomUUID } from "node:crypto"
 
 /** Evaluation host only. Run beneath the outer resource/profile supervisor. */
-export async function openJob(input: { directory: string; log: string; command: string[]; seconds?: number }) {
+export async function openJob(input: {
+  directory: string
+  log: string
+  command: string[]
+  seconds?: number
+  environment?: Record<string, string>
+}) {
   if (process.platform !== "win32") throw new Error("evaluation-job-requires-windows")
   const python = Bun.which("python")
   const seconds = input.seconds ?? 900
@@ -30,7 +36,7 @@ export async function openJob(input: { directory: string; log: string; command: 
       "--",
       ...input.command,
     ],
-    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: input.environment },
   )
   const messages: Record<string, unknown>[] = []
   let failure: Error | undefined
