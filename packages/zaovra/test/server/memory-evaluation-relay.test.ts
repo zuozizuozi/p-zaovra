@@ -303,3 +303,74 @@ test("owned relay identity is frozen and a copied or stopped handle cannot grant
     await relay.stop()
   }
 })
+
+for (const delay of ["headers", "frames"] as const)
+  test(`evaluation relay preserves a stream with ${delay} idle longer than ten seconds`, async () => {
+    await using tmp = await tmpdir()
+    const first = "data: first\n\n"
+    const last = "data: last\n\ndata: [DONE]\n\n"
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      // Only the relay under test should exercise Bun's default idle timeout.
+      idleTimeout: 0,
+      async fetch() {
+        if (delay === "headers") {
+          await Bun.sleep(11500)
+          return new Response(first + last, { headers: { "content-type": "text/event-stream" } })
+        }
+        let timer: ReturnType<typeof setTimeout>
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(stream) {
+              stream.enqueue(new TextEncoder().encode(first))
+              timer = setTimeout(() => {
+                stream.enqueue(new TextEncoder().encode(last))
+                stream.close()
+              }, 11500)
+            },
+            cancel() {
+              clearTimeout(timer)
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      },
+    })
+    const journal = path.join(tmp.path, "delayed.jsonl")
+    const relay = startEvaluationRelay({
+      baseURL: `http://127.0.0.1:${upstream.port}/v1`,
+      apiKey: "private-test-key",
+      model: "fixture",
+      protocol: "openai-chat",
+      journal,
+      maxRequests: 1,
+      maxRequestBytes: 4096,
+      maxOutput: 64,
+    })
+    try {
+      const response = await fetch(relay.baseURL + "/chat/completions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${relay.apiKey}` },
+        body: JSON.stringify({
+          model: "fixture",
+          stream: true,
+          max_tokens: 64,
+          messages: [{ role: "user", content: "hello" }],
+        }),
+        signal: AbortSignal.timeout(20000),
+      })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe(first + last)
+    } finally {
+      await relay.stop()
+      await upstream.stop(true)
+    }
+    const records = (await Bun.file(journal).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(records.filter((record) => record.phase === "admitted")).toHaveLength(1)
+    expect(records.filter((record) => record.phase === "eof")).toHaveLength(1)
+    expect(records.some((record) => record.phase === "incomplete" || record.phase === "transport-failed")).toBe(false)
+  }, 25000)

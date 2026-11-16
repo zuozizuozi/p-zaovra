@@ -79,6 +79,7 @@ export function startEvaluationRelay(options: {
     Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
+      idleTimeout: 0,
       maxRequestBodySize: input.maxRequestBytes,
       async fetch(request) {
         const url = new URL(request.url)
