@@ -190,6 +190,35 @@ export async function setupTimeline(
         if (index < 0) throw new Error("Missing fixture message")
         messages[index] = { ...messages[index]!, info } as TimelineMessage
       }
+      if (input.v2ToolUpdates && valid.payload.type === "message.part.delta") {
+        const props = valid.payload.properties
+        const message = messages.find((item) => item.info.id === props.messageID)
+        const part = message?.parts.find((item) => item.id === props.partID)
+        if (!part || (part.type !== "text" && part.type !== "reasoning") || props.field !== "text")
+          throw new Error("V2 text fixture delta requires an existing text or reasoning part")
+        const offset = part.text.length
+        part.text += props.delta
+        await transport.writeRaw(
+          `data: ${JSON.stringify({
+            directory,
+            payload: {
+              id: valid.payload.id,
+              type: `session.next.${part.type}.delta`,
+              properties: {
+                sessionID,
+                assistantMessageID: props.messageID,
+                [part.type === "text" ? "textID" : "reasoningID"]: part.id,
+                delta: props.delta,
+                offset,
+              },
+            },
+          })}\n\n`,
+          undefined,
+          describeEvent(valid),
+        )
+        if (delay) await page.waitForTimeout(delay)
+        return
+      }
       if (input.v2ToolUpdates && valid.payload.type === "message.part.updated") {
         const part = valid.payload.properties.part
         const toolState = part.type === "tool" ? part.state : undefined
@@ -198,6 +227,7 @@ export async function setupTimeline(
         const index = messages.findIndex((message) => message.info.id === part.messageID)
         if (index < 0) throw new Error("Missing fixture message")
         const current = messages[index]!
+        const previous = current.parts.find((item) => item.id === part.id)
         const updated = {
           info: current.info,
           parts: current.parts.some((item) => item.id === part.id)
@@ -206,6 +236,44 @@ export async function setupTimeline(
         } as TimelineMessage
         decodeMessage(updated, decodeOptions)
         messages[index] = updated
+        if (part.type === "text" || part.type === "reasoning") {
+          const before = previous && (previous.type === "text" || previous.type === "reasoning") ? previous.text : ""
+          if (!part.text.startsWith(before)) throw new Error("V2 text fixture updates must append")
+          const properties = {
+            sessionID,
+            assistantMessageID: part.messageID,
+            [part.type === "text" ? "textID" : "reasoningID"]: part.id,
+          }
+          // Use the same V2 identity as HTTP hydration; legacy bare part IDs remount on the final read.
+          await transport.writeRaw(
+            [
+              ...(!previous
+                ? [
+                    {
+                      id: valid.payload.id + "-started",
+                      type: `session.next.${part.type}.started`,
+                      properties: { ...properties, timestamp: 1700000002000 },
+                    },
+                  ]
+                : []),
+              ...(part.text.length > before.length
+                ? [
+                    {
+                      id: valid.payload.id,
+                      type: `session.next.${part.type}.delta`,
+                      properties: { ...properties, delta: part.text.slice(before.length), offset: before.length },
+                    },
+                  ]
+                : []),
+            ]
+              .map((payload) => `data: ${JSON.stringify({ directory, payload })}\n\n`)
+              .join(""),
+            undefined,
+            describeEvent(valid),
+          )
+          if (delay) await page.waitForTimeout(delay)
+          return
+        }
         if (!toolState) {
           const acknowledgement = await transport.send(valid, { marker: describeEvent(valid) })
           await recordTimelineDelivery(valid, acknowledgement)

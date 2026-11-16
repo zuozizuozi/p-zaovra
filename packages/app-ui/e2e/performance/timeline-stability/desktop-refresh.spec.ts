@@ -23,6 +23,7 @@ for (const [kind, detail] of Object.entries({
 })) {
   test(`error card keeps ${kind} details behind disclosure`, async ({ page }, info) => {
     const timeline = await setupTimeline(page, {
+      v2ToolUpdates: true,
       messages: [userMessage(), assistantMessage([], { completed: false })],
     })
     await timeline.send(
@@ -34,6 +35,10 @@ for (const [kind, detail] of Object.entries({
       ),
     )
     const card = page.locator('[data-component="execution-error-card"]')
+    // A failed attempt is quiet while its turn can still retry. Settle the turn before checking its final error.
+    await expect(card).toBeHidden()
+    await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+    await timeline.send(status("idle"))
     await expect(card).toBeVisible()
     await expect(card.locator("pre")).toBeHidden()
     await expect(card.getByRole("button", { name: "Check model service", exact: true })).toBeHidden()
@@ -139,6 +144,7 @@ test("synthetic continuations share one disclosure and preserve final text", asy
 test("empty checks remain absent and error recovery remains available beside its card", async ({ page }) => {
   const requests: unknown[] = []
   const timeline = await setupTimeline(page, {
+    v2ToolUpdates: true,
     settings: { newLayoutDesigns: true },
     messages: [userMessage(), assistantMessage([], { completed: false })],
   })
@@ -163,7 +169,7 @@ test("empty checks remain absent and error recovery remains available beside its
   await timeline.send(
     messageUpdated(
       assistantMessage([], {
-        completed: false,
+        completed: true,
         error: { name: "APIError", data: { message: "HTTP 401: invalid API key", isRetryable: false } },
       }).info,
     ),
@@ -173,14 +179,14 @@ test("empty checks remain absent and error recovery remains available beside its
   await expect(card).toBeVisible()
   await card.locator("summary").click()
   await expect(card.locator("pre")).toHaveText("HTTP 401: invalid API key")
-  const retry = page
-    .locator('[data-component="session-recovery-actions"]')
-    .getByRole("button", { name: "Retry", exact: true })
-  await expect(retry).toHaveCount(1)
-  await expect(retry).toBeVisible()
+  const resume = page
+    .locator('[data-component="session-recovery"]')
+    .getByRole("button", { name: "Continue", exact: true })
+  await expect(resume).toHaveCount(1)
+  await expect(resume).toBeVisible()
   await expect(page.locator('[data-component="verification-summary"]')).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Refresh verification status", exact: true })).toHaveCount(0)
-  await retry.click()
+  await resume.click()
   await expect.poll(() => requests.length).toBe(1)
-  expect(requests[0]).toMatchObject({ messageID: assistantMessage([]).info.id, action: "retry" })
+  expect(requests[0]).toMatchObject({ messageID: assistantMessage([]).info.id, action: "continue" })
 })

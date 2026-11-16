@@ -169,10 +169,13 @@ test.describe("timeline visual lifecycle stability", () => {
   }, testInfo) => {
     const reasoningID = "prt_reasoning_visible"
     const textID = "prt_streamed_text"
+    const reasoningPartID = `${assistantID}:${reasoningID}`
+    const textPartID = `${assistantID}:${textID}`
     const assistant = assistantMessage([], { completed: false })
     const timeline = await setupTimeline(page, {
       messages: [userMessage(), assistant],
       settings: { showReasoningSummaries: true },
+      v2ToolUpdates: true,
       cpuRate: 4,
     })
     await timeline.send(status("busy"), 120)
@@ -184,22 +187,24 @@ test.describe("timeline visual lifecycle stability", () => {
     const details = page.locator(
       `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
     )
-    await expect(details).toHaveAttribute("aria-expanded", "false")
-    await details.click()
-    await expect(details).toHaveAttribute("aria-expanded", "true")
     const regions = defineVisualRegions({
       thinking: { selector: '[data-timeline-row="AssistantHeading"]' },
       reasoning: {
-        selector: `[data-timeline-part-id="${reasoningID}"]`,
+        selector: `[data-timeline-part-id="${reasoningPartID}"]`,
         closest: '[data-timeline-row="AssistantPart"]',
       },
-      text: { selector: `[data-timeline-part-id="${textID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
+      text: { selector: `[data-timeline-part-id="${textPartID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
     })
+    // Empty thinking has no expandable details. The control appears with the first nonempty reasoning.
+    await expect(details).toHaveCount(0)
     await startVisualProbe(page, regions)
     await timeline.send(partUpdated(reasoningPart(reasoningID, "")), 100)
-    await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(0)
+    await expect(page.locator(`[data-timeline-part-id="${reasoningPartID}"]`)).toHaveCount(0)
     await timeline.send(partUpdated(reasoningPart(reasoningID, "## Planning\n\nChecking the visible timeline.")), 160)
-    await timeline.waitForPart(reasoningID)
+    await expect(details).toHaveAttribute("aria-expanded", "false")
+    await details.click()
+    await expect(details).toHaveAttribute("aria-expanded", "true")
+    await timeline.waitForPart(reasoningPartID)
     await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveAttribute(
       "data-state",
       "thinking",
@@ -227,7 +232,7 @@ test.describe("timeline visual lifecycle stability", () => {
         { type: "flow", regions: ["reasoning", "text"] },
       ]),
     )
-    await expect(page.locator(`[data-timeline-part-id="${textID}"]`)).toContainText("stable output")
+    await expect(page.locator(`[data-timeline-part-id="${textPartID}"]`)).toContainText("stable output")
   })
 })
 

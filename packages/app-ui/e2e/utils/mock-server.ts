@@ -306,7 +306,27 @@ function v2Message(value: unknown): SessionMessage {
     model: { id: item.info.modelID, providerID: item.info.providerID, variant: item.info.variant },
     cost: item.info.cost,
     tokens: item.info.tokens,
-    finish: item.info.finish,
+    finish: item.info.error?.name === "MessageAbortedError" ? "interrupted" : item.info.finish,
+    error:
+      item.info.error &&
+      item.info.error.name !== "MessageAbortedError" &&
+      "message" in item.info.error.data &&
+      typeof item.info.error.data.message === "string"
+        ? {
+            type: "unknown",
+            message: item.info.error.data.message,
+            ...(item.info.error.name === "APIError"
+              ? {
+                  metadata: {
+                    ...item.info.error.data.metadata,
+                    ...(item.info.error.data.statusCode !== undefined
+                      ? { statusCode: String(item.info.error.data.statusCode) }
+                      : {}),
+                  },
+                }
+              : {}),
+          }
+        : undefined,
     content: item.parts.flatMap((part): Extract<SessionMessage, { type: "assistant" }>["content"] => {
       if (part.type === "text" || part.type === "reasoning") return [{ id: part.id, type: part.type, text: part.text }]
       if (part.type !== "tool") return []
