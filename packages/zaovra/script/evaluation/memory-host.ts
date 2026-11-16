@@ -1,4 +1,5 @@
-import { Effect, Layer, Schema } from "effect"
+import { serialize, deserialize } from "node:v8"
+import { Effect, Layer, Option, Schema } from "effect"
 import { Catalog } from "@zaovra-ai/core/catalog"
 import { Credential } from "@zaovra-ai/core/credential"
 import { Location } from "@zaovra-ai/core/location"
@@ -14,7 +15,7 @@ import { createEvaluationMemoryProfile } from "../../../../script/evaluation/mem
 
 /** Only the isolated launcher reads this private parent capability. No product route/config switch. */
 export function createMemoryHost(value: string, generation: string) {
-  const input = Schema.decodeUnknownSync(
+  const decoded = Schema.decodeUnknownOption(
     Schema.UnknownFromJsonString.pipe(
       Schema.decodeTo(
         Schema.Struct({
@@ -27,6 +28,8 @@ export function createMemoryHost(value: string, generation: string) {
       ),
     ),
   )(value)
+  if (Option.isNone(decoded)) throw new Error("invalid-evaluation-memory-host")
+  const input = decoded.value
   const url = new URL(input.url)
   if (
     url.protocol !== "http:" ||
@@ -82,13 +85,13 @@ export function createMemoryHost(value: string, generation: string) {
         redirect: "error",
         signal: AbortSignal.timeout(5000),
         headers: { authorization: `Bearer ${input.key}`, "content-type": "application/json" },
-        body: JSON.stringify({ generation, model }),
+        body: JSON.stringify({ generation, snapshot: serialize(model).toString("base64") }),
       }),
     )
     if (!response.ok) return yield* Effect.die("evaluation-memory-profile-rejected")
-    const data = Schema.decodeUnknownSync(
+    const decoded = Schema.decodeUnknownOption(
       Schema.Struct({
-        model: ModelV2.Info,
+        snapshot: Schema.String,
         binding: Schema.Struct({
           baseURL: Schema.String,
           modelID: Schema.String,
@@ -96,7 +99,11 @@ export function createMemoryHost(value: string, generation: string) {
         }),
       }),
     )(yield* Effect.promise(() => response.json()))
-    grant = createEvaluationMemoryProfile({ model: data.model, variant: undefined, binding: data.binding })
+    if (Option.isNone(decoded) || decoded.value.snapshot.length > 60000)
+      return yield* Effect.die("evaluation-memory-profile-invalid")
+    const expected: unknown = deserialize(Buffer.from(decoded.value.snapshot, "base64"))
+    if (!Schema.is(ModelV2.Info)(expected)) return yield* Effect.die("evaluation-memory-profile-invalid")
+    grant = createEvaluationMemoryProfile({ model: expected, variant: undefined, binding: decoded.value.binding })
     if (grant.profile.memoryNote(model, undefined) !== true)
       return yield* Effect.die("evaluation-memory-profile-mismatch")
   })

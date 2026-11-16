@@ -1,3 +1,4 @@
+import { serialize, deserialize } from "node:v8"
 import { randomUUID } from "node:crypto"
 import { Schema } from "effect"
 import { Model } from "../../../packages/schema/src/model"
@@ -50,9 +51,11 @@ export function createMemoryAuthority(input: {
           try {
             if (revoked) throw new Error("evaluation-memory-authority-revoked")
             evaluationRelayBinding(input.relay)
-            const body = (await request.json()) as { generation?: unknown; model?: unknown }
+            const body = (await request.json()) as { generation?: unknown; snapshot?: unknown }
             if (body.generation !== generation) throw new Error("generation")
-            const model = Schema.decodeUnknownSync(Model.Info)(body.model)
+            if (typeof body.snapshot !== "string" || body.snapshot.length > 60000) throw new Error("snapshot")
+            const model: unknown = deserialize(Buffer.from(body.snapshot, "base64"))
+            if (!Schema.is(Model.Info)(model)) throw new Error("model")
             if (
               model.providerID !== input.providerID ||
               model.id !== input.modelID ||
@@ -75,7 +78,7 @@ export function createMemoryAuthority(input: {
             if (grant?.profile.memoryNote(model, undefined) !== true) throw new Error("changed")
             return Response.json(
               {
-                model: frozen,
+                snapshot: serialize(frozen).toString("base64"),
                 binding: { baseURL: binding.baseURL, modelID: binding.model, protocol: input.protocol },
               },
               { headers: { "cache-control": "no-store" } },

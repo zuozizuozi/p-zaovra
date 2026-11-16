@@ -103,7 +103,14 @@ test.skipIf(process.platform !== "win32")(
           return { pass: false, reason: "fixture-not-real-capability" }
         },
       })
-      expect(result.counts, JSON.stringify(result) + "\n" + await Bun.file(path.join(root, "stage-1", "backend.log")).text().catch(() => "no backend log")).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
+      expect(
+        result.counts,
+        JSON.stringify(result) +
+          "\n" +
+          (await Bun.file(path.join(root, "stage-1", "backend.log"))
+            .text()
+            .catch(() => "no backend log")),
+      ).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
       expect(new Set(sessions).size).toBe(5)
       expect(calls).toHaveLength(15)
       expect(calls.filter((_, index) => index % 3 === 1).every((call) => call.names.includes("memory_note"))).toBe(true)
