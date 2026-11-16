@@ -2,14 +2,13 @@ import path from "node:path"
 import { execFileSync } from "node:child_process"
 import { mkdir, writeFile, access } from "node:fs/promises"
 import { createHash } from "node:crypto"
-import { prepare, change } from "./cases"
+import { chains, prepare, change } from "./cases"
 import { gradeBilling } from "./billing"
 import { runEvaluationSession } from "./session"
+import { validCapture } from "./observe"
+import type { CaptureBounds } from "./observe"
 
-/** One frozen five-Session A/B pilot, not the full multi-chain acceptance or complete billing ledger.
- * The outer host admits the reserve before calling this and owns the resource-limited process tree.
- */
-export async function runBillingChain(input: {
+type Input = {
   root: string
   candidate: string
   family: "gpt" | "deepseek"
@@ -18,13 +17,44 @@ export async function runBillingChain(input: {
   baseURL: string
   reserveTokens: number
   relayKey: string
-}) {
+}
+
+/** Preserve the original billing entry point and its exact oracle. */
+export function runBillingChain(input: Input) {
+  return runEvaluationChain({
+    ...input,
+    chainID: "billing",
+    grade: async ({ directory, stage, session }) => {
+      if (!session.observation.turn) throw new Error("missing-billing-pilot-turn")
+      return gradeBilling({ directory, stage, turn: session.observation.turn })
+    },
+  })
+}
+
+/** One frozen five-Session A/B chain, not full acceptance or a complete billing ledger.
+ * The outer host admits the reserve and owns the resource-limited process tree. Grading
+ * is a trusted host callback after the Session Job is empty, never supplied by the model.
+ */
+export async function runEvaluationChain(
+  input: Input & {
+    chainID: string
+    capture?: CaptureBounds
+    grade: (input: {
+      directory: string
+      stage: number
+      session: Awaited<ReturnType<typeof runEvaluationSession>>
+    }) => Promise<{ pass: boolean; reason: string }>
+  },
+) {
   const endpoint = new URL(input.baseURL)
   if (
     !path.isAbsolute(input.root) ||
     !/^[a-f0-9]{40}$/.test(input.candidate) ||
     !["gpt", "deepseek"].includes(input.family) ||
     !["A", "B"].includes(input.treatment) ||
+    !chains.some((chain) => chain.id === input.chainID) ||
+    typeof input.grade !== "function" ||
+    !validCapture(input.capture) ||
     !input.modelID.trim() ||
     !Number.isSafeInteger(input.reserveTokens) ||
     input.reserveTokens < 1 ||
@@ -56,7 +86,7 @@ export async function runBillingChain(input: {
   await mkdir(input.root)
   const workspace = path.join(input.root, "workspace")
   const profile = path.join(input.root, "profile")
-  const chain = await prepare(workspace, "billing")
+  const chain = await prepare(workspace, input.chainID)
   await mkdir(path.join(profile, "config", "zaovra"), { recursive: true })
   await writeFile(path.join(profile, ".evaluation-profile"), "zaovra-memory-evaluation-v1\n", { flag: "wx" })
   const providerID = `evaluation-${input.family}`
@@ -104,6 +134,7 @@ export async function runBillingChain(input: {
     memoryNoteProfile: "unknown",
     taskSearch: false,
     tidy: false,
+    ...(input.capture ? { capture: input.capture } : {}),
   }
   // Only the short-lived local relay capability enters this profile. No upstream key enters the backend.
   await writeFile(path.join(input.root, "manifest.json"), JSON.stringify(manifest, null, 2), { flag: "wx" })
@@ -133,13 +164,20 @@ export async function runBillingChain(input: {
         model: manifest.model,
         prompt,
         seconds: manifest.stageDeadlineSeconds,
+        ...(input.capture ? { capture: input.capture } : {}),
         ...(index === 3 ? { poison: { chain: chain.id, sourceSessionID: previousSessionID! } } : {}),
       })
       phase = "session-evidence"
       await writeFile(path.join(stage, "session.json"), JSON.stringify(result, null, 2), { flag: "wx" })
       if (!result.observation.turn) throw new Error("missing-billing-pilot-turn")
       phase = "oracle"
-      const grade = await gradeBilling({ directory: workspace, stage: index + 1, turn: result.observation.turn })
+      const grade = await input.grade({ directory: workspace, stage: index + 1, session: result })
+      if (
+        typeof grade?.pass !== "boolean" ||
+        typeof grade.reason !== "string" ||
+        !/^[a-z][a-z0-9-]{0,159}$/.test(grade.reason)
+      )
+        throw new Error("invalid-host-grade")
       phase = "grade-evidence"
       await writeFile(path.join(stage, "grade.json"), JSON.stringify(grade, null, 2), { flag: "wx" })
       stages[index] = { stage: index + 1, status: "completed", pass: grade.pass, reason: grade.reason }
@@ -154,6 +192,7 @@ export async function runBillingChain(input: {
         "evaluation-backend-ended-before-ready",
         "evaluation-history-incomplete",
         "missing-billing-pilot-turn",
+        "invalid-host-grade",
       ]
       const reason =
         error instanceof Error && allowed.includes(error.message) ? error.message : "unclassified-stage-error"
