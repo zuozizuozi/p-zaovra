@@ -19,6 +19,7 @@ export async function runEvaluationSession(input: {
   prompt: string
   seconds?: number
   providerEnvironment?: Record<string, string>
+  poison?: { chain: string; sourceSessionID: string }
 }) {
   const seconds = input.seconds ?? 180
   if (
@@ -61,6 +62,8 @@ export async function runEvaluationSession(input: {
   const readyFile = path.join(input.stage, "ready.json")
   const bunConfig = path.join(input.stage, "bunfig.toml")
   await Bun.write(bunConfig, "preload = []\n")
+  const fixtureFile = path.join(input.stage, "fixture-request.json")
+  if (input.poison) await Bun.write(fixtureFile, JSON.stringify({ ...input.poison, directory: input.directory }))
   const environment = Object.fromEntries(
     [
       "PATH",
@@ -115,6 +118,7 @@ export async function runEvaluationSession(input: {
       "script/memory-evaluation-backend.ts",
       readyFile,
       generation,
+      ...(input.poison ? [fixtureFile] : []),
     ],
     seconds,
     environment,

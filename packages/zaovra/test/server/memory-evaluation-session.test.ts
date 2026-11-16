@@ -4,6 +4,7 @@ import path from "node:path"
 import { link, mkdir } from "node:fs/promises"
 import { openJob } from "../../../../script/evaluation/memory/job"
 import { runEvaluationSession } from "../../../../script/evaluation/memory/session"
+import { chains } from "../../../../script/evaluation/memory/cases"
 import { tmpdir } from "../fixture/fixture"
 
 test.skipIf(process.platform !== "win32")(
@@ -17,11 +18,13 @@ test.skipIf(process.platform !== "win32")(
     await Bun.write(path.join(profile, ".evaluation-profile"), "zaovra-memory-evaluation-v1\n")
     let calls = 0
     let reject = false
+    const requests: string[] = []
     // Only the upstream is scripted. The backend is the standalone executable under its native Job.
     const provider = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch() {
+      async fetch(request) {
+        requests.push(await request.text())
         calls++
         if (reject)
           return Response.json(
@@ -55,7 +58,7 @@ test.skipIf(process.platform !== "win32")(
         },
       }),
     )
-    const execute = async (stage: string) => {
+    const execute = async (stage: string, sourceSessionID?: string) => {
       try {
         return await runEvaluationSession({
           directory,
@@ -64,6 +67,7 @@ test.skipIf(process.platform !== "win32")(
           model: { id: "fixture-model", providerID: "session-fixture" },
           prompt: "Private fixture prompt. Reply once, do not use tools.",
           seconds: 30,
+          ...(sourceSessionID ? { poison: { chain: "billing", sourceSessionID } } : {}),
         })
       } catch (error) {
         // This local fixture has no credentials or real model data. Preserve startup diagnostics on failure.
@@ -77,7 +81,7 @@ test.skipIf(process.platform !== "win32")(
     }
     try {
       const first = await execute("first")
-      const second = await execute("second")
+      const second = await execute("second", first.admission.sessionID)
       expect(first.admission.sessionID).not.toBe(second.admission.sessionID)
       expect(first.generation).not.toBe(second.generation)
       expect(first.stopped.scope).not.toBe(second.stopped.scope)
@@ -89,6 +93,13 @@ test.skipIf(process.platform !== "win32")(
         expect(JSON.stringify(result)).not.toContain("Private fixture")
       }
       expect(calls).toBe(2)
+      const seeded = await Bun.file(path.join(tmp.path, "second", "fixture.json")).json()
+      expect(seeded).toMatchObject({ chain: "billing", sourceSessionID: first.admission.sessionID })
+      expect(seeded.after).toHaveLength(seeded.before.length + 1)
+      expect(seeded.after.find((note: { id: string }) => note.id === seeded.inserted)).toMatchObject({
+        origin: "model",
+        status: "verified",
+      })
       // Open only after both backend Job trees stopped; verify actual disk persistence across the restart.
       {
         using db = new Database(path.join(profile, "sessions.sqlite"), { readonly: true })
@@ -97,7 +108,28 @@ test.skipIf(process.platform !== "win32")(
             .query("select id from session where id in (?, ?) order by id")
             .all(first.admission.sessionID, second.admission.sessionID),
         ).toHaveLength(2)
+        expect(
+          db.query("select origin, status, verification from memory_note where id = ?").get(seeded.inserted),
+        ).toMatchObject({ origin: "model", status: "verified", verification: "Recorded operational guidance." })
       }
+      await expect(execute("duplicate-fixture", first.admission.sessionID)).rejects.toThrow(
+        "evaluation-backend-ended-before-ready",
+      )
+      expect(calls).toBe(2)
+      const poisonedNote = chains.find((chain) => chain.id === "billing")!.poisonedNote
+      expect(requests[1]).not.toContain(poisonedNote)
+      const configFile = Bun.file(path.join(directory, "zaovra.json"))
+      const config = await configFile.json()
+      await Bun.write(
+        configFile,
+        JSON.stringify({ ...config, memory: { enabled: true, taskSearch: false, index: { enabled: true } } }),
+      )
+      const indexed = await execute("indexed")
+      expect(indexed.stopped).toMatchObject({ remaining: [], controllerExit: 0 })
+      expect(requests[2]).toContain(poisonedNote)
+      expect(requests[2]).not.toContain("intentionally false")
+      expect(requests[2]).not.toContain("artificial-poison")
+      await Bun.write(configFile, JSON.stringify(config))
       const otherProfile = path.join(tmp.path, "other-profile")
       await mkdir(otherProfile)
       await Bun.write(path.join(otherProfile, ".evaluation-profile"), "zaovra-memory-evaluation-v1\n")
@@ -120,9 +152,9 @@ test.skipIf(process.platform !== "win32")(
       }
       reject = true
       await expect(execute("rejected")).rejects.toThrow("evaluation-session-not-completed")
-      expect(calls).toBe(4)
+      expect(calls).toBe(5)
       await expect(execute("first")).rejects.toThrow()
-      expect(calls).toBe(4)
+      expect(calls).toBe(5)
     } finally {
       await provider.stop(true)
     }

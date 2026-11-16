@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { open, realpath } from "node:fs/promises"
 import path from "node:path"
 
@@ -36,6 +36,7 @@ export function completed(turns: ReadonlyArray<Turn>, expected: number) {
 export interface Result {
   pass: boolean
   reason: string
+  artifact?: { sha256: string; bytes: number }
 }
 
 /** Resolve fixed evaluator-owned names; do not follow an artifact out of the fixture. */
@@ -122,11 +123,22 @@ export async function historicalFacts(input: {
   expectedTurns: number
   expected: Readonly<Record<string, string | number>>
 }): Promise<Result> {
+  return jsonFacts({ ...input, name: "history.json" })
+}
+
+/** Fixed host-owned artifact names and expectations, never model assertions. */
+export async function jsonFacts(input: {
+  directory: string
+  name: string
+  turns: ReadonlyArray<Turn>
+  expectedTurns: number
+  expected: Readonly<Record<string, string | number>>
+}): Promise<Result> {
   if (!completed(input.turns, input.expectedTurns)) return { pass: false, reason: "session-not-completed" }
   if (!Object.keys(input.expected).length) return { pass: false, reason: "empty-history-expectation" }
   try {
-    const file = await open(await artifact(input.directory, "history.json"), "r")
-    const text = await (async () => {
+    const file = await open(await artifact(input.directory, input.name), "r")
+    const content = await (async () => {
       try {
         if (!(await file.stat()).isFile()) throw new Error("history-not-file")
         const bytes = Buffer.alloc(16 * 1024 + 1)
@@ -137,19 +149,25 @@ export async function historicalFacts(input: {
           length += result.bytesRead
         }
         if (length > 16 * 1024) throw new Error("history-too-large")
-        return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length))
+        return bytes.subarray(0, length)
       } finally {
         await file.close()
       }
     })()
-    const value: unknown = JSON.parse(text)
+    const evidence = { sha256: createHash("sha256").update(content).digest("hex"), bytes: content.length }
+    let value: unknown
+    try {
+      value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(content))
+    } catch {
+      return { pass: false, reason: "history-artifact-invalid", artifact: evidence }
+    }
     if (typeof value !== "object" || value === null || Array.isArray(value))
-      return { pass: false, reason: "history-not-object" }
+      return { pass: false, reason: "history-not-object", artifact: evidence }
     const fields = value as Record<string, unknown>
     const pass =
       Object.keys(fields).length === Object.keys(input.expected).length &&
       Object.entries(input.expected).every(([key, value]) => Object.hasOwn(fields, key) && fields[key] === value)
-    return { pass, reason: pass ? "historical-facts-match" : "historical-facts-differ" }
+    return { pass, reason: pass ? "historical-facts-match" : "historical-facts-differ", artifact: evidence }
   } catch {
     return { pass: false, reason: "history-artifact-invalid" }
   }

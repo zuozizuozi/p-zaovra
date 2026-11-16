@@ -1,8 +1,8 @@
 import path from "node:path"
-import { link, writeFile } from "node:fs/promises"
+import { link, lstat, writeFile } from "node:fs/promises"
 
 // Standalone evaluation entrypoint. Never imported by the normal application.
-const [ready, generation] = process.argv.slice(2)
+const [ready, generation, fixtureFile] = process.argv.slice(2)
 if (!ready || !path.isAbsolute(ready) || !/^[a-f0-9-]{36}$/.test(generation ?? ""))
   throw new Error("invalid-evaluation-host-arguments")
 for (const name of [
@@ -24,6 +24,20 @@ const { layer, observeRuntime } = await import("./evaluation/runtime-idle")
 const runtime = ManagedRuntime.make(layer, { memoMap })
 const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
 if (!(await runtime.runPromise(observeRuntime)).idle) throw new Error("evaluation-runtime-not-idle-at-start")
+if (fixtureFile) {
+  if (!path.isAbsolute(fixtureFile) || path.dirname(fixtureFile) !== path.dirname(ready))
+    throw new Error("invalid-evaluation-fixture-path")
+  const info = await lstat(fixtureFile)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 4096)
+    throw new Error("invalid-evaluation-fixture-file")
+  const { Schema } = await import("effect")
+  const request = Schema.decodeUnknownSync(
+    Schema.Struct({ chain: Schema.String, directory: Schema.String, sourceSessionID: Schema.String }),
+  )(await Bun.file(fixtureFile).json())
+  const { seedPoison } = await import("./evaluation/memory-fixture")
+  const snapshot = await seedPoison(request)
+  await writeFile(path.join(path.dirname(ready), "fixture.json"), JSON.stringify(snapshot), { flag: "wx" })
+}
 if (process.platform === "win32") {
   // This headless process owns no interactive console; never exempt a leftover host from Job checks.
   const { dlopen, FFIType } = await import("bun:ffi")
