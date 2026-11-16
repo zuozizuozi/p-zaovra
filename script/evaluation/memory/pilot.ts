@@ -33,7 +33,7 @@ export function runBillingChain(input: Input) {
   })
 }
 
-/** One frozen five-Session A/B chain, not full acceptance or a complete billing ledger.
+/** One frozen five-Session A/B/C chain, not full acceptance or a complete billing ledger.
  * The outer host admits the reserve and owns the resource-limited process tree. Grading
  * is a trusted host callback after the Session Job is empty, never supplied by the model.
  */

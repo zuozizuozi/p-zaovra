@@ -9,7 +9,7 @@ import { evaluationRelayBinding } from "./relay"
  * The first projection is read by our owned backend before any model admission in the
  * fresh, host-written profile. Later backends must match that same private snapshot.
  */
-export function createMemoryAuthority(input: {
+export function createMemoryAuthority(options: {
   relay: object
   baseURL: string
   relayKey: string
@@ -17,6 +17,7 @@ export function createMemoryAuthority(input: {
   providerID: string
   protocol: "openai-chat" | "openai-responses"
 }) {
+  const input = { ...options }
   const binding = evaluationRelayBinding(input.relay)
   if (
     binding.baseURL !== input.baseURL ||
@@ -52,6 +53,8 @@ export function createMemoryAuthority(input: {
             if (revoked) throw new Error("evaluation-memory-authority-revoked")
             evaluationRelayBinding(input.relay)
             const body = (await request.json()) as { generation?: unknown; snapshot?: unknown }
+            if (revoked) throw new Error("evaluation-memory-authority-revoked")
+            evaluationRelayBinding(input.relay)
             if (body.generation !== generation) throw new Error("generation")
             if (typeof body.snapshot !== "string" || body.snapshot.length > 60000) throw new Error("snapshot")
             const model: unknown = deserialize(Buffer.from(body.snapshot, "base64"))

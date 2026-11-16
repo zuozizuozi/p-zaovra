@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
+import { evaluationRelayBinding, startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
 import { tmpdir } from "../fixture/fixture"
 
 test("evaluation relay closes upstream work on cancel and repeated stop without claiming EOF", async () => {
@@ -261,5 +261,43 @@ test("evaluation relay refuses redirects, media references and oversized request
     await relay.stop()
     await upstream.stop(true)
     await target.stop(true)
+  }
+})
+
+test("owned relay identity is frozen and a copied or stopped handle cannot grant C permission", async () => {
+  await using tmp = await tmpdir()
+  const options = {
+    baseURL: "http://127.0.0.1:9/v1",
+    apiKey: "fixture-only",
+    model: "fixed",
+    protocol: "openai-chat" as const,
+    journal: path.join(tmp.path, "owned.jsonl"),
+    maxRequests: 1,
+    maxRequestBytes: 4096,
+    maxOutput: 64,
+  }
+  const relay = startEvaluationRelay(options)
+  try {
+    const before = evaluationRelayBinding(relay)
+    options.model = "changed"
+    options.baseURL = "http://127.0.0.1:8/v1"
+    options.maxRequests = 40
+    expect(evaluationRelayBinding(relay)).toEqual(before)
+    expect(() => evaluationRelayBinding({ ...relay })).toThrow("evaluation-relay-not-owned")
+    const response = await fetch(relay.baseURL + "/chat/completions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${relay.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "changed",
+        messages: [{ role: "user", content: "local fixture" }],
+        stream: true,
+        max_tokens: 64,
+      }),
+    })
+    expect(response.status).toBe(400)
+    await relay.stop()
+    expect(() => evaluationRelayBinding(relay)).toThrow("evaluation-relay-closed")
+  } finally {
+    await relay.stop()
   }
 })

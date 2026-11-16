@@ -21,7 +21,7 @@ export function evaluationRelayBinding(relay: object) {
  * One host owns it across all Sessions in a chain. Unknown token reservations remain in the outer ledger.
  * The product receives only the ephemeral local key; the real credential never enters its tools' environment.
  */
-export function startEvaluationRelay(input: {
+export function startEvaluationRelay(options: {
   baseURL: string
   apiKey: string
   model: string
@@ -31,6 +31,8 @@ export function startEvaluationRelay(input: {
   maxRequestBytes: number
   maxOutput: number
 }) {
+  // Keep transport ownership fixed even if the caller later edits its option object.
+  const input = { ...options }
   const endpoint = new URL(input.baseURL)
   if (
     !path.isAbsolute(input.journal) ||
