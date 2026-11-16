@@ -19,9 +19,9 @@ export function completed(turns: ReadonlyArray<Turn>, expected: number) {
     Number.isSafeInteger(expected) &&
     expected > 0 &&
     turns.length === expected &&
-    turns.every(
+    Array.from(turns).every(
       (turn) =>
-        turn.admitted === true &&
+        turn?.admitted === true &&
         turn.promoted === true &&
         turn.active === false &&
         turn.pending === 0 &&
@@ -108,10 +108,16 @@ export async function billingHistory(input: {
     const file = await open(await artifact(input.directory, "history.json"), "r")
     const text = await (async () => {
       try {
+        if (!(await file.stat()).isFile()) throw new Error("history-not-file")
         const bytes = Buffer.alloc(16 * 1024 + 1)
-        const result = await file.read(bytes, 0, bytes.length, 0)
-        if (result.bytesRead > 16 * 1024) throw new Error("history-too-large")
-        return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, result.bytesRead))
+        let length = 0
+        while (length < bytes.length) {
+          const result = await file.read(bytes, length, bytes.length - length, length)
+          if (result.bytesRead === 0) break
+          length += result.bytesRead
+        }
+        if (length > 16 * 1024) throw new Error("history-too-large")
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length))
       } finally {
         await file.close()
       }

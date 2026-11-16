@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { arithmetic, billingHistory, completed } from "../../../script/evaluation/memory/oracle"
 import { tmpdir } from "./fixture/tmpdir"
@@ -18,6 +18,10 @@ test("evaluation cannot turn timeout, partial history or stale idle into success
   expect(completed([done], 1)).toBe(true)
   expect(completed([done], 2)).toBe(false)
   expect(completed([], 0)).toBe(false)
+  const missing = Array<typeof done>(2)
+  missing[0] = done
+  expect(completed(missing, 2)).toBe(false)
+  expect(completed(Array<typeof done>(5), 5)).toBe(false)
   for (const item of [
     { ...done, admitted: false },
     { ...done, promoted: false },
@@ -74,5 +78,11 @@ test("historical verdict requires all frozen facts and a completed own session",
   await writeFile(file, "not-json billing slow")
   expect((await billingHistory(input)).reason).toBe("history-artifact-invalid")
   await writeFile(file, " ".repeat(16 * 1024) + JSON.stringify(facts))
+  expect((await billingHistory(input)).reason).toBe("history-artifact-invalid")
+  const encoded = JSON.stringify(facts)
+  await writeFile(file, " ".repeat(16 * 1024 - Buffer.byteLength(encoded)) + encoded)
+  expect((await billingHistory(input)).pass).toBe(true)
+  await unlink(file)
+  await mkdir(file)
   expect((await billingHistory(input)).reason).toBe("history-artifact-invalid")
 })
