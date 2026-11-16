@@ -25,6 +25,50 @@ export class MemoryPageError extends Schema.TaggedErrorClass<MemoryPageError>()(
   { httpApiStatus: 409 },
 ) {}
 
+export const MemoryAutomaticGroup = HttpApiGroup.make("server.memoryAutomatic")
+  .add(
+    HttpApiEndpoint.get("memory.getAutomatic", "/api/memory/automatic", {
+      query: LocationQuery,
+      success: Schema.Struct({ data: Schema.NullOr(Memory.AutomaticPreference) }),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.getAutomatic",
+          summary: "Read project automatic tidy consent without starting work",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.put("memory.confirmAutomatic", "/api/memory/automatic", {
+      query: LocationQuery,
+      payload: Memory.AutomaticConfirmation,
+      success: Schema.Struct({ data: Memory.AutomaticPreference }),
+      error: MemoryTidyError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.confirmAutomatic",
+          summary: "Confirm automatic project tidy model and spending limits",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.post("memory.disableAutomatic", "/api/memory/automatic/disable", {
+      query: LocationQuery,
+      payload: Schema.Struct({ expected: Schema.String }),
+      success: Schema.Struct({ data: Memory.AutomaticPreference }),
+      error: MemoryTidyError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.disableAutomatic",
+          summary: "Revoke automatic consent and stop its owned tidy task",
+        }),
+      ),
+  )
 export const MemoryGroup = HttpApiGroup.make("server.memory")
   .add(
     HttpApiEndpoint.get("memory.listPages", "/api/memory/pages", {

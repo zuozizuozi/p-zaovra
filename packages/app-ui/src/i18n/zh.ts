@@ -3,9 +3,19 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "settings.memory.automatic.description":
+    "自动整理项目默认关闭。确认开启后，有新的已结束会话，且当前后端连续一分钟没有会话或后台任务时才会启动；读取设置不会启动任务。",
+  "settings.memory.automatic.confirm":
+    "是否按下列模型和额度，持续授权自动整理当前项目？未聊天时也会消耗模型用量；每日额度与手动整理共享。线路不支持完整输入计数时会停止，不发送生成请求。",
+  "settings.memory.automatic.review": "核对自动整理项目",
+  "settings.memory.automatic.enable": "确认开启自动整理",
+  "settings.memory.automatic.enabled": "已开启项目自动整理",
+  "settings.memory.automatic.disable": "关闭自动整理并停止其任务",
+  "settings.memory.automatic.interrupted":
+    "失败、取消或中断的任务不会自动重试。未完成内容可用手动整理检查；关闭后重新确认，可允许后续自动任务。",
   "settings.memory.task.title": "有预算的记忆整理",
   "settings.memory.task.description":
-    "每次选择模型并确认后才执行。打开页面不会自动开始或继续；整理使用独立对话，不改变当前聊天。",
+    "选择模型并确认本次手动整理，或另行开启项目自动整理。打开页面不会开始或继续任务；整理使用独立对话，不改变当前聊天。",
   "settings.memory.task.scope": "整理范围",
   "settings.memory.task.chooseModel": "选择整理模型",
   "settings.memory.task.tokens": "单次上限（tokens）",

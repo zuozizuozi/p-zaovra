@@ -197,6 +197,12 @@ import type {
   MemoryRemoveOutput,
   MemoryClearInput,
   MemoryClearOutput,
+  ServerMemoryAutomaticGetAutomaticInput,
+  ServerMemoryAutomaticGetAutomaticOutput,
+  ServerMemoryAutomaticConfirmAutomaticInput,
+  ServerMemoryAutomaticConfirmAutomaticOutput,
+  ServerMemoryAutomaticDisableAutomaticInput,
+  ServerMemoryAutomaticDisableAutomaticOutput,
   EventsSubscribeOutput,
   PtysListInput,
   PtysListOutput,
@@ -1622,6 +1628,52 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+    },
+    "server.memoryAutomatic": {
+      getAutomatic: (input?: ServerMemoryAutomaticGetAutomaticInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerMemoryAutomaticGetAutomaticOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory/automatic`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      confirmAutomatic: (input: ServerMemoryAutomaticConfirmAutomaticInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerMemoryAutomaticConfirmAutomaticOutput }>(
+          {
+            method: "PUT",
+            path: `/api/memory/automatic`,
+            query: { location: input["location"] },
+            body: {
+              requestID: input["requestID"],
+              expected: input["expected"],
+              model: input["model"],
+              tokens: input["tokens"],
+              dailyTokens: input["dailyTokens"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      disableAutomatic: (input: ServerMemoryAutomaticDisableAutomaticInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerMemoryAutomaticDisableAutomaticOutput }>(
+          {
+            method: "POST",
+            path: `/api/memory/automatic/disable`,
+            query: { location: input["location"] },
+            body: { expected: input["expected"] },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
     },
     events: {
       subscribe: (requestOptions?: RequestOptions): AsyncIterable<EventsSubscribeOutput> =>

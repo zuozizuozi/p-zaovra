@@ -10210,6 +10210,99 @@ export type MemoryClearInput = {
 
 export type MemoryClearOutput = void
 
+export type ServerMemoryAutomaticGetAutomaticInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type ServerMemoryAutomaticGetAutomaticOutput = {
+  readonly data: {
+    readonly directory: string
+    readonly generation: string
+    readonly enabled: boolean
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly currentRun: string | null
+    readonly confirmedAt: number
+  } | null
+}["data"]
+
+export type ServerMemoryAutomaticConfirmAutomaticInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly requestID: {
+    readonly requestID: string
+    readonly expected?: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+  }["requestID"]
+  readonly expected?: {
+    readonly requestID: string
+    readonly expected?: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+  }["expected"]
+  readonly model: {
+    readonly requestID: string
+    readonly expected?: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+  }["model"]
+  readonly tokens: {
+    readonly requestID: string
+    readonly expected?: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+  }["tokens"]
+  readonly dailyTokens: {
+    readonly requestID: string
+    readonly expected?: string
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+  }["dailyTokens"]
+}
+
+export type ServerMemoryAutomaticConfirmAutomaticOutput = {
+  readonly data: {
+    readonly directory: string
+    readonly generation: string
+    readonly enabled: boolean
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly currentRun: string | null
+    readonly confirmedAt: number
+  }
+}["data"]
+
+export type ServerMemoryAutomaticDisableAutomaticInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly expected: { readonly expected: string }["expected"]
+}
+
+export type ServerMemoryAutomaticDisableAutomaticOutput = {
+  readonly data: {
+    readonly directory: string
+    readonly generation: string
+    readonly enabled: boolean
+    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly tokens: number
+    readonly dailyTokens: number
+    readonly currentRun: string | null
+    readonly confirmedAt: number
+  }
+}["data"]
+
 export type EventsSubscribeOutput = ZaovraEventEncoded
 
 export type PtysListInput = {

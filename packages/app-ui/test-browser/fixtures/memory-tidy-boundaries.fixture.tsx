@@ -86,6 +86,7 @@ async function mount(initial: MemoryTidyTask[] = []) {
     throwOnError: true,
     fetch: async (request: Request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/automatic") return Response.json({ data: null })
       if (request.method === "GET" && path === "/api/memory/pages") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery")
         return Response.json({

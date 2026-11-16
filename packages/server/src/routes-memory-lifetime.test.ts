@@ -21,7 +21,7 @@ test("production tidy listener lifetime is isolated from the test batch", async 
     expect(code, stdout + stderr).toBe(0)
     expect(stderr).toContain("1 pass")
     expect(stderr).toContain("0 fail")
-    expect(stderr).toContain("20 expect() calls")
+    expect(stderr).toContain("22 expect() calls")
   } finally {
     child.kill()
     await child.exited

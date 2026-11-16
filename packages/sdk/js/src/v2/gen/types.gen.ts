@@ -7619,6 +7619,25 @@ export type MemoryRecoveryChoice = {
   ids: Array<string>
 }
 
+export type MemoryAutomaticPreference = {
+  directory: string
+  generation: string
+  enabled: boolean
+  model: ModelRef
+  tokens: number
+  dailyTokens: number
+  currentRun: string
+  confirmedAt: number
+}
+
+export type MemoryAutomaticConfirmation = {
+  requestID: string
+  expected?: string
+  model: ModelRef
+  tokens: number
+  dailyTokens: number
+}
+
 export type ModelsDevRefreshed = {
   id: string
   metadata?: {
@@ -17762,6 +17781,126 @@ export type V2MemoryUpdateResponses = {
 }
 
 export type V2MemoryUpdateResponse = V2MemoryUpdateResponses[keyof V2MemoryUpdateResponses]
+
+export type V2MemoryGetAutomaticData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory/automatic"
+}
+
+export type V2MemoryGetAutomaticErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryGetAutomaticError = V2MemoryGetAutomaticErrors[keyof V2MemoryGetAutomaticErrors]
+
+export type V2MemoryGetAutomaticResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryAutomaticPreference
+  }
+}
+
+export type V2MemoryGetAutomaticResponse = V2MemoryGetAutomaticResponses[keyof V2MemoryGetAutomaticResponses]
+
+export type V2MemoryConfirmAutomaticData = {
+  body: MemoryAutomaticConfirmation
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory/automatic"
+}
+
+export type V2MemoryConfirmAutomaticErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryTidyError
+   */
+  409: MemoryTidyError
+}
+
+export type V2MemoryConfirmAutomaticError = V2MemoryConfirmAutomaticErrors[keyof V2MemoryConfirmAutomaticErrors]
+
+export type V2MemoryConfirmAutomaticResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryAutomaticPreference
+  }
+}
+
+export type V2MemoryConfirmAutomaticResponse =
+  V2MemoryConfirmAutomaticResponses[keyof V2MemoryConfirmAutomaticResponses]
+
+export type V2MemoryDisableAutomaticData = {
+  body: {
+    expected: string
+  }
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory/automatic/disable"
+}
+
+export type V2MemoryDisableAutomaticErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryTidyError
+   */
+  409: MemoryTidyError
+}
+
+export type V2MemoryDisableAutomaticError = V2MemoryDisableAutomaticErrors[keyof V2MemoryDisableAutomaticErrors]
+
+export type V2MemoryDisableAutomaticResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryAutomaticPreference
+  }
+}
+
+export type V2MemoryDisableAutomaticResponse =
+  V2MemoryDisableAutomaticResponses[keyof V2MemoryDisableAutomaticResponses]
 
 export type V2EventSubscribeData = {
   body?: never

@@ -13,6 +13,7 @@ import { SessionSchema } from "../session/schema"
 import { SessionInputTable, SessionTable } from "../session/sql"
 import { MemoryTidyAttemptTable, MemoryTidyDayTable, MemoryTidyRunTable } from "./tidy.sql"
 import { MemoryStore } from "./store"
+import { MemoryAutomaticRunTable, MemoryAutomaticTable } from "./automatic.sql"
 
 export const defaults = { tokens: 200_000, dailyTokens: 1_000_000 } as const
 export type Run = typeof MemoryTidyRunTable.$inferSelect
@@ -90,6 +91,27 @@ const layer = Layer.effect(
         .get()
 
       if (!run?.input) return yield* new Rejected({ reason: "unauthorized" })
+      const automatic = yield* db
+        .select()
+        .from(MemoryAutomaticRunTable)
+        .where(eq(MemoryAutomaticRunTable.run_id, run.id))
+        .get()
+      if (automatic) {
+        const consent = yield* db
+          .select()
+          .from(MemoryAutomaticTable)
+          .where(eq(MemoryAutomaticTable.directory, automatic.directory))
+          .get()
+        if (
+          !consent?.enabled ||
+          consent.generation !== automatic.generation ||
+          consent.current_run !== run.id ||
+          consent.scope !== run.scope ||
+          consent.directory !== run.directory ||
+          modelKey(consent.model) !== modelKey(run.model)
+        )
+          return yield* new Rejected({ reason: "unauthorized" })
+      }
       const session = yield* db
         .select({ model: SessionTable.model, project: SessionTable.project_id, directory: SessionTable.directory })
         .from(SessionTable)

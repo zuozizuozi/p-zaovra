@@ -21,6 +21,8 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     tokens: "200000",
     dailyTokens: "1000000",
     request: undefined as MemoryTidyRequest | undefined,
+    automatic: false,
+    automaticExpected: undefined as string | undefined,
     sent: false,
     busy: false,
     error: false,
@@ -43,12 +45,16 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     () => state.layer,
     async (layer) => (await client.listTidy({ location, layer }, { throwOnError: true })).data.data,
   )
+  const [automatic, automaticActions] = createResource(
+    async () => (await client.getAutomatic({ location }, { throwOnError: true })).data.data,
+  )
   // Viewing/reopening never starts a task. Poll only while a task is actually running.
   createEffect(() => {
-    if (!tasks()?.some((task) => task.executing)) return
+    if (!tasks()?.some((task) => task.executing) && !automatic()?.enabled) return
     const timer = setInterval(() => {
       if (!tasks.loading) void Promise.resolve(actions.refetch()).catch(() => undefined)
-    }, 2000)
+      if (!automatic.loading) void Promise.resolve(automaticActions.refetch()).catch(() => undefined)
+    }, 5000)
     onCleanup(() => clearInterval(timer))
   })
   const valid = () =>
@@ -68,15 +74,42 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     if (state.busy || !state.request || blocked(state.request.layer)) return
     const request = state.request
     setState({ busy: true, error: false, sent: true })
+    await (
+      state.automatic
+        ? client.confirmAutomatic(
+            {
+              location,
+              memoryAutomaticConfirmation: {
+                requestID: request.requestID,
+                expected: state.automaticExpected,
+                model: request.model,
+                tokens: request.tokens!,
+                dailyTokens: request.dailyTokens!,
+              },
+            },
+            { throwOnError: true },
+          )
+        : client
+            .prepareTidy({ location, memoryTidyRequest: request }, { throwOnError: true })
+            .then((result) =>
+              client.startTidy({ location, layer: request.layer, id: result.data.data.id }, { throwOnError: true }),
+            )
+    ).then(
+      () => setState({ request: undefined, sent: false }),
+      () => setState("error", true),
+    )
+    await Promise.resolve(actions.refetch()).catch(() => setState("error", true))
+    await Promise.resolve(automaticActions.refetch()).catch(() => setState("error", true))
+    setState("busy", false)
+  }
+  const disableAutomatic = async () => {
+    const preference = automatic()
+    if (state.busy || !preference) return
+    setState({ busy: true, error: false })
     await client
-      .prepareTidy({ location, memoryTidyRequest: request }, { throwOnError: true })
-      .then((result) =>
-        client.startTidy({ location, layer: request.layer, id: result.data.data.id }, { throwOnError: true }),
-      )
-      .then(
-        () => setState({ request: undefined, sent: false }),
-        () => setState("error", true),
-      )
+      .disableAutomatic({ location, expected: preference.generation }, { throwOnError: true })
+      .catch(() => setState("error", true))
+    await Promise.resolve(automaticActions.refetch()).catch(() => setState("error", true))
     await Promise.resolve(actions.refetch()).catch(() => setState("error", true))
     setState("busy", false)
   }
@@ -150,7 +183,9 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
         when={!state.request}
         fallback={
           <div data-slot="memory-tidy-confirm" class="flex flex-col gap-2">
-            <p class="text-xs">{language.t("settings.memory.task.confirm")}</p>
+            <p class="text-xs">
+              {language.t(state.automatic ? "settings.memory.automatic.confirm" : "settings.memory.task.confirm")}
+            </p>
             <p class="break-all text-xs">
               {state.request?.model.providerID} / {state.request?.model.id} ·{" "}
               {language.t(
@@ -164,7 +199,13 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
                 disabled={state.busy || blocked(state.request?.layer)}
                 onClick={() => void submit()}
               >
-                {language.t(state.sent ? "settings.memory.task.retry" : "settings.memory.task.start")}
+                {language.t(
+                  state.sent
+                    ? "settings.memory.task.retry"
+                    : state.automatic
+                      ? "settings.memory.automatic.enable"
+                      : "settings.memory.task.start",
+                )}
               </ButtonV2>
               <Show when={!state.sent}>
                 <ButtonV2 variant="neutral" onClick={() => setState("request", undefined)}>
@@ -185,12 +226,49 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
             !!tasks.error ||
             !!tasks()?.some((task) => task.state === "active")
           }
-          onClick={() => setState("request", confirmation())}
+          onClick={() => setState({ request: confirmation(), automatic: false })}
         >
           {language.t("settings.memory.task.review")}
         </ButtonV2>
       </Show>
-      <Show when={state.error || tasks.error}>
+      <div data-slot="memory-automatic" class="flex flex-col gap-2 border-t border-v2-border-base pt-3">
+        <p class="text-xs">{language.t("settings.memory.automatic.description")}</p>
+        <Show
+          when={automatic()?.enabled}
+          fallback={
+            <ButtonV2
+              variant="neutral"
+              disabled={
+                state.busy ||
+                !!state.request ||
+                state.layer !== "project" ||
+                blocked() ||
+                !valid() ||
+                automatic.loading ||
+                !!automatic.error ||
+                tasks.loading ||
+                !!tasks.error ||
+                !!tasks()?.some((task) => task.state === "active")
+              }
+              onClick={() =>
+                setState({ request: confirmation(), automatic: true, automaticExpected: automatic()?.generation })
+              }
+            >
+              {language.t("settings.memory.automatic.review")}
+            </ButtonV2>
+          }
+        >
+          <p class="break-all text-xs">
+            {language.t("settings.memory.automatic.enabled")} · {automatic()?.model.providerID} /{" "}
+            {automatic()?.model.id} · {automatic()?.tokens} / {automatic()?.dailyTokens} tokens
+          </p>
+          <p class="text-xs">{language.t("settings.memory.automatic.interrupted")}</p>
+          <ButtonV2 variant="neutral" disabled={state.busy || !!state.request} onClick={() => void disableAutomatic()}>
+            {language.t("settings.memory.automatic.disable")}
+          </ButtonV2>
+        </Show>
+      </div>
+      <Show when={state.error || tasks.error || automatic.error}>
         <p role="alert" class="text-xs">
           {language.t("settings.memory.task.failed")}
         </p>
@@ -198,7 +276,9 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
       <ButtonV2
         variant="neutral"
         disabled={state.busy || tasks.loading}
-        onClick={() => void Promise.resolve(actions.refetch()).catch(() => setState("error", true))}
+        onClick={() =>
+          void Promise.all([actions.refetch(), automaticActions.refetch()]).catch(() => setState("error", true))
+        }
       >
         {language.t("settings.memory.task.refresh")}
       </ButtonV2>

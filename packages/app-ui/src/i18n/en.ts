@@ -1,7 +1,17 @@
 export const dict = {
+  "settings.memory.automatic.description":
+    "Automatic project tidy is off by default. After confirmation, new completed conversations can trigger a tidy when this backend has had no session or background work for one minute. Reading settings does not start work.",
+  "settings.memory.automatic.confirm":
+    "Enable ongoing automatic tidy for this project with the model and limits below? It spends model tokens even when you are not chatting. Daily limits are shared with manual tidies. Unsupported input counting stops the task without sending a generation request.",
+  "settings.memory.automatic.review": "Review automatic project tidy",
+  "settings.memory.automatic.enable": "Confirm and enable automatic tidy",
+  "settings.memory.automatic.enabled": "Automatic project tidy enabled",
+  "settings.memory.automatic.disable": "Disable automatic tidy and stop its task",
+  "settings.memory.automatic.interrupted":
+    "Failed, cancelled or interrupted tasks are not retried automatically. Use a manual tidy to review unfinished content; disable and confirm again to permit later automatic tasks.",
   "settings.memory.task.title": "Budgeted memory tidy",
   "settings.memory.task.description":
-    "Choose a model and confirm each run. Opening this page never starts or resumes a task. The conversation used for tidying is separate from your current chat.",
+    "Choose a model and confirm a manual run, or separately enable automatic project tidy. Opening this page never starts or resumes a task. Tidying uses a conversation separate from your current chat.",
   "settings.memory.task.scope": "Scope",
   "settings.memory.task.chooseModel": "Choose a tidy model",
   "settings.memory.task.tokens": "Run limit (tokens)",

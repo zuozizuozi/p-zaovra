@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "b40d2dcd-57f5-49af-95c4-fbab1312870a",
+  "id": "af9e00eb-a724-42cc-89cc-87da4e9dfd89",
   "prevIds": [
-    "72a3fa09-ce01-446a-8c52-18110ca22d22"
+    "b40d2dcd-57f5-49af-95c4-fbab1312870a"
   ],
   "ddl": [
     {
@@ -12,6 +12,18 @@
     },
     {
       "name": "data_migration",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_automatic_run",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_automatic_source",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_automatic",
       "entityType": "tables"
     },
     {
@@ -281,6 +293,176 @@
       "name": "time_completed",
       "entityType": "columns",
       "table": "data_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "memory_automatic_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "memory_automatic_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "generation",
+      "entityType": "columns",
+      "table": "memory_automatic_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "memory_automatic_source"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "memory_automatic_source"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seq",
+      "entityType": "columns",
+      "table": "memory_automatic_source"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "input_seq",
+      "entityType": "columns",
+      "table": "memory_automatic_source"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "generation",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "enabled",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_limit",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "daily_limit",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "current_run",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_confirmed",
+      "entityType": "columns",
+      "table": "memory_automatic"
     },
     {
       "type": "text",
@@ -4764,6 +4946,16 @@
     },
     {
       "columns": [
+        "directory",
+        "session_id"
+      ],
+      "nameExplicit": false,
+      "name": "memory_automatic_source_pk",
+      "entityType": "pks",
+      "table": "memory_automatic_source"
+    },
+    {
+      "columns": [
         "email",
         "url"
       ],
@@ -4839,6 +5031,24 @@
       "nameExplicit": false,
       "name": "data_migration_pk",
       "table": "data_migration",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "nameExplicit": false,
+      "name": "memory_automatic_run_pk",
+      "table": "memory_automatic_run",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "directory"
+      ],
+      "nameExplicit": false,
+      "name": "memory_automatic_pk",
+      "table": "memory_automatic",
       "entityType": "pks"
     },
     {

@@ -24,6 +24,7 @@ import { SessionOutputRecovery } from "../session/output-recovery"
 import { MemoryStore } from "./store"
 import { MemoryTidyBudget } from "./tidy-budget"
 import { MemoryTidyStore } from "./tidy-store"
+import { MemoryAutomaticIdle } from "./automatic-idle"
 
 export interface Interface {
   /** Bound actual generation before encoding, leaving ordinary requests unchanged. */
@@ -49,6 +50,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const location = yield* Location.Service
     const http = yield* HttpClient.HttpClient
+    const idle = yield* MemoryAutomaticIdle.Service
 
     const authority = Effect.fn("MemoryTidyExecution.authority")(function* (
       run: MemoryTidyStore.Run,
@@ -66,6 +68,7 @@ const layer = Layer.effect(
         enabled: Config.latest(yield* config.entries(), "memory")?.enabled !== false,
       }
       yield* store.authorize(input).pipe(Effect.mapError(() => denied("整理授权已失效，未发送模型请求。")))
+      if (!(yield* idle.allows(run))) return yield* denied("应用有其他待处理任务，自动整理已暂停，未发送模型请求。")
       const session = yield* sessions.get(run.session_id)
       if (!session) return yield* denied("整理会话不存在。")
       // Resolve the current catalog alias and variant again. Matching the wire
@@ -170,6 +173,7 @@ export const node = makeLocationNode({
     MemoryTidyStore.node,
     MemoryStore.node,
     MemoryTidyBudget.node,
+    MemoryAutomaticIdle.node,
     SessionStore.node,
     SessionRunnerModel.node,
     Config.node,

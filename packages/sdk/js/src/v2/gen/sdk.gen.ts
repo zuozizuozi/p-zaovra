@@ -87,6 +87,7 @@ import type {
   LocationRef,
   LspStatusErrors,
   LspStatusResponses,
+  MemoryAutomaticConfirmation,
   MemoryRecoveryChoice,
   MemoryTidyRequest,
   ModelRef,
@@ -216,8 +217,14 @@ import type {
   V2MemoryCancelTidyResponses,
   V2MemoryClearErrors,
   V2MemoryClearResponses,
+  V2MemoryConfirmAutomaticErrors,
+  V2MemoryConfirmAutomaticResponses,
   V2MemoryCreateErrors,
   V2MemoryCreateResponses,
+  V2MemoryDisableAutomaticErrors,
+  V2MemoryDisableAutomaticResponses,
+  V2MemoryGetAutomaticErrors,
+  V2MemoryGetAutomaticResponses,
   V2MemoryGetPageErrors,
   V2MemoryGetPageResponses,
   V2MemoryGetTidyErrors,
@@ -6391,6 +6398,110 @@ export class Memory extends HeyApiClient {
     )
     return (options?.client ?? this.client).patch<V2MemoryUpdateResponses, V2MemoryUpdateErrors, ThrowOnError>({
       url: "/api/memory/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Read project automatic tidy consent without starting work
+   */
+  public getAutomatic<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<
+      V2MemoryGetAutomaticResponses,
+      V2MemoryGetAutomaticErrors,
+      ThrowOnError
+    >({
+      url: "/api/memory/automatic",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Confirm automatic project tidy model and spending limits
+   */
+  public confirmAutomatic<ThrowOnError extends boolean = false>(
+    parameters: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      memoryAutomaticConfirmation: MemoryAutomaticConfirmation
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { key: "memoryAutomaticConfirmation", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      V2MemoryConfirmAutomaticResponses,
+      V2MemoryConfirmAutomaticErrors,
+      ThrowOnError
+    >({
+      url: "/api/memory/automatic",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Revoke automatic consent and stop its owned tidy task
+   */
+  public disableAutomatic<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      expected?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "expected" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2MemoryDisableAutomaticResponses,
+      V2MemoryDisableAutomaticErrors,
+      ThrowOnError
+    >({
+      url: "/api/memory/automatic/disable",
       ...options,
       ...params,
       headers: {

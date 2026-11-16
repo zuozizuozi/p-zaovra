@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test"
 import { render } from "solid-js/web"
 import { MemoryRouter, Route } from "@solidjs/router"
 import { createSignal } from "solid-js"
-import type { MemoryTidyTask } from "@zaovra-ai/sdk/v2/client"
+import type { MemoryAutomaticPreference, MemoryTidyTask } from "@zaovra-ai/sdk/v2/client"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { DialogProvider } from "@zaovra-ai/ui/context/dialog"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
@@ -51,7 +51,8 @@ mock.module("@/context/server-sync", () => ({
 const { SettingsMemoryV2 } = await import("../../src/components/settings-v2/memory")
 let dispose: (() => void) | undefined
 const calls: { path: string; body: Record<string, unknown> }[] = []
-let failure: "prepare" | "start" | undefined
+let failure: "prepare" | "start" | "automatic" | undefined
+let automatic: MemoryAutomaticPreference | null = null
 let tasks: MemoryTidyTask[] = []
 let target: ((value: string) => void) | undefined
 let hold: Promise<void> | undefined
@@ -76,6 +77,7 @@ function picker() {
 }
 async function mount(initial: MemoryTidyTask[] = []) {
   tasks = initial
+  automatic = null
   calls.length = 0
   localWrites = 0
   client = createZaovraClient({
@@ -83,6 +85,7 @@ async function mount(initial: MemoryTidyTask[] = []) {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/automatic") return Response.json({ data: automatic })
       if (request.method === "GET" && path === "/api/memory/pages") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery")
         return Response.json({
@@ -115,6 +118,33 @@ async function mount(initial: MemoryTidyTask[] = []) {
       const body = text ? (JSON.parse(text) as Record<string, unknown>) : {}
       calls.push({ path, body })
       if (hold) await hold
+      if (path === "/api/memory/automatic") {
+        const input = body as {
+          requestID: string
+          model: MemoryAutomaticPreference["model"]
+          tokens: number
+          dailyTokens: number
+        }
+        automatic = {
+          directory: "/tidy-project",
+          generation: input.requestID,
+          model: input.model,
+          tokens: input.tokens,
+          dailyTokens: input.dailyTokens,
+          enabled: true,
+          currentRun: null,
+          confirmedAt: 1,
+        }
+        if (failure === "automatic") {
+          failure = undefined
+          return Response.json({ message: "Lost response" }, { status: 503 })
+        }
+        return Response.json({ data: automatic })
+      }
+      if (path === "/api/memory/automatic/disable") {
+        automatic = { ...automatic!, enabled: false }
+        return Response.json({ data: automatic })
+      }
       if (path === "/api/memory/tidy") {
         const request = body as {
           requestID: string
@@ -193,6 +223,38 @@ afterEach(() => {
   document.body.replaceChildren()
   failure = undefined
   hold = undefined
+})
+
+test("automatic consent has a separate confirmation, idempotent retry and an explicit disable", async () => {
+  await mount()
+  await choose()
+  await until(() => !button("Review automatic project tidy").disabled)
+  button("Review automatic project tidy").click()
+  expect(calls).toHaveLength(0)
+  expect(document.querySelector('[data-slot="memory-tidy-confirm"]')?.textContent).toContain(
+    "even when you are not chatting",
+  )
+  failure = "automatic"
+  button("Confirm and enable automatic tidy").click()
+  await until(
+    () => document.querySelector('[role="alert"]') !== null && button("Retry this confirmation")?.disabled === false,
+  )
+  expect(calls).toHaveLength(1)
+  const confirmed = calls[0].body
+  button("Retry this confirmation").click()
+  await until(() => button("Disable automatic tidy and stop its task")?.disabled === false)
+  expect(calls.map((call) => call.path)).toEqual(["/api/memory/automatic", "/api/memory/automatic"])
+  expect(calls[1].body).toEqual(confirmed)
+  expect(confirmed).toMatchObject({
+    model: { id: "chat-b", providerID: "configured" },
+    tokens: 200000,
+    dailyTokens: 1000000,
+  })
+  button("Disable automatic tidy and stop its task").click()
+  await until(() => calls.length === 3 && button("Review automatic project tidy") !== undefined)
+  expect(calls[2]).toEqual({ path: "/api/memory/automatic/disable", body: { expected: confirmed.requestID } })
+  expect(tasks).toEqual([])
+  expect(localWrites).toBe(0)
 })
 
 test("chosen model and explicit confirmation use the budgeted SDK without changing the current chat", async () => {

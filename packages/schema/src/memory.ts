@@ -176,3 +176,25 @@ export const TidyTask = Schema.Struct({
   time: Schema.Struct({ created: Schema.Finite, finished: Schema.NullOr(Schema.Finite) }),
 }).annotate({ identifier: "Memory.TidyTask" })
 export interface TidyTask extends Schema.Schema.Type<typeof TidyTask> {}
+
+/** Separate, persistent consent for automatic project tidy work. */
+export const AutomaticConfirmation = Schema.Struct({
+  requestID: Schema.String,
+  expected: Schema.String.pipe(optional),
+  model: Model.Ref,
+  tokens: PositiveInt,
+  dailyTokens: PositiveInt,
+}).annotate({ identifier: "Memory.AutomaticConfirmation" })
+export interface AutomaticConfirmation extends Schema.Schema.Type<typeof AutomaticConfirmation> {}
+
+export const AutomaticPreference = Schema.Struct({
+  directory: Schema.String,
+  generation: Schema.String,
+  enabled: Schema.Boolean,
+  model: Model.Ref,
+  tokens: PositiveInt,
+  dailyTokens: PositiveInt,
+  currentRun: Schema.NullOr(Schema.String),
+  confirmedAt: Schema.Finite,
+}).annotate({ identifier: "Memory.AutomaticPreference" })
+export interface AutomaticPreference extends Schema.Schema.Type<typeof AutomaticPreference> {}

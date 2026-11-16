@@ -23,7 +23,7 @@ import { CredentialGroup } from "./groups/credential"
 import { ProjectCopyGroup } from "./groups/project-copy"
 import { WorkGroup } from "./groups/work"
 import { MCPGroup } from "./groups/mcp"
-import { MemoryGroup } from "./groups/memory"
+import { MemoryAutomaticGroup, MemoryGroup } from "./groups/memory"
 import { CustomizationGroup } from "./groups/customization"
 
 // Protocol owns middleware placement, while Server injects concrete keys so Core service identities stay downstream.
@@ -56,6 +56,7 @@ const makeApiFromGroup = <
     .add(CommandGroup.middleware(locationMiddleware))
     .add(SkillGroup.middleware(locationMiddleware))
     .add(MemoryGroup.middleware(locationMiddleware))
+    .add(MemoryAutomaticGroup.middleware(locationMiddleware))
     .add(eventGroup)
     .add(PtyGroup.middleware(locationMiddleware))
     .add(makeQuestionGroup(locationMiddleware, sessionLocationMiddleware))

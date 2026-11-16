@@ -96,6 +96,18 @@ test("production tidy retains execution across listener close, isolates director
   }
   let reopened: ReturnType<typeof open> | undefined
   try {
+    const automatic = new URL("/api/memory/automatic", first.url)
+    automatic.searchParams.set("location[directory]", a)
+    const enabled = await fetch(automatic, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...confirmation, requestID: "automatic-lifetime" }),
+    })
+    expect((await enabled.json()).data).toMatchObject({
+      enabled: true,
+      generation: "automatic-lifetime",
+      currentRun: null,
+    })
     const prepared = await call(first.url, a, "", confirmation)
     expect(prepared.status, await prepared.clone().text()).toBe(200)
     const task = (await prepared.json()).data
@@ -127,6 +139,12 @@ test("production tidy retains execution across listener close, isolates director
     await second.stop(true)
     await web.dispose()
     reopened = open()
+    const automaticAfter = await reopened.handler(new Request(automatic))
+    expect((await automaticAfter.json()).data).toMatchObject({
+      enabled: true,
+      generation: "automatic-lifetime",
+      currentRun: null,
+    })
     const read = async (suffix = "", body?: unknown) => {
       const url = new URL("http://localhost/api/memory/tidy" + suffix)
       url.searchParams.set("location[directory]", a)

@@ -11,6 +11,7 @@ import { MemoryStore } from "@zaovra-ai/core/memory/store"
 import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
+import { MemoryAutomatic } from "@zaovra-ai/core/memory/automatic"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
@@ -47,6 +48,8 @@ const applicationServices = LayerNode.group([
   MemoryPages.node,
   MemoryTidyStore.node,
   MemoryTidyTasks.node,
+  MemoryAutomatic.node,
+  MemoryAutomatic.startupNode,
   PtyTicket.node,
   Credential.node,
   PtyEnvironment.node,

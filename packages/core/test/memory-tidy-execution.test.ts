@@ -17,6 +17,8 @@ import { EventTable } from "../src/event/sql"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryTidy } from "../src/memory/tidy"
+import { MemoryAutomaticStore } from "../src/memory/automatic-store"
+import { MemoryStore } from "../src/memory/store"
 import { MemoryTidyExecution } from "../src/memory/tidy-execution"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { ModelV2 } from "../src/model"
@@ -26,6 +28,8 @@ import { AbsolutePath } from "../src/schema"
 import { SessionV2 } from "../src/session"
 import { SessionCompaction } from "../src/session/compaction"
 import { SessionExecution } from "../src/session/execution"
+import { SessionExecutionStatus } from "../src/session/execution-status"
+import { SessionEvent } from "../src/session/event"
 import { SessionMessage } from "../src/session/message"
 import { SessionRunner } from "../src/session/runner/index"
 import { node } from "../src/session/runner/llm"
@@ -59,6 +63,8 @@ for (const scenario of [
   "count-redirect",
   "generation-redirect",
   "cancel-during-count",
+  "automatic-busy-during-count",
+  "automatic-revoked-during-count",
   "config-during-count",
   "route-during-count",
   "defaults-during-count",
@@ -174,16 +180,66 @@ for (const scenario of [
           const guard = yield* MemoryTidyExecution.Service
           const sessions = yield* SessionV2.Service
           const llm = yield* LLMClient.Service
+          const automatic = yield* MemoryAutomaticStore.Service
+          const active = new Set<SessionV2.ID>()
+          const status = yield* SessionExecutionStatus.Service
+          yield* status.track(Effect.sync(() => active))
+          const prepareAutomatic = Effect.gen(function* () {
+            const memory = yield* MemoryStore.Service
+            const here = yield* Location.Service
+            const events = yield* EventV2.Service
+            const source = yield* sessions.create({ model: selected, location: { directory: here.directory } })
+            const timestamp = yield* DateTime.now
+            const assistantMessageID = SessionMessage.ID.create()
+            yield* events.publish(SessionEvent.Prompted, {
+              sessionID: source.id,
+              timestamp,
+              messageID: SessionMessage.ID.create(),
+              prompt: { text: "Completed ordinary work" },
+              delivery: "steer",
+            })
+            yield* events.publish(SessionEvent.Step.Started, {
+              sessionID: source.id,
+              timestamp,
+              assistantMessageID,
+              model: selected,
+              agent: "build",
+            })
+            yield* events.publish(SessionEvent.Step.Ended, {
+              sessionID: source.id,
+              timestamp,
+              assistantMessageID,
+              finish: "stop",
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            })
+            const place = {
+              directory: here.directory,
+              project: here.project.id,
+              scope: yield* memory.scope({ directory: here.directory, project: here.project.id }),
+            }
+            yield* automatic.confirm(place, { requestID: "automatic", model: selected, tokens: 500, dailyTokens: 1000 })
+            const run = yield* automatic.claim(place, "automatic", Effect.succeed(true), (request) =>
+              tidy.prepare(request).pipe(Effect.map((view) => view.run)),
+            )
+            expect(run).toBeDefined()
+            return run!
+          })
           const run =
             scenario === "ordinary"
               ? undefined
-              : (yield* tidy.prepare({ requestID: "confirmed", model: selected, tokens: 500 })).run
+              : scenario.startsWith("automatic-")
+                ? yield* prepareAutomatic
+                : (yield* tidy.prepare({ requestID: "confirmed", model: selected, tokens: 500 })).run
           const sessionID =
             run?.session_id ??
             (yield* sessions.create({ model: selected, location: { directory: AbsolutePath.make(tmp.path) } })).id
           if (run)
             state.charged = () => Effect.runPromise(store.usage({ runID: run.id })).then((usage) => usage.charged)
           state.duringCount = async () => {
+            if (scenario === "automatic-busy-during-count") active.add(SessionV2.ID.create())
+            if (scenario === "automatic-revoked-during-count")
+              await Effect.runPromise(automatic.disable(tmp.path, "automatic"))
             if (scenario === "cancel-during-count") await Effect.runPromise(store.finish(run!.id, "cancelled"))
             if (scenario === "config-during-count") state.enabled = false
             if (scenario === "retry-revoked" && state.counted.length === 2) state.enabled = false
@@ -358,6 +414,10 @@ for (const scenario of [
                 MemoryTidy.node,
                 MemoryTidyExecution.node,
                 MemoryTidyStore.node,
+                MemoryAutomaticStore.node,
+                MemoryStore.node,
+                SessionExecutionStatus.node,
+                Location.node,
                 SessionV2.node,
                 LayerNodePlatform.llmClient,
                 Database.node,

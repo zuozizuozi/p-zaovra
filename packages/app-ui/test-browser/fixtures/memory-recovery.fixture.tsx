@@ -119,6 +119,7 @@ async function mount() {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/automatic") return Response.json({ data: null })
       if (request.method === "GET" && path === "/api/memory/pages") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/tidy") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery") return Response.json({ data: recovery })

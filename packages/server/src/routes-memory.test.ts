@@ -66,3 +66,58 @@ test("production routes bind tidy globals outside Location without starting a pr
     await web.dispose()
   }
 }, 30000)
+
+test("automatic HTTP settings default off, isolate directories and reject stale consent", async () => {
+  const directory = path.join(root!, "automatic-project")
+  await fs.mkdir(directory, { recursive: true })
+  const web = HttpRouter.toWebHandler(createEmbeddedRoutes().pipe(Layer.provide(HttpServer.layerServices)), {
+    disableLogger: true,
+  })
+  const call = (method = "GET", body?: unknown, suffix = "", target = directory) => {
+    const url = new URL("http://localhost/api/memory/automatic" + suffix)
+    url.searchParams.set("location[directory]", target)
+    return web.handler(
+      new Request(url, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+    )
+  }
+  const consent = {
+    requestID: "automatic-http",
+    model: { id: "offline", providerID: "offline" },
+    tokens: 100,
+    dailyTokens: 200,
+  }
+  try {
+    expect((await (await call()).json()).data).toBeNull()
+    const confirmed = await call("PUT", consent)
+    expect(confirmed.status, await confirmed.clone().text()).toBe(200)
+    expect((await confirmed.json()).data).toMatchObject({
+      enabled: true,
+      generation: consent.requestID,
+      currentRun: null,
+      tokens: 100,
+    })
+    expect((await (await call("PUT", consent)).json()).data.generation).toBe(consent.requestID)
+    expect((await call("PUT", { ...consent, tokens: 101 })).status).toBe(409)
+    expect(
+      (await call("PUT", { ...consent, requestID: "invalid", expected: consent.requestID, tokens: 201 })).status,
+    ).toBe(409)
+    const other = path.join(root!, "automatic-other")
+    await fs.mkdir(other, { recursive: true })
+    expect((await (await call("GET", undefined, "", other)).json()).data).toBeNull()
+    expect((await call("POST", { expected: "stale" }, "/disable")).status).toBe(409)
+    expect((await (await call("POST", { expected: consent.requestID }, "/disable")).json()).data.enabled).toBe(false)
+    // A response lost before disable cannot re-enable the same authorization.
+    expect((await (await call("PUT", consent)).json()).data.enabled).toBe(false)
+    expect((await call("PUT", { ...consent, requestID: "next" })).status).toBe(409)
+    expect(
+      (await (await call("PUT", { ...consent, requestID: "next", expected: consent.requestID })).json()).data.enabled,
+    ).toBe(true)
+    expect((await (await call()).json()).data.currentRun).toBeNull()
+  } finally {
+    await web.dispose()
+  }
+}, 30000)
