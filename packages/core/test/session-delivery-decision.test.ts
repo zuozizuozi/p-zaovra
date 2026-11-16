@@ -170,3 +170,37 @@ test("delivery decision preserves missing order, deduplication and all failure a
     "unverified: bounded repair ended; host inspection budget exhausted",
   ])
 })
+
+test("unavailable repair pricing changes the reason without changing admission or closed-gap decisions", () => {
+  const first = { ...input, reviewing: false, turns: 0, toolCalls: 0, output: 0, allowance: 0, spent: 0 }
+  const known = DeliveryContract.decide({ ...first, pricingAvailable: true })
+  const unknown = DeliveryContract.decide({ ...first, pricingAvailable: false })
+  expect(known.reason).toBe("repair budget exhausted")
+  expect(unknown).toMatchObject({
+    continuing: false,
+    decision: "unverified",
+    report: known.report,
+    reason: "repair pricing unavailable; cannot establish allowance",
+  })
+  expect(unknown.missing).toContain(
+    "unverified: bounded repair ended; repair pricing unavailable; cannot establish allowance",
+  )
+  const closed = { ...first, reviewing: true, hard: [], missing: [], needsContinuation: false }
+  expect(DeliveryContract.decide({ ...closed, pricingAvailable: false })).toEqual(DeliveryContract.decide(closed))
+})
+
+for (const item of cases.filter((item) =>
+  [
+    "3 turns",
+    "12 tools",
+    "overspend precedes exhausted",
+    "unknown usage precedes overspend",
+    "pending precedes unknown effects",
+    "unknown effects precede unknown usage",
+    "inspection failure precedes pending",
+  ].includes(item.name),
+))
+  test(`unavailable repair pricing preserves priority: ${item.name}`, () => {
+    const original = { ...input, ...item.change, output: 0 }
+    expect(DeliveryContract.decide({ ...original, pricingAvailable: false })).toEqual(DeliveryContract.decide(original))
+  })

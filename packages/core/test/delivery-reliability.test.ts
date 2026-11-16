@@ -256,3 +256,48 @@ test("368 hard gaps distinguish failed artifacts and missing real execution from
     DeliveryContract.gaps([], [{ requirement: 1, path: "result.json", digest: "", problem: "invalid JSON" }], []),
   ).toHaveLength(1)
 })
+
+test("repair allowance distinguishes unavailable pricing from known insufficient or explicitly free pricing", () => {
+  const price = { input: 1, output: 2, cache: { read: 0.1, write: 1 } }
+  expect(DeliveryContract.allowance(1, [], 0, "")).toMatchObject({ pricingAvailable: false, output: 0 })
+  expect(DeliveryContract.allowance(1, [{ ...price, output: 0 }], 0, "")).toMatchObject({
+    pricingAvailable: false,
+    output: 0,
+  })
+  expect(DeliveryContract.allowance(1, [{ ...price, cache: { read: 0, write: 1 } }], 512, "")).toMatchObject({
+    pricingAvailable: false,
+    output: 0,
+  })
+  expect(DeliveryContract.allowance(0, [price], 0, "")).toMatchObject({ pricingAvailable: true, output: 0 })
+  expect(DeliveryContract.allowance(1, [price], 0, "")).toMatchObject({ pricingAvailable: true, output: 1024 })
+  expect(
+    DeliveryContract.allowance(
+      0,
+      [
+        {
+          input: 0,
+          output: 0,
+          cache: { read: 0, write: 0 },
+          configured: { input: true, output: true, cacheRead: true, cacheWrite: true },
+        },
+      ],
+      0,
+      "",
+    ),
+  ).toMatchObject({ pricingAvailable: true, output: 1024, estimatedCost: 0 })
+  expect(
+    DeliveryContract.allowance(
+      1,
+      [
+        price,
+        {
+          ...price,
+          tier: { type: "context", size: 1 },
+          configured: { input: true, output: false, cacheRead: true, cacheWrite: true },
+        },
+      ],
+      0,
+      "",
+    ),
+  ).toMatchObject({ pricingAvailable: false, output: 0 })
+})

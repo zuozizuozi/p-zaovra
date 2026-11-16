@@ -59,13 +59,17 @@ export function allowance(available: number, costs: readonly Model.Cost[], cache
     calls: 1,
     unreported: 0,
   })
-  const base = SessionUsageQuery.estimateRequest(tokens(0), costs).amount
-  const full = SessionUsageQuery.estimateRequest(tokens(budget.output), costs).amount
-  if (base === null || full === null || base > available)
-    return { output: 0, estimatedCost: base ?? 0, input, cacheRead: cached }
-  const rate = (full - base) / budget.output
-  const output = Math.max(0, Math.min(budget.output, rate > 0 ? Math.floor((available - base) / rate) : budget.output))
-  return { output, estimatedCost: base + rate * output, input, cacheRead: cached }
+  const base = SessionUsageQuery.estimateRequest(tokens(0), costs)
+  const full = SessionUsageQuery.estimateRequest(tokens(budget.output), costs)
+  const pricingAvailable = base.priceConfigured && full.priceConfigured
+  if (base.amount === null || full.amount === null || base.amount > available)
+    return { output: 0, estimatedCost: base.amount ?? 0, input, cacheRead: cached, pricingAvailable }
+  const rate = (full.amount - base.amount) / budget.output
+  const output = Math.max(
+    0,
+    Math.min(budget.output, rate > 0 ? Math.floor((available - base.amount) / rate) : budget.output),
+  )
+  return { output, estimatedCost: base.amount + rate * output, input, cacheRead: cached, pricingAvailable }
 }
 
 /** Unknown coverage alone never launches extra model work. */
@@ -118,6 +122,7 @@ export function decide(input: {
   unreported: number
   previousUnreported: number
   output: number
+  pricingAvailable?: boolean
   needsContinuation: boolean
   hard: readonly string[]
   missing: readonly string[]
@@ -149,7 +154,9 @@ export function decide(input: {
           : overBudget
             ? "reported repair usage exceeded estimated allowance; no further requests"
             : exhausted && (input.hard.length || input.needsContinuation)
-              ? "repair budget exhausted"
+              ? input.pricingAvailable === false && input.turns < budget.turns && input.toolCalls < budget.tools
+                ? "repair pricing unavailable; cannot establish allowance"
+                : "repair budget exhausted"
               : report
                 ? "deterministic hard gaps closed; report remaining scope"
                 : continuing

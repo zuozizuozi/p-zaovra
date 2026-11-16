@@ -1197,6 +1197,11 @@ const layer = Layer.effect(
           (deliveryReceipt.turns ?? 0) >= DeliveryContract.budget.turns ||
           deliveryReceipt.model !== SessionOutputRecovery.identity(model))
       ) {
+        const pricingUnavailable =
+          deliveryAllowance!.pricingAvailable === false &&
+          (deliveryReceipt.turns ?? 0) < DeliveryContract.budget.turns &&
+          (deliveryReceipt.toolCalls ?? 0) < DeliveryContract.budget.tools &&
+          deliveryReceipt.model === SessionOutputRecovery.identity(model)
         yield* events.publish(SessionEvent.Synthetic, {
           sessionID: session.id,
           timestamp: yield* DateTime.now,
@@ -1204,8 +1209,15 @@ const layer = Layer.effect(
           ...SessionHost.delivery({
             ...deliveryReceipt!,
             decision: "unverified",
-            reason: "repair token allowance exhausted or model changed",
-            missing: [...deliveryReceipt.missing, "unverified: repair budget exhausted"],
+            reason: pricingUnavailable
+              ? "repair pricing unavailable; cannot establish allowance"
+              : "repair token allowance exhausted or model changed",
+            missing: [
+              ...deliveryReceipt.missing,
+              pricingUnavailable
+                ? "unverified: repair pricing unavailable; cannot establish allowance"
+                : "unverified: repair budget exhausted",
+            ],
           }),
         })
         return { needsContinuation: false, step: currentStep }
@@ -2291,6 +2303,7 @@ const layer = Layer.effect(
                   unreported: current.unreported,
                   previousUnreported: usage.unreported,
                   output: estimate.output,
+                  pricingAvailable: estimate.pricingAvailable,
                   needsContinuation,
                   hard,
                   missing: outcome.missing,

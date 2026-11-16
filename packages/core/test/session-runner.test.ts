@@ -1006,14 +1006,14 @@ for (const fence of ["```", "~~~"])
     }),
   )
 
-for (const scenario of ["missing", "wrong-type", "valid", "budget", "unknown", "uncovered"] as const)
+for (const scenario of ["missing", "wrong-type", "valid", "budget", "unknown", "uncovered", "unpriced"] as const)
   it.live(`368 60k context bounded repair: ${scenario}`, () =>
     Effect.gen(function* () {
       yield* setup
       verificationEnabled = false
       deliveryEnabled = undefined
       currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
-        pricing: repairPricing,
+        pricing: scenario === "unpriced" ? { ...repairPricing, cost: [] } : repairPricing,
       })
       const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
         Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -1054,7 +1054,7 @@ for (const scenario of ["missing", "wrong-type", "valid", "budget", "unknown", "
         resume: false,
       })
       const primary =
-        scenario === "budget" || scenario === "unknown"
+        scenario === "budget" || scenario === "unknown" || scenario === "unpriced"
           ? []
           : Array.from({ length: 19 }, (_, i) => repairCall(`work-${i}`, "echo", { text: `observed-${i}` }))
       const final =
@@ -1081,12 +1081,77 @@ for (const scenario of ["missing", "wrong-type", "valid", "budget", "unknown", "
         expect(receipt?.missing.join(" ")).not.toContain("missing or unreadable")
       } else {
         expect(requests).toHaveLength(normal)
-        if (scenario === "budget" || scenario === "unknown") {
+        if (scenario === "budget" || scenario === "unknown" || scenario === "unpriced") {
           expect(receipt?.decision).toBe("unverified")
-          expect(receipt?.reason).toContain("budget")
+          if (scenario === "unpriced") {
+            expect(receipt?.reason).toBe("repair pricing unavailable; cannot establish allowance")
+            expect(receipt?.turns).toBe(0)
+            expect(receipt?.costs).toEqual([])
+            expect(receipt?.allowance).toBe(0)
+          } else expect(receipt?.reason).toContain("budget")
           expect((yield* session.outcome(sessionID)).verification).not.toBe("verified")
         } else expect(receipt).toBeUndefined()
       }
+    }),
+  )
+
+for (const scenario of ["unpriced", "model-changed", "turn-cap", "tool-cap"] as const)
+  it.live(`repair pricing on saved receipt stops before dispatch: ${scenario}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = undefined
+      currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+        pricing: repairPricing,
+      })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+      response = repairStop("seed")
+      yield* session.resume(sessionID)
+      const request = SessionOutcome.requested(yield* session.context(sessionID)).sourceMessageID!
+      const events = yield* EventV2.Service
+      yield* events.publish(SessionEvent.Synthetic, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        messageID: SessionMessage.ID.create(),
+        text:
+          DeliveryContract.prefix +
+          JSON.stringify({
+            request,
+            started: yield* Clock.currentTimeMillis,
+            tokens: 1024,
+            decision: "repair",
+            missing: ["required result.json is missing"],
+            allowance: 1,
+            spent: 0.25,
+            turns: scenario === "turn-cap" ? 3 : 0,
+            toolCalls: scenario === "tool-cap" ? 12 : 0,
+            costs: [],
+            model: scenario === "model-changed" ? "different-model" : SessionOutputRecovery.identity(model),
+          }),
+      })
+      requests.length = 0
+      responses = [repairStop("must-not-dispatch")]
+      yield* session.resume(sessionID)
+      const receipt = DeliveryContract.receipt(yield* session.context(sessionID), request)
+      expect(requests).toHaveLength(0)
+      expect(receipt).toMatchObject({
+        decision: "unverified",
+        allowance: 1,
+        spent: 0.25,
+        turns: scenario === "turn-cap" ? 3 : 0,
+        toolCalls: scenario === "tool-cap" ? 12 : 0,
+        costs: [],
+        reason:
+          scenario === "unpriced"
+            ? "repair pricing unavailable; cannot establish allowance"
+            : "repair token allowance exhausted or model changed",
+      })
+      expect(receipt?.missing).toContain(
+        scenario === "unpriced"
+          ? "unverified: repair pricing unavailable; cannot establish allowance"
+          : "unverified: repair budget exhausted",
+      )
     }),
   )
 
