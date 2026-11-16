@@ -59,6 +59,7 @@ export function startEvaluationRelay(options: {
   const key = randomUUID()
   const file = openSync(input.journal, "wx")
   const active = new Set<AbortController>()
+  const pendingLabels = new Map<AbortController, () => void>()
   let sent = 0
   let closed = false
   const log = (record: object) => appendFileSync(file, JSON.stringify(record) + "\n")
@@ -147,6 +148,15 @@ export function startEvaluationRelay(options: {
         sent++
         const controller = new AbortController()
         active.add(controller)
+        const usage = observeUsage(input.protocol, [input.apiKey, key, input.baseURL, endpoint.hostname])
+        let labelsRecorded = false
+        const recordModels = (end: "eof" | "incomplete" | "cancelled") => {
+          if (closed || labelsRecorded) return
+          labelsRecorded = true
+          pendingLabels.delete(controller)
+          log({ id, phase: "response-model-observed", end, ...usage.models(end) })
+        }
+        pendingLabels.set(controller, () => recordModels("cancelled"))
         try {
           const response = await fetch(target, {
             method: "POST",
@@ -158,16 +168,17 @@ export function startEvaluationRelay(options: {
           if (!closed) log({ id, phase: "headers", status: response.status })
           const reader = response.body?.getReader()
           if (!reader) {
+            recordModels("eof")
             active.delete(controller)
             return new Response(null, { status: response.status })
           }
           let received = 0
-          const usage = observeUsage(input.protocol)
           let usageRecorded = false
           const recordUsage = (end: "eof" | "incomplete" | "cancelled") => {
             if (closed || usageRecorded) return
             usageRecorded = true
             log({ id, phase: "usage-observed", end, ...usage.result() })
+            recordModels(end)
           }
           return new Response(
             new ReadableStream<Uint8Array>({
@@ -206,6 +217,7 @@ export function startEvaluationRelay(options: {
             },
           )
         } catch {
+          recordModels("incomplete")
           controller.abort()
           active.delete(controller)
           if (!closed) log({ id, phase: "transport-failed", usage: "unknown" })
@@ -229,12 +241,16 @@ export function startEvaluationRelay(options: {
     apiKey: key,
     stop() {
       return (stopping ??= (async () => {
-        closed = true
-        for (const controller of active) controller.abort()
         try {
-          await server.stop(true)
+          for (const record of pendingLabels.values()) record()
         } finally {
-          closeSync(file)
+          closed = true
+          for (const controller of active) controller.abort()
+          try {
+            await server.stop(true)
+          } finally {
+            closeSync(file)
+          }
         }
       })())
     },
