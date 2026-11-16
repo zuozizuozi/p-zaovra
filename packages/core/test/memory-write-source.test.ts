@@ -22,6 +22,7 @@ import { AbsolutePath } from "../src/schema"
 import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
 import { MemoryTool } from "../src/tool/memory"
+import { MemoryCheckTool } from "../src/tool/memory-check"
 import { ToolRegistry } from "../src/tool/registry"
 import { ReadTool } from "../src/tool/read"
 import { PermissionV2 } from "../src/permission"
@@ -579,6 +580,53 @@ windows("file binding insert failure leaves neither an unlinked note nor a parti
   ),
 )
 
+windows("a published Read receipt binds a note that can be rechecked without minting another receipt", () =>
+  withMemory(
+    (h) =>
+      Effect.gen(function* () {
+        const session = yield* h.create()
+        const source = path.join(h.directory, "source.txt")
+        yield* Effect.promise(() => writeFile(source, Buffer.from([0xef, 0xbb, 0xbf, 97])))
+        const file = yield* h.read(session.id, { path: "source.txt" })
+        const called = yield* h.call(session.id, { kind: "decision", text: "Real source recheck integration", file })
+        expect((yield* h.captured.settle(called.invocation)).output?.structured).toMatchObject({ kept: true })
+        const note = (yield* h.store.list(h.project))[0]!
+        expect(note.files).toMatchObject({ state: "unknown" })
+        expect(note.status).toBe("unverified")
+        const first = yield* h.call(
+          session.id,
+          { noteID: note.id, expectedRevision: note.fileRevision },
+          "memory_check",
+        )
+        expect((yield* h.captured.settle(first.invocation)).output?.structured).toMatchObject({
+          outcome: "matched-at-check",
+          applied: true,
+          checkedFiles: 1,
+        })
+        const matched = (yield* h.store.get(note.id))!
+        expect(matched.files).toMatchObject({ state: "unknown" })
+        expect(matched.status).toBe("unverified")
+        yield* Effect.promise(() => writeFile(source, "changed after the check"))
+        const second = yield* h.call(
+          session.id,
+          { noteID: note.id, expectedRevision: matched.fileRevision },
+          "memory_check",
+        )
+        expect((yield* h.captured.settle(second.invocation)).output?.structured).toMatchObject({
+          outcome: "changed",
+          applied: true,
+          checkedFiles: 1,
+        })
+        expect((yield* h.store.get(note.id))!.status).toBe("stale")
+        expect((yield* h.store.get(note.id))!.text).toBe(note.text)
+        const receipts = yield* h.database.db.select().from(ReadReceiptTable).all()
+        expect(receipts).toHaveLength(1)
+        expect(receipts[0]!.call_id).toBe(file.callID)
+      }),
+    true,
+  ),
+)
+
 async function withMemory(
   body: (h: Effect.Success<typeof setup>, settings: { enabled: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
   evaluated = false,
@@ -595,6 +643,7 @@ async function withMemory(
             Catalog.node,
             MemoryWritePolicy.node,
             MemoryTool.node,
+            MemoryCheckTool.node,
             ReadTool.node,
             MemoryRecorder.node,
             Database.node,
