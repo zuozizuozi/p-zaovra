@@ -17,7 +17,7 @@ test.skipIf(process.platform !== "win32")(
     await mkdir(profile)
     await Bun.write(path.join(profile, ".evaluation-profile"), "zaovra-memory-evaluation-v1\n")
     let calls = 0
-    let reject = false
+    let failure: "http" | "permission" | undefined
     const requests: string[] = []
     // Only the upstream is scripted. The backend is the standalone executable under its native Job.
     const provider = Bun.serve({
@@ -26,13 +26,40 @@ test.skipIf(process.platform !== "win32")(
       async fetch(request) {
         requests.push(await request.text())
         calls++
-        if (reject)
+        if (failure === "http")
           return Response.json(
             { error: { message: "fixture rejected", type: "invalid_request_error" } },
             { status: 400 },
           )
         const chunk = (choices: unknown[], usage?: object) =>
           `data: ${JSON.stringify({ id: "session-fixture", object: "chat.completion.chunk", created: 1, model: "fixture-model", choices, usage })}\n\n`
+        if (failure === "permission")
+          return new Response(
+            chunk([
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "denied-command",
+                      type: "function",
+                      function: {
+                        name: "bash",
+                        arguments: JSON.stringify({ command: "$x = 'private-fixture-command'; Write-Output $x" }),
+                      },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ]) +
+              chunk([{ index: 0, delta: {}, finish_reason: "tool_calls" }]) +
+              chunk([], { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 }) +
+              "data: [DONE]\n\n",
+            { headers: { "content-type": "text/event-stream" } },
+          )
         return new Response(
           chunk([
             { index: 0, delta: { role: "assistant", content: "Private fixture response." }, finish_reason: null },
@@ -48,6 +75,8 @@ test.skipIf(process.platform !== "win32")(
       path.join(directory, "zaovra.json"),
       JSON.stringify({
         model: "session-fixture/fixture-model",
+        shell: "powershell",
+        agent: { build: { steps: 8 } },
         memory: { enabled: false },
         provider: {
           "session-fixture": {
@@ -150,11 +179,31 @@ test.skipIf(process.platform !== "win32")(
         ).toEqual([])
         expect(db.query("select id from session where id = ?").all(other.admission.sessionID)).toHaveLength(1)
       }
-      reject = true
+      failure = "http"
       await expect(execute("rejected")).rejects.toThrow("evaluation-session-not-completed")
       expect(calls).toBe(5)
+      failure = "permission"
+      await Bun.write(
+        configFile,
+        JSON.stringify({ ...config, permission: { "*": "allow", external_directory: "deny" } }),
+      )
+      await expect(execute("denied-command")).rejects.toThrow("evaluation-session-not-completed")
+      expect(calls).toBe(6)
+      for (const stage of ["rejected", "denied-command"]) {
+        const incomplete = await Bun.file(path.join(tmp.path, stage, "incomplete.json")).json()
+        expect(incomplete.admission.sessionID).toBeString()
+        expect(incomplete.admission.id).toBeString()
+        expect(incomplete.lastObservation.artifactReady).toBe(false)
+        expect(["own-assistant-terminated", "outcome-not-completed"]).toContain(incomplete.lastObservation.reason)
+        expect(incomplete.lastObservation.turnEvidence).toBeUndefined()
+        expect(incomplete.stopped).toMatchObject({ remaining: [], controllerExit: 0 })
+        expect(JSON.stringify(incomplete)).not.toContain("Private fixture")
+        expect(JSON.stringify(incomplete)).not.toContain("private-fixture-command")
+        expect(await Bun.file(path.join(tmp.path, stage, "session.json")).exists()).toBe(false)
+        expect(await Bun.file(path.join(tmp.path, stage, "grade.json")).exists()).toBe(false)
+      }
       await expect(execute("first")).rejects.toThrow()
-      expect(calls).toBe(5)
+      expect(calls).toBe(6)
     } finally {
       await provider.stop(true)
     }
@@ -212,6 +261,8 @@ test.skipIf(process.platform !== "win32")(
     )
     const forbidden = path.join(tmp.path, "must-not-be-created")
     Object.assign(environment, {
+      // Bun may cache imported source before executing the entrypoint's isolation checks.
+      BUN_RUNTIME_TRANSPILER_CACHE_PATH: path.join(tmp.path, "transpiler-cache"),
       HOME: forbidden,
       USERPROFILE: forbidden,
       XDG_DATA_HOME: forbidden,

@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import path from "node:path"
-import { lstat, mkdir, readFile, realpath } from "node:fs/promises"
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { Zaovra } from "@zaovra-ai/client"
 import { openJob } from "./job"
@@ -215,8 +215,17 @@ export async function runEvaluationSession(input: {
     const observed = await read()
     lastObservation = observed
     if (!observed.artifactReady || !observed.turn) {
-      if (["own-assistant-terminated", "outcome-not-completed"].includes(observed.reason))
+      if (["own-assistant-terminated", "outcome-not-completed"].includes(observed.reason)) {
+        // Failure diagnostics are not a completed turn or an artifact grading certificate.
+        // Stop the owned backend before persisting the last bounded observation.
+        const stopped = await owner.stop()
+        await writeFile(
+          path.join(input.stage, "incomplete.json"),
+          JSON.stringify({ generation, admission, lastObservation, backgroundReason, stopped }),
+          { flag: "wx" },
+        )
         throw new Error("evaluation-session-not-completed")
+      }
       await Bun.sleep(100)
       continue
     }
