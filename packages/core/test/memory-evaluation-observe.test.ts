@@ -282,3 +282,168 @@ test("a new coherent sampling attempt may succeed after a changed snapshot", asy
   expect(result.artifactReady).toBe(true)
   expect(result.attempts).toBe(2)
 })
+
+const capturedTool = {
+  type: "tool",
+  id: "tool-first",
+  name: "read",
+  state: {
+    status: "completed",
+    input: { path: "notes.txt" },
+    content: [{ type: "text", text: "tool-result-private" }],
+    structured: {},
+  },
+  time: { created: 2, completed: 3 },
+} as const
+const capture = { maxBytes: 65536, maxParts: 32 }
+
+test("turn evidence is explicit, bound to final fingerprint, ordered and excludes foreign/reasoning/superseded text", async () => {
+  await using f = await fixture({
+    messages: [
+      { ...user, id: "old-user", seq: 1 },
+      {
+        ...assistant,
+        id: "old-answer",
+        seq: 2,
+        turn: "old-user",
+        content: [{ type: "text", id: "old", text: "foreign-secret" }],
+      },
+      user,
+      {
+        ...assistant,
+        id: "final",
+        seq: 9,
+        content: [
+          { type: "reasoning", id: "reasoning", text: "reasoning-secret" },
+          { type: "text", id: "superseded", text: "superseded-secret", superseded: true },
+          { type: "text", id: "answer-a", text: "结论：" },
+          { type: "text", id: "answer-b", text: "六行。" },
+        ],
+      },
+      {
+        ...assistant,
+        content: [
+          { type: "text", id: "commentary", text: "early-commentary" },
+          capturedTool,
+          {
+            ...capturedTool,
+            id: "tool-second",
+            state: {
+              status: "error",
+              input: {},
+              content: [],
+              structured: {},
+              error: { type: "unknown", message: "recoverable" },
+            },
+          },
+        ],
+      },
+    ],
+  })
+  const normal = await observe({ client: f.client, admission, confirmBackground: quiet })
+  expect(normal.turnEvidence).toBeUndefined()
+  for (const text of ["early-commentary", "tool-result-private", "六行", "secret"])
+    expect(JSON.stringify(normal)).not.toContain(text)
+  const result = await observe({ client: f.client, admission, confirmBackground: quiet, capture })
+  const evidence = result.turnEvidence
+  expect(evidence?.status).toBe("complete")
+  if (evidence?.status !== "complete") throw new Error("missing-evidence")
+  expect(evidence.admission).toEqual(admission)
+  expect(evidence.snapshot).toEqual(result.evidence.at(-1)!)
+  expect(evidence.tools.map((tool) => [tool.messageID, tool.seq, tool.partID, tool.index, tool.state.status])).toEqual([
+    [assistant.id, 7, "tool-first", 1, "completed"],
+    [assistant.id, 7, "tool-second", 2, "error"],
+  ])
+  expect(evidence.answer).toEqual({
+    status: "selected",
+    messageID: "final",
+    seq: 9,
+    partIDs: ["answer-a", "answer-b"],
+    text: "结论：六行。",
+  })
+  expect(evidence.assistantText.map((part) => part.partID)).toEqual(["commentary", "answer-a", "answer-b"])
+  expect(JSON.stringify(evidence)).not.toContain("secret")
+  expect(JSON.stringify(evidence.tools[0].state)).toContain("tool-result-private")
+})
+
+test("capture overflow is unknown with no partial payload; UTF8 byte boundary is exact", async () => {
+  await using f = await fixture({
+    messages: [user, { ...assistant, content: [{ type: "text", id: "text", text: "敏感内容" }] }],
+  })
+  const read = (bounds = capture) => observe({ client: f.client, admission, confirmBackground: quiet, capture: bounds })
+  const whole = (await read()).turnEvidence!
+  expect(whole.status).toBe("complete")
+  const bytes = Buffer.byteLength(JSON.stringify(whole))
+  expect((await read({ maxBytes: bytes, maxParts: 1 })).turnEvidence?.status).toBe("complete")
+  const limited = (await read({ maxBytes: bytes - 1, maxParts: 1 })).turnEvidence
+  expect(limited).toMatchObject({ status: "unknown", reason: "byte-limit" })
+  expect(JSON.stringify(limited)).not.toContain("敏感内容")
+  await using parts = await fixture({
+    messages: [user, { ...assistant, content: [capturedTool, { type: "text", id: "text", text: "part-private" }] }],
+  })
+  const result = await observe({
+    client: parts.client,
+    admission,
+    confirmBackground: quiet,
+    capture: { maxBytes: 65536, maxParts: 1 },
+  })
+  expect(result.turnEvidence).toMatchObject({ status: "unknown", reason: "part-limit" })
+  expect(JSON.stringify(result)).not.toContain("private")
+})
+
+test("pruned tools and ambiguous identities refuse evidence, and a final tool/reasoning is not an answer", async () => {
+  for (const [messages, reason] of [
+    [
+      [user, { ...assistant, content: [{ ...capturedTool, time: { ...capturedTool.time, pruned: 4 } }] }],
+      "tool-result-pruned",
+    ],
+    [[user, { ...assistant, content: [capturedTool, capturedTool] }], "ambiguous-part-identity"],
+    [[user, assistant, { ...assistant, id: "same-seq" }], "ambiguous-message-order"],
+  ] satisfies Array<[Message[], string]>) {
+    await using f = await fixture({ messages })
+    const result = await observe({ client: f.client, admission, confirmBackground: quiet, capture })
+    expect(result.turnEvidence).toMatchObject({ status: "unknown", reason })
+    expect(JSON.stringify(result)).not.toContain("tool-result-private")
+  }
+  for (const content of [
+    [capturedTool],
+    [{ type: "reasoning", id: "r", text: "reasoning-private" }],
+    [{ type: "text", id: "s", text: "superseded-private", superseded: true }],
+  ] satisfies Array<Extract<Message, { type: "assistant" }>["content"]>) {
+    await using f = await fixture({
+      messages: [
+        user,
+        { ...assistant, content: [{ type: "text", id: "early", text: "not-final" }] },
+        { ...assistant, id: "last", seq: 8, content },
+      ],
+    })
+    const evidence = (await observe({ client: f.client, admission, confirmBackground: quiet, capture })).turnEvidence
+    expect(evidence?.status).toBe("complete")
+    if (evidence?.status !== "complete") throw new Error("missing-evidence")
+    expect(evidence.answer).toEqual({ status: "unknown", reason: "no-unambiguous-final-text" })
+  }
+})
+
+test("opt-in does not bypass stable sampling or admission completion and invalid capture never reads", async () => {
+  const messages: Message[] = [
+    user,
+    { ...assistant, content: [{ type: "text", id: "sensitive", text: "must-not-leak" }] },
+  ]
+  await using f = await fixture({ messages, change: (value, read) => ({ ...value, watermark: read > 4 ? 21 : 20 }) })
+  const changed = await observe({ client: f.client, admission, attempts: 1, confirmBackground: quiet, capture })
+  expect(changed.reason).toBe("snapshot-changed-after-background-check")
+  expect(changed.turnEvidence).toBeUndefined()
+  expect(JSON.stringify(changed)).not.toContain("must-not-leak")
+  await using pending = await fixture({ messages, outcome: { ...done, state: "failed" } })
+  expect(
+    (await observe({ client: pending.client, admission, confirmBackground: quiet, capture })).turnEvidence,
+  ).toBeUndefined()
+  await using invalid = await fixture()
+  for (const bounds of [
+    { maxBytes: 0, maxParts: 1 },
+    { maxBytes: 262145, maxParts: 1 },
+    { maxBytes: 100, maxParts: 1001 },
+  ])
+    expect((await observe({ client: invalid.client, admission, capture: bounds })).attempts).toBe(0)
+  expect(invalid.requests).toHaveLength(0)
+})

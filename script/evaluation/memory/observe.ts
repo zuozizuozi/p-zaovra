@@ -6,6 +6,32 @@ import type { MessagesListOutput, SessionsPromptOutput } from "@zaovra-ai/client
 import type { Turn } from "./oracle"
 
 type Admission = Pick<SessionsPromptOutput, "sessionID" | "id" | "admittedSeq">
+type Assistant = Extract<MessagesListOutput["data"][number], { type: "assistant" }>
+type Tool = Extract<Assistant["content"][number], { type: "tool" }>
+export type CaptureBounds = { maxBytes: number; maxParts: number }
+type TextEvidence = { messageID: string; seq: number; partID: string; index: number; text: string }
+type ToolEvidence = {
+  messageID: string
+  seq: number
+  partID: string
+  index: number
+  name: string
+  state: Tool["state"]
+  time: Tool["time"]
+}
+type EvidenceBinding = { admission: Admission; snapshot: Observation["evidence"][number] }
+export type TurnEvidence = EvidenceBinding &
+  (
+    | { status: "unknown"; reason: string }
+    | {
+        status: "complete"
+        assistantText: TextEvidence[]
+        tools: ToolEvidence[]
+        answer:
+          | { status: "selected"; messageID: string; seq: number; partIDs: string[]; text: string }
+          | { status: "unknown"; reason: string }
+      }
+  )
 type Snapshot = {
   epoch: number
   revision: number
@@ -41,6 +67,8 @@ export type Observation = {
     messages: number
   }>
   turn?: Turn
+  /** Explicit opt-in only. Projection order is not proof of shell subcommands or negative execution. */
+  turnEvidence?: TurnEvidence
 }
 
 /** Read-only, bounded sampling of an already admitted isolated Session. */
@@ -50,6 +78,8 @@ export async function observe(input: {
   maxPages?: number
   attempts?: number
   requestTimeoutMs?: number
+  /** Bounds the exported evidence, not HTTP response allocation. No partial text is returned on overflow. */
+  capture?: CaptureBounds
   confirmBackground?: (check: BackgroundCheck, signal: AbortSignal) => Promise<"quiescent" | "active" | "unknown">
 }): Promise<Observation> {
   const pages = input.maxPages ?? 20
@@ -68,6 +98,7 @@ export async function observe(input: {
     !integer(pages, 1, 100) ||
     !integer(attempts, 1, 3) ||
     !integer(timeout, 1, 30_000) ||
+    !validCapture(input.capture) ||
     !input.admission.sessionID ||
     !input.admission.id ||
     !integer(input.admission.admittedSeq, 1)
@@ -162,6 +193,7 @@ export async function observe(input: {
       return {
         ...result("ready", "own-turn-completed-and-host-quiescent", attempt),
         artifactReady: true,
+        ...(input.capture ? { turnEvidence: capture(final, input.admission, input.capture) } : {}),
         turn: {
           admitted: true,
           promoted: true,
@@ -185,6 +217,60 @@ export async function observe(input: {
 }
 
 class ObservationError extends Error {}
+
+export function validCapture(capture: CaptureBounds | undefined) {
+  return (
+    capture === undefined ||
+    (capture !== null &&
+      typeof capture === "object" &&
+      integer(capture.maxBytes, 1, 262144) &&
+      integer(capture.maxParts, 1, 1000))
+  )
+}
+
+function capture(snapshot: Snapshot, admission: Admission, bounds: CaptureBounds): TurnEvidence {
+  const binding = { admission, snapshot: summary(snapshot) }
+  const unknown = (reason: string): TurnEvidence => ({ ...binding, status: "unknown", reason })
+  const messages = snapshot.messages
+    .filter((message): message is Assistant => message.type === "assistant" && message.turn === admission.id)
+    .sort((a, b) => a.seq! - b.seq!)
+  if (new Set(messages.map((message) => message.seq)).size !== messages.length)
+    return unknown("ambiguous-message-order")
+  if (messages.reduce((count, message) => count + message.content.length, 0) > bounds.maxParts)
+    return unknown("part-limit")
+  const assistantText: TextEvidence[] = []
+  const tools: ToolEvidence[] = []
+  for (const message of messages) {
+    const ids = new Set<string>()
+    for (const [index, part] of message.content.entries()) {
+      if (typeof part.id !== "string" || !part.id || ids.has(part.id)) return unknown("ambiguous-part-identity")
+      ids.add(part.id)
+      const ref = { messageID: message.id, seq: message.seq!, partID: part.id, index }
+      if (part.type === "text" && !part.superseded) assistantText.push({ ...ref, text: part.text })
+      if (part.type === "tool") {
+        if (part.time.pruned !== undefined) return unknown("tool-result-pruned")
+        tools.push({ ...ref, name: part.name, state: part.state, time: part.time })
+      }
+    }
+  }
+  // Conservative final-answer selection: only unsuperseded text in the latest assistant,
+  // and never an assistant that also calls a tool. Do not fall back to earlier commentary.
+  const last = messages.at(-1)!
+  const text = assistantText.filter((part) => part.messageID === last.id)
+  const answer =
+    !last.content.some((part) => part.type === "tool") && text.some((part) => part.text.trim())
+      ? {
+          status: "selected" as const,
+          messageID: last.id,
+          seq: last.seq!,
+          partIDs: text.map((part) => part.partID),
+          text: text.map((part) => part.text).join(""),
+        }
+      : { status: "unknown" as const, reason: "no-unambiguous-final-text" }
+  const result: TurnEvidence = { ...binding, status: "complete", assistantText, tools, answer }
+  if (Buffer.byteLength(JSON.stringify(result)) > bounds.maxBytes) return unknown("byte-limit")
+  return result
+}
 
 function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum

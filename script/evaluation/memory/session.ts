@@ -4,7 +4,8 @@ import { lstat, mkdir, readFile, realpath } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { Zaovra } from "@zaovra-ai/client"
 import { openJob } from "./job"
-import { observe } from "./observe"
+import { observe, validCapture } from "./observe"
+import type { CaptureBounds } from "./observe"
 import { collectHistory } from "./history"
 
 /** One new Session in an isolated, persistent profile; no retry admits another prompt.
@@ -20,6 +21,8 @@ export async function runEvaluationSession(input: {
   seconds?: number
   providerEnvironment?: Record<string, string>
   poison?: { chain: string; sourceSessionID: string }
+  /** Opt-in sensitive own-turn projection; delivered only after final consistency and empty Job. */
+  capture?: CaptureBounds
 }) {
   const seconds = input.seconds ?? 180
   if (
@@ -27,6 +30,7 @@ export async function runEvaluationSession(input: {
     !Number.isInteger(seconds) ||
     seconds < 10 ||
     seconds > 600 ||
+    !validCapture(input.capture) ||
     !input.prompt.trim()
   )
     throw new Error("invalid-evaluation-session")
@@ -159,11 +163,12 @@ export async function runEvaluationSession(input: {
   )
   const admitted = await client.sessions.prompt({ sessionID: session.id, prompt: { text: input.prompt } }, { signal })
   const admission = { sessionID: admitted.sessionID, id: admitted.id, admittedSeq: admitted.admittedSeq }
-  const read = () =>
+  const read = (capture?: CaptureBounds) =>
     observe({
       client,
       admission,
       attempts: 1,
+      ...(capture ? { capture } : {}),
       async confirmBackground(check, requestSignal) {
         const before = await owner.inspect()
         backgroundReason = !before.rootAlive
@@ -210,7 +215,7 @@ export async function runEvaluationSession(input: {
     const last = observed.evidence.at(-1)!
     const diagnostics = await collectHistory({ client, admission, cut: last.watermark })
     if (diagnostics.coverage.status !== "complete-through-cut") throw new Error("evaluation-history-incomplete")
-    const final = await read()
+    const final = await read(input.capture)
     const finalSnapshot = final.evidence.at(-1)
     if (
       !final.artifactReady ||
