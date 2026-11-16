@@ -90,7 +90,14 @@ it.live("664 a non-GPT runner advertises compact schemas without changing canoni
     const sizes = SessionCache.inputSizes(request)
     const registry = yield* ToolRegistry.Service
     const full = (yield* registry.materialize()).definitions
-    const compact = ToolProfile.select(full, { model: model.id, history: [] })
+    // The synthetic model has no trusted memory-write profile. Registration is
+    // unchanged, but its per-turn advertisement must exclude memory_note.
+    expect(full.some((tool) => tool.name === "memory_note")).toBe(true)
+    expect(request.tools.some((tool) => tool.name === "memory_note")).toBe(false)
+    const compact = ToolProfile.select(
+      full.filter((tool) => tool.name !== "memory_note"),
+      { model: model.id, history: [] },
+    )
     const fullBytes = Buffer.byteLength(JSON.stringify(full))
     expect(request.tools).toEqual(compact)
     expect(sizes.find((entry) => entry.category === "tools")!.bytes).toBeLessThan(fullBytes)

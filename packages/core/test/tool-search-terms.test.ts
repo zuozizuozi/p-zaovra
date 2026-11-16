@@ -68,9 +68,12 @@ for (const input of [{}, { query: "" }, { query: "   " }, { query: "!!!，。" }
     withSearch([], (sessionID) =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
-        const catalog = (yield* registry.materialize()).definitions.filter((tool) => tool.name !== "tool_search")
+        const registered = (yield* registry.materialize()).definitions
+        expect(registered.some((tool) => tool.name === "memory_note")).toBe(true)
+        const catalog = registered.filter((tool) => tool.name !== "tool_search" && tool.name !== "memory_note")
         const output = (yield* search(registry, sessionID, input)).output?.structured as SearchOutput
         expect(output.activated).toEqual([])
+        expect(output.available.some((tool) => tool.name === "memory_note")).toBe(false)
         expect(output.available).toEqual(
           catalog.map((tool) => ({ name: tool.name, description: tool.description.split("\n")[0]!.slice(0, 200) })),
         )
@@ -196,7 +199,15 @@ test("541 search for the file activates search capabilities rather than generic 
       expect(output.activated).toContain("grep")
       expect(output.activated.length).toBeLessThanOrEqual(7)
       for (const name of output.activated)
-        expect(["evidence_read", "evidence_search", "glob", "grep", "memory_review", "memory_search", "websearch"]).toContain(name)
+        expect([
+          "evidence_read",
+          "evidence_search",
+          "glob",
+          "grep",
+          "memory_review",
+          "memory_search",
+          "websearch",
+        ]).toContain(name)
       for (const name of ["bash", "read", "write", "edit", "task", "question", "skill"])
         expect(output.activated).not.toContain(name)
     }),
