@@ -34,6 +34,7 @@ import {
   DateTime,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   FiberSet,
   Layer,
@@ -719,7 +720,8 @@ const layer = Layer.effect(
       if (!previousHistory.some((message) => message.type === "user")) yield* initialize
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       const withTool = Semaphore.makeUnsafe(1).withPermit
-      let toolsStopped = false
+      let toolStopCause: Cause.Cause<ToolOutputStore.Error> | undefined
+      let permissionStopped = false
       let stopQueuedTools = false
       let needsContinuation = false
       const operationCounts = new Map<string, number>()
@@ -1474,7 +1476,7 @@ const layer = Layer.effect(
             needsContinuation = true
             const assistantMessageID = yield* publisher.assistantMessageID(event.id)
             yield* Effect.suspend(() =>
-              toolsStopped
+              toolStopCause
                 ? Effect.interrupt
                 : stopQueuedTools
                   ? publish(
@@ -1646,7 +1648,10 @@ const layer = Layer.effect(
                               )
                               active.operation.settlement = settlement
                             }
-                            if (settlement.errorMetadata?.phase === "permission") return yield* Effect.interrupt
+                            if (settlement.errorMetadata?.phase === "permission") {
+                              permissionStopped = true
+                              return yield* Effect.interrupt
+                            }
                           }),
                         ),
                       ),
@@ -1654,7 +1659,7 @@ const layer = Layer.effect(
             ).pipe(
               Effect.onExit((exit) =>
                 Effect.sync(() => {
-                  if (exit._tag === "Failure") toolsStopped = true
+                  if (exit._tag === "Failure") toolStopCause ??= exit.cause
                 }),
               ),
               withTool,
@@ -1800,7 +1805,10 @@ const layer = Layer.effect(
               }),
             )
           }
-          const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
+          const awaited = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
+          // FiberSet.join ignores pure interruptions, so awaitEmpty can win with
+          // success. Preserve the first tool's cause before queued fibers stop.
+          const settled = toolStopCause ? Exit.failCause(toolStopCause) : awaited
           for (const [callID, operation] of hostedOperations)
             yield* recordOperation(operation.id, operation.fingerprint, "unknown", callID)
           // A protocol parse failure can leave local input-start records even
@@ -1835,6 +1843,7 @@ const layer = Layer.effect(
               settleInterruptedTurn(session.id, {
                 publisher,
                 budget: budgetStop?.expired || budgetStop?.closing || budgetStop?.repairExpired,
+                source: permissionStopped ? "permission" : undefined,
                 requestPerformed: !(subtask?.type === "user" && subtask.subtask),
               }),
             )

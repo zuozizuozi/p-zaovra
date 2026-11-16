@@ -73,6 +73,7 @@ import { Config } from "@zaovra-ai/core/config"
 import { ConfigCompaction } from "@zaovra-ai/core/config/compaction"
 import { ConfigExperimental } from "@zaovra-ai/core/config/experimental"
 import { Tool } from "@zaovra-ai/core/tool/tool"
+import { safetyFailure } from "@zaovra-ai/core/tool/safety-failure"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
 import { ToolSearch } from "@zaovra-ai/core/tool/tool-search"
 import { VerificationReviewTool } from "@zaovra-ai/core/tool/verification-review"
@@ -8010,6 +8011,101 @@ describe("SessionRunnerLLM", () => {
         },
         { type: "assistant", finish: "stop" },
       ])
+    }),
+  )
+
+  it.effect("settles every called tool when a real permission deny interrupts queued execution", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const agents = yield* AgentV2.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const store = yield* SessionStore.Service
+      const permissions = Context.get(
+        yield* Layer.build(
+          AppNodeBuilder.build(PermissionV2.node, [
+            [AgentV2.node, Layer.succeed(AgentV2.Service, agents)],
+            [Database.node, Layer.succeed(Database.Service, database)],
+            [EventV2.node, Layer.succeed(EventV2.Service, events)],
+            [SessionStore.node, Layer.succeed(SessionStore.Service, store)],
+            [Location.node, fixtureLocation],
+            [Config.node, config],
+          ]),
+        ),
+        PermissionV2.Service,
+      )
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("build"), (agent) => {
+          agent.permissions.push({ action: "external_directory", resource: "*", effect: "deny" })
+        }),
+      )
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        denied: Tool.make({
+          description: "Request an explicitly denied directory",
+          input: Schema.Struct({}),
+          output: Schema.Struct({}),
+          execute: () =>
+            permissions.assert({ sessionID, action: "external_directory", resources: ["outside"], save: [] }).pipe(
+              Effect.mapError((error) => safetyFailure(error) ?? new Tool.Failure({ message: error.message })),
+              Effect.map(() => {
+                executions.push("denied side effect")
+                return {}
+              }),
+            ),
+        }),
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Call denied" }), resume: false })
+      requests.length = 0
+      executions.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "call-denied", name: "denied", input: {} }),
+          LLMEvent.toolCall({ id: "call-after-deny", name: "echo", input: { text: "must not run" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "unexpected", ["Must not continue"]).completeEvents,
+      ]
+      const exit = yield* session.resume(sessionID).pipe(Effect.exit)
+      const history = yield* session.context(sessionID)
+      expect(history).toMatchObject([
+        { type: "user" },
+        {
+          type: "assistant",
+          finish: "interrupted",
+          termination: { category: "interrupted", source: "permission" },
+          content: [
+            { type: "tool", id: "call-denied", state: { status: "error" } },
+            { type: "tool", id: "call-after-deny", state: { status: "error" } },
+          ],
+        },
+      ])
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(requests).toHaveLength(1)
+      expect(executions).toEqual([])
+      const rows = yield* database.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      for (const callID of ["call-denied", "call-after-deny"]) {
+        expect(
+          rows.filter(
+            (row) => row.type === EventV2.versionedType(SessionEvent.Tool.Called.type, 1) && row.data.callID === callID,
+          ),
+        ).toHaveLength(1)
+        expect(
+          rows.filter(
+            (row) => row.type === EventV2.versionedType(SessionEvent.Tool.Failed.type, 1) && row.data.callID === callID,
+          ),
+        ).toHaveLength(1)
+      }
+      expect(JSON.stringify(rows)).toContain("PermissionV2.BlockedError")
     }),
   )
 
