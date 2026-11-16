@@ -3,7 +3,7 @@ import { lstat, readFile, writeFile } from "node:fs/promises"
 import { runEvaluationChain } from "./pilot"
 import { gradeArithmetic } from "./arithmetic-chain"
 import { gradeFormat } from "./format"
-import { gradeBuild, gradePublish } from "./build-publish"
+import { gradeBuild, gradeBuildV2, gradePublish } from "./build-publish"
 import { hostVerdict, combine, digest, humanRubrics, checkDimensions } from "./host-verdict"
 import { chains } from "./cases"
 import type { HostChain, Check, HostReport } from "./host-verdict"
@@ -11,7 +11,7 @@ import type { HostChain, Check, HostReport } from "./host-verdict"
 type StageInput = Parameters<Parameters<typeof runEvaluationChain>[0]["grade"]>[0]
 type Artifacts = Awaited<ReturnType<typeof gradeArithmetic>>["artifacts"]
 
-/** Opt-in four-chain entry. Budget/transport authorization stays with the calling host. */
+/** Opt-in host-graded entry. Budget/transport authorization stays with the calling host. */
 export function runHostGradedChain(
   input: Omit<Parameters<typeof runEvaluationChain>[0], "grade" | "capture" | "chainID"> & {
     chainID: HostChain
@@ -95,6 +95,7 @@ export function createHostGrader(input: { candidate: string; chain: HostChain; r
       previousTexts = {}
       lastStage = stage.stage
       return {
+        ...(input.chain === "build-v2" ? { chain: "build-v2" as const } : {}),
         pass: false,
         reason: "needs-host-evidence-binding",
         hostVerdict: { status: "unknown" as const, file: "host-verdict.json" },
@@ -119,7 +120,9 @@ export function createHostGrader(input: { candidate: string; chain: HostChain; r
                 return report.status
               },
             })
-          : await (input.chain === "build" ? gradeBuild : gradePublish)(common)
+          : await (input.chain === "build" ? gradeBuild : input.chain === "build-v2" ? gradeBuildV2 : gradePublish)(
+              common,
+            )
     // The original oracle may stop at a failed artifact or unknown human rubric.
     // Preserve that result; an uncalled tool callback is explicitly unassessed.
     const required = "requirements" in grade ? grade.requirements : undefined

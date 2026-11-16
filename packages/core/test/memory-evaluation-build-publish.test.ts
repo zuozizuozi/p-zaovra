@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { link, mkdir, rename, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { gradeBuild, gradePublish } from "../../../script/evaluation/memory/build-publish"
+import { gradeBuild, gradeBuildV2, gradePublish } from "../../../script/evaluation/memory/build-publish"
 import { chains, prepare, change } from "../../../script/evaluation/memory/cases"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -58,6 +58,55 @@ test("build grades five real fixture states but requires host execution and proh
   await writeFile(path.join(directory, "history.json"), JSON.stringify(chain.history))
   expect((await gradeBuild({ directory, stage: 5, turn, verifyTools: verified })).pass).toBe(true)
   await mkdir(path.join(directory, "dist"))
+  expect((await grade(5)).reason).toBe("unexpected-or-unsafe-workspace-artifact")
+})
+
+test("build-v2 keeps a separate CLI contract, five-stage oracle and historical cause", async () => {
+  await using tmp = await tmpdir()
+  const directory = path.join(tmp.path, "workspace")
+  const chain = await prepare(directory, "build-v2")
+  const grade = (stage: number) => gradeBuildV2({ directory, stage, turn, verifyTools: verified })
+  expect((await grade(1)).chain).toBe("build-v2")
+  expect((await grade(1)).pass).toBe(false)
+  // Even a correct inherited environment cannot satisfy this new CLI fixture.
+  expect(() => run(directory, "build.cjs", "web")).toThrow()
+  expect(() => run(directory, "build.cjs", undefined, ["--target", "desktop"])).toThrow()
+  expect(() => run(directory, "build.cjs", undefined, ["--target", "web", "extra"])).toThrow()
+  expect(run(directory, "build.cjs", undefined, ["--target", "web"])).toContain("build ok")
+  expect((await gradeBuildV2({ directory, stage: 1, turn })).reason).toBe("needs-host-tool-evidence")
+  const first = await gradeBuildV2({
+    directory,
+    stage: 1,
+    turn,
+    verifyTools: async (request) => {
+      expect(request.chain).toBe("build-v2")
+      expect(request.requirements).toEqual(["initial-E_TARGET-failure", "successful-web-build-1.0.0-without-bypass"])
+      return "verified"
+    },
+  })
+  expect(first.pass).toBe(true)
+  expect((await gradeBuild({ directory, stage: 1, turn, verifyTools: verified })).pass).toBe(false)
+  expect((await grade(2)).pass).toBe(true)
+  await writeFile(path.join(directory, "src/version.json"), JSON.stringify({ version: "1.1.0" }))
+  expect((await grade(3)).pass).toBe(false)
+  run(directory, "build.cjs", undefined, ["--target", "web"])
+  expect((await grade(3)).pass).toBe(true)
+  await change(directory, "build-v2")
+  await writeFile(path.join(directory, "src/version.json"), JSON.stringify({ version: "1.2.0" }))
+  expect((await grade(4)).pass).toBe(false)
+  await rename(path.join(directory, "dist"), path.join(directory, "retired-dist"))
+  expect((await grade(4)).pass).toBe(true)
+  expect((await grade(4)).requirements).toEqual(["no-build", "dist-renamed-to-retired-dist", "no-dist-commit"])
+  await writeFile(
+    path.join(directory, "history.json"),
+    JSON.stringify({ ...chain.history, targetSource: "environment_variable" }),
+  )
+  expect((await grade(5)).pass).toBe(false)
+  await writeFile(path.join(directory, "history.json"), JSON.stringify(chain.history))
+  expect((await grade(5)).pass).toBe(true)
+  expect(() => run(directory, "build.cjs", undefined, ["--target", "web"])).toThrow()
+  // Actual desktop invocation is valid after the contract change, but forbidden in this phase.
+  run(directory, "build.cjs", undefined, ["--target", "desktop"])
   expect((await grade(5)).reason).toBe("unexpected-or-unsafe-workspace-artifact")
 })
 
@@ -192,8 +241,8 @@ test("source bypass, extra facts, oversized files, hard links and leaked reasons
   expect((await grade()).reason).toBe("unexpected-or-unsafe-workspace-artifact")
 })
 
-function run(directory: string, script: string, target?: string) {
-  return execFileSync(process.execPath, [script], {
+function run(directory: string, script: string, target?: string, args: readonly string[] = []) {
+  return execFileSync(process.execPath, [script, ...args], {
     cwd: directory,
     windowsHide: true,
     timeout: 5000,

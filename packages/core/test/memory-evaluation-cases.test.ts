@@ -5,9 +5,9 @@ import { chains, change, prepare } from "../../../script/evaluation/memory/cases
 import { historicalFacts } from "../../../script/evaluation/memory/oracle"
 import { tmpdir } from "./fixture/tmpdir"
 
-test("five independent seeds expose task files but not host answer keys", async () => {
+test("independent seeds and versioned build expose task files but not host answer keys", async () => {
   await using temp = await tmpdir()
-  expect(chains.map((chain) => chain.id)).toEqual(["arithmetic", "format", "build", "billing", "publish"])
+  expect(chains.map((chain) => chain.id)).toEqual(["arithmetic", "format", "build", "build-v2", "billing", "publish"])
   for (const chain of chains) {
     const directory = path.join(temp.path, chain.id)
     await prepare(directory, chain.id)

@@ -11,7 +11,7 @@ import { knownReadOnly, patchChanges, arithmeticReview } from "./host-tool-evide
 import type { CodeExecution } from "./host-tool-evidence"
 
 export type Verdict = "verified" | "violated" | "unknown"
-export type HostChain = "arithmetic" | "format" | "build" | "publish"
+export type HostChain = "arithmetic" | "format" | "build" | "build-v2" | "publish"
 export const humanRubrics = {
   "one-sentence-report-of-exactly-four-lines":
     "One sentence states that the current notes have exactly four lines; no contradictory count. Count the fact, not answer layout.",
@@ -134,7 +134,7 @@ export function hostVerdict(input: {
       : {}),
   }
   const tools = bound && evidence?.status === "complete" ? evidence.tools : []
-  const calls = tools.map((tool) => inspectTool(tool, input.directory, input.shell))
+  const calls = tools.map((tool) => inspectTool(tool, input.directory, input.shell, input.chain, input.stage))
   const fixture = chains.find((chain) => chain.id === input.chain)!
   const fixed = { ...fixture.seed, ...(input.stage >= 4 ? fixture.beforeFourth.write : {}) }
   const mutable =
@@ -142,7 +142,7 @@ export function hostVerdict(input: {
       ? ["src/sum.cjs", "test/sum.test.cjs", "test/math.test.cjs", "history.json"]
       : input.chain === "format"
         ? ["answer.json", "history.json"]
-        : input.chain === "build"
+        : input.chain === "build" || input.chain === "build-v2"
           ? ["src/version.json", "history.json"]
           : ["config.json", "history.json"]
   // A script edit, unknown tool, background command or complex shell invalidates
@@ -448,6 +448,8 @@ function inspectTool(
   tool: Tool,
   directory: string,
   shell?: "powershell" | "posix",
+  chain?: HostChain,
+  stage?: number,
 ): {
   tool: Tool
   kind: "read" | "read-only" | "discovery" | "edit" | "patch" | "command" | "unknown"
@@ -474,6 +476,7 @@ function inspectTool(
   const decoded = Schema.decodeUnknownOption(SessionOutcome.ExecutionRecord)(output.executionRecord)
   if (Option.isNone(decoded)) return unknown
   const record = decoded.value
+  // V2 deliberately starts with E_TARGET/exit 2; keep every other failure marker uninterpretable.
   if (
     record.originCallID !== tool.partID ||
     record.scope.command !== input.command ||
@@ -490,18 +493,29 @@ function inspectTool(
     (output.exit !== undefined && output.exit !== record.exit) ||
     output.truncated !== false ||
     output.timeout === true ||
-    output.reason !== undefined ||
+    (output.reason !== undefined &&
+      !(
+        chain === "build-v2" &&
+        stage === 1 &&
+        input.command === "node build.cjs" &&
+        record.exit === 2 &&
+        output.exit === 2 &&
+        output.reason === "non-zero-exit"
+      )) ||
     input.background === true ||
     output.job_id !== undefined ||
     output.status === "running"
   )
     return unknown
-  const command = fixedCommand(input.command, shell)
+  const command = fixedCommand(input.command, shell, chain)
   return command ? { tool, kind: "command", command, record } : unknown
 }
 
 // Deliberately finite spellings. No shell splitting, quoting inference or wrapper expansion.
-function fixedCommand(command: string, shell?: "powershell" | "posix") {
+function fixedCommand(command: string, shell?: "powershell" | "posix", chain?: HostChain) {
+  // The v2 fixture has an explicit CLI contract. Do not accept it as evidence for the old environment task.
+  if (chain === "build-v2" && command === "node build.cjs --target web") return "web-build"
+  if (chain === "build-v2" && command === "node build.cjs --target desktop") return "desktop-build"
   if (
     [
       "node --test test/sum.test.cjs",
@@ -525,14 +539,16 @@ function fixedCommand(command: string, shell?: "powershell" | "posix") {
   )
     return command
   if (
-    (shell === "posix" && command === "BUILD_TARGET=web node build.cjs") ||
-    (shell === "powershell" &&
-      ["$env:BUILD_TARGET='web'; node build.cjs", '$env:BUILD_TARGET="web"; node build.cjs'].includes(command))
+    chain !== "build-v2" &&
+    ((shell === "posix" && command === "BUILD_TARGET=web node build.cjs") ||
+      (shell === "powershell" &&
+        ["$env:BUILD_TARGET='web'; node build.cjs", '$env:BUILD_TARGET="web"; node build.cjs'].includes(command)))
   )
     return "web-build"
   if (
-    (shell === "posix" && command === "BUILD_TARGET=desktop node build.cjs") ||
-    (shell === "powershell" && command === "$env:BUILD_TARGET='desktop'; node build.cjs")
+    chain !== "build-v2" &&
+    ((shell === "posix" && command === "BUILD_TARGET=desktop node build.cjs") ||
+      (shell === "powershell" && command === "$env:BUILD_TARGET='desktop'; node build.cjs"))
   )
     return "desktop-build"
   if (

@@ -43,15 +43,22 @@ test("unknown briefing rejects before endpoint access or directory creation", as
 })
 
 // Production pilot requires a committed, clean candidate; the upstream here is local and fixed.
-test.skipIf(process.platform !== "win32")(
-  "host chain sends all five original or briefed prompts bound by its manifest",
-  async () => {
-    await using tmp = await tmpdir()
-    const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim()
-    const chain = chains.find((entry) => entry.id === "format")!
-    const original = JSON.stringify(chain.prompts)
-    for (const version of [undefined, "workspace-only-v1"] as const) {
+for (const scenario of [
+  { chain: "format", briefing: undefined },
+  { chain: "format", briefing: "workspace-only-v1" },
+  { chain: "build-v2", briefing: "workspace-only-v1" },
+] as const)
+  test.skipIf(process.platform !== "win32")(
+    `host chain ${scenario.chain}/${scenario.briefing ?? "default"} sends five bound prompts`,
+    async () => {
+      await using tmp = await tmpdir()
+      const candidate = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim()
+      const chain = chains.find((entry) => entry.id === scenario.chain)!
+      const original = JSON.stringify(chain.prompts)
+      const version = scenario.briefing
       const received: string[] = []
+      const rounds = [0, 0, 0, 0, 0]
+      const root = path.join(tmp.path, `${chain.id}-${version ?? "default"}`)
       const provider = Bun.serve({
         hostname: "127.0.0.1",
         port: 0,
@@ -60,20 +67,56 @@ test.skipIf(process.platform !== "win32")(
             messages: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>
           }
           const user = body.messages.filter((message) => message.role === "user").at(-1)!
-          received.push(
+          const text =
             typeof user.content === "string"
               ? user.content
               : user.content
                   .filter((part) => part.type === "text")
                   .map((part) => part.text)
-                  .join(""),
-          )
-          if (received.length > 5) return new Response("unexpected extra request", { status: 400 })
+                  .join("")
+          const stage = chain.prompts.findIndex((prompt) => text.includes(prompt))
+          if (stage < 0 || ++rounds[stage] > (scenario.chain === "build-v2" && stage === 0 ? 4 : 1))
+            return new Response("unexpected extra request", { status: 400 })
+          if (rounds[stage] === 1) received[stage] = text
+          // Exercise the new literal contract under the unchanged production permission configuration.
+          const call =
+            scenario.chain !== "build-v2" || stage !== 0 || rounds[stage] === 4
+              ? undefined
+              : rounds[stage] === 1
+                ? { name: "tool_search", arguments: { names: ["bash"] } }
+                : {
+                    name: "bash",
+                    arguments: {
+                      command: rounds[stage] === 2 ? "node build.cjs" : "node build.cjs --target web",
+                      workdir: path.join(root, "workspace"),
+                      description: "Run the fixed build fixture",
+                      timeout: 5000,
+                      hard_timeout_ms: 8000,
+                    },
+                  }
           const chunk = (choices: unknown[], usage?: object) =>
-            `data: ${JSON.stringify({ id: `briefing-${received.length}`, object: "chat.completion.chunk", created: 1, model: "fixture-model", choices, usage })}\n\n`
+            `data: ${JSON.stringify({ id: `briefing-${stage}-${rounds[stage]}`, object: "chat.completion.chunk", created: 1, model: "fixture-model", choices, usage })}\n\n`
           return new Response(
-            chunk([{ index: 0, delta: { role: "assistant", content: "Done." }, finish_reason: null }]) +
-              chunk([{ index: 0, delta: {}, finish_reason: "stop" }]) +
+            chunk([
+              {
+                index: 0,
+                delta: call
+                  ? {
+                      role: "assistant",
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: `call-${stage}-${rounds[stage]}`,
+                          type: "function",
+                          function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+                        },
+                      ],
+                    }
+                  : { role: "assistant", content: "Done." },
+                finish_reason: null,
+              },
+            ]) +
+              chunk([{ index: 0, delta: {}, finish_reason: call ? "tool_calls" : "stop" }]) +
               chunk([], { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }) +
               "data: [DONE]\n\n",
             { headers: { "content-type": "text/event-stream" } },
@@ -81,20 +124,21 @@ test.skipIf(process.platform !== "win32")(
         },
       })
       try {
-        const root = path.join(tmp.path, version ?? "default")
         const result = await runHostGradedChain({
           root,
           candidate,
           family: "deepseek",
           modelID: "fixture-model",
           treatment: "A",
-          chainID: "format",
+          chainID: scenario.chain,
           ...(version ? { briefing: version } : {}),
           baseURL: `http://127.0.0.1:${provider.port}/v1`,
           reserveTokens: 1,
           relayKey: randomUUID(),
         })
         expect(result.counts).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
+        expect(result.chain).toBe(chain.id)
+        expect(rounds).toEqual(scenario.chain === "build-v2" ? [4, 1, 1, 1, 1] : [1, 1, 1, 1, 1])
         // A fixed "Done" response proves transport only, never task or memory success.
         expect(result.pass).toBe(false)
         // Provider transport appends a host observation; it is not part of the admitted prompt hash.
@@ -110,6 +154,7 @@ test.skipIf(process.platform !== "win32")(
         )
         expect(JSON.stringify(chain.prompts)).toBe(original)
         const manifest = await Bun.file(path.join(root, "manifest.json")).json()
+        expect(manifest.chain).toBe(chain.id)
         expect(manifest.promptsHash).toBe(
           createHash("sha256")
             .update(JSON.stringify(wire.map((entry) => entry.prompt)))
@@ -130,11 +175,21 @@ test.skipIf(process.platform !== "win32")(
           const session = await Bun.file(path.join(root, `stage-${stage}`, "session.json")).json()
           expect(session.stopped).toMatchObject({ remaining: [], controllerExit: 0 })
           expect(wire[stage - 1].facts.sourceRequest).toBe(session.admission.id)
+          if (scenario.chain === "build-v2") {
+            const grade = await Bun.file(path.join(root, `stage-${stage}`, "grade.json")).json()
+            expect(grade.chain).toBe("build-v2")
+            const verdict = await Bun.file(path.join(root, `stage-${stage}`, "host-verdict.json")).json()
+            if (stage === 1) {
+              if (!grade.pass)
+                console.error(JSON.stringify({ grade, verdict, evidence: session.observation.turnEvidence }))
+              expect(grade.pass).toBe(true)
+            }
+            expect(verdict.binding.chain).toBe("build-v2")
+          }
         }
       } finally {
         await provider.stop(true)
       }
-    }
-  },
-  240000,
-)
+    },
+    240000,
+  )

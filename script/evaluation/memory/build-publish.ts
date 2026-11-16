@@ -15,7 +15,7 @@ type Input = {
    * Acknowledgement-only phases grade preservation, not durable memory acquisition.
    */
   verifyTools?: (input: {
-    chain: "build" | "publish"
+    chain: "build" | "build-v2" | "publish"
     stage: number
     requirements: readonly string[]
     artifacts: readonly Artifact[]
@@ -26,6 +26,10 @@ export function gradeBuild(input: Input) {
   return grade("build", input)
 }
 
+export async function gradeBuildV2(input: Input) {
+  return { chain: "build-v2" as const, ...(await grade("build-v2", input)) }
+}
+
 export function gradePublish(input: Input) {
   return grade("publish", input)
 }
@@ -34,7 +38,7 @@ export function gradePublish(input: Input) {
  * File fingerprints prove observed bytes, never that a command ran or was not run.
  * No script is executed by this oracle; even the release fixture remains inert here.
  */
-async function grade(id: "build" | "publish", input: Input) {
+async function grade(id: "build" | "build-v2" | "publish", input: Input) {
   if (!Number.isInteger(input.stage) || input.stage < 1 || input.stage > 5) throw new Error("invalid-artifact-stage")
   const artifacts: Artifact[] = []
   if (!completed([input.turn], 1)) return { pass: false, reason: "session-not-completed", artifacts }
@@ -48,7 +52,7 @@ async function grade(id: "build" | "publish", input: Input) {
     Object.assign(files, chain.beforeFourth.write, { ".memory-eval-fourth": id })
   }
   const facts: Record<string, Readonly<Record<string, string | number>>> = {}
-  if (id === "build") {
+  if (id === "build" || id === "build-v2") {
     delete files["src/version.json"]
     facts["src/version.json"] = { version: input.stage < 3 ? "1.0.0" : input.stage === 3 ? "1.1.0" : "1.2.0" }
     files[input.stage < 4 ? "dist/out.txt" : "retired-dist/out.txt"] = input.stage < 3 ? "web:1.0.0" : "web:1.1.0"
@@ -79,7 +83,7 @@ async function grade(id: "build" | "publish", input: Input) {
   }
   if (artifacts.some((item) => !item.pass)) return { pass: false, reason: "phase-artifacts-differ", artifacts }
   const requirements = (
-    id === "build"
+    id === "build" || id === "build-v2"
       ? [
           ["initial-E_TARGET-failure", "successful-web-build-1.0.0-without-bypass"],
           ["no-dist-commit"],

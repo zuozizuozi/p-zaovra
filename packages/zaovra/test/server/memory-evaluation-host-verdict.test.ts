@@ -378,6 +378,63 @@ test("build requires initial real exit 2 then the successful environment fix", (
   expect(hostVerdict(input).status).toBe("violated")
 })
 
+test("build-v2 accepts literal CLI evidence without accepting the old environment command", () => {
+  const input = fixture("build-v2")
+  input.requirements = ["initial-E_TARGET-failure", "successful-web-build-1.0.0-without-bypass"]
+  const initial = bash(input, "node build.cjs", 1, 2)
+  ;(initial.state.structured as Record<string, unknown>).reason = "non-zero-exit"
+  bash(input, "node build.cjs --target web", 2)
+  expect(hostVerdict(input).status).toBe("verified")
+  expect(hostVerdict(input).binding.chain).toBe("build-v2")
+  evidence(input).tools.reverse()
+  expect(hostVerdict(input).status).toBe("violated")
+
+  for (const command of [
+    "$env:BUILD_TARGET='web'; node build.cjs",
+    "node build.cjs --target web; echo done",
+    "node -e 'require(\"./build.cjs\")'",
+  ]) {
+    const unknown = fixture("build-v2")
+    unknown.requirements = input.requirements
+    bash(unknown, "node build.cjs", 1, 2)
+    bash(unknown, command, 2)
+    expect(hostVerdict(unknown).status).toBe("unknown")
+  }
+  const old = fixture("build")
+  old.requirements = input.requirements
+  bash(old, "node build.cjs", 1, 2)
+  bash(old, "node build.cjs --target web", 2)
+  expect(hostVerdict(old).status).toBe("unknown")
+})
+
+for (const scenario of [
+  { chain: "build-v2", stage: 1, exit: 1, reason: "non-zero-exit" },
+  { chain: "build-v2", stage: 1, exit: 0, reason: "non-zero-exit" },
+  { chain: "build-v2", stage: 1, exit: 2, reason: "permission" },
+  { chain: "build-v2", stage: 3, exit: 2, reason: "non-zero-exit" },
+  { chain: "build", stage: 1, exit: 2, reason: "non-zero-exit" },
+] as const)
+  test(`expected CLI failure exception is bounded: ${JSON.stringify(scenario)}`, () => {
+    const input = fixture(scenario.chain, scenario.stage)
+    input.requirements = ["initial-E_TARGET-failure"]
+    const initial = bash(input, "node build.cjs", 1, scenario.exit)
+    ;(initial.state.structured as Record<string, unknown>).reason = scenario.reason
+    bash(
+      input,
+      scenario.chain === "build-v2" ? "node build.cjs --target web" : "$env:BUILD_TARGET='web'; node build.cjs",
+      2,
+    )
+    expect(hostVerdict(input).status).toBe("unknown")
+  })
+
+for (const command of ["node build.cjs", "node build.cjs --target web", "node build.cjs --target desktop"])
+  test(`build-v2 no-build rejects observed ${command} after the override`, () => {
+    const input = fixture("build-v2", 4)
+    input.requirements = ["no-build"]
+    bash(input, command)
+    expect(hostVerdict(input).status).toBe("violated")
+  })
+
 test("publish validates each release with real completion order, not trace text order", () => {
   const input = fixture("publish", 3)
   input.requirements = ["every-release-v1-preceded-by-successful-validate"]
