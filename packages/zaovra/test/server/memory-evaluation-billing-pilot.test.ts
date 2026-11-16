@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import path from "node:path"
 import { runBillingChain } from "../../../../script/evaluation/memory/pilot"
+import { startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
 import { chains } from "../../../../script/evaluation/memory/cases"
 import { tmpdir } from "../fixture/fixture"
 
@@ -83,6 +84,17 @@ test.skipIf(process.platform !== "win32")(
           )
         },
       })
+      const journal = path.join(tmp.path, treatment + "-relay.jsonl")
+      const relay = startEvaluationRelay({
+        baseURL: `http://127.0.0.1:${provider.port}/v1`,
+        apiKey: "private-upstream-fixture-key",
+        model: "fixture-model",
+        protocol: "openai-chat",
+        journal,
+        maxRequests: 13,
+        maxRequestBytes: 131072,
+        maxOutput: 4096,
+      })
       try {
         const root = path.join(tmp.path, treatment)
         const result = await runBillingChain({
@@ -91,9 +103,9 @@ test.skipIf(process.platform !== "win32")(
           family: "deepseek",
           modelID: "fixture-model",
           treatment,
-          baseURL: `http://127.0.0.1:${provider.port}/v1`,
+          baseURL: relay.baseURL,
           reserveTokens: 1,
-          environment: { ZAOVRA_EVAL_API_KEY: "local-fixture-only" },
+          environment: { ZAOVRA_EVAL_API_KEY: relay.apiKey },
         })
         expect(result.pass).toBe(true)
         expect(result.counts).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
@@ -119,7 +131,17 @@ test.skipIf(process.platform !== "win32")(
         const fixture = await Bun.file(path.join(root, "stage-4", "fixture.json")).json()
         expect(fixture.sourceSessionID).toBe(sessions[2])
         expect(fixture.fixture).toBe("artificial-poison")
+        const records = (await Bun.file(journal).text())
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+        expect(records.filter((record) => record.phase === "admitted")).toHaveLength(13)
+        expect(records.filter((record) => record.phase === "eof")).toHaveLength(13)
+        expect(await Bun.file(path.join(root, "profile", "config", "zaovra", "zaovra.json")).text()).not.toContain(
+          "private-upstream-fixture-key",
+        )
       } finally {
+        await relay.stop()
         await provider.stop(true)
       }
     }
