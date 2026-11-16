@@ -17,6 +17,10 @@ import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { safetyFailure } from "./safety-failure"
+import path from "node:path"
+import { Database } from "../database/database"
+import { Location } from "../location"
+import { ReadReceipt } from "../read-receipt"
 
 export const name = "read"
 const SUPPORTED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
@@ -41,105 +45,149 @@ const layer = Layer.effectDiscard(
     const permission = yield* PermissionV2.Service
     const sessions = yield* SessionStore.Service
     const catalog = yield* Catalog.Service
+    const database = yield* Database.Service
+    const location = yield* Location.Service
 
     yield* tools
       .register({
-        [name]: Tool.make({
-          observation: true,
-          description:
-            "Read a text file, PDF or supported image, page through a large UTF-8 text file or extracted PDF text by line offset, or list a directory page. Relative paths resolve from the current location; absolute paths inside it are accepted, while external absolute paths require external_directory approval.",
-          input: Input,
-          output: Output,
-          toModelOutput: ({ input, output }) => {
-            if (
-              !("encoding" in output) ||
-              output.encoding !== "base64" ||
-              (!SUPPORTED_IMAGE_MIMES.has(output.mime) && output.mime !== "application/pdf")
-            )
-              return []
-            return [
-              {
-                type: "text",
-                text: output.mime === "application/pdf" ? "PDF read successfully" : "Image read successfully",
-              },
-              { type: "file", data: output.content, mime: output.mime, name: input.path },
-            ]
-          },
-          execute: (input, context) => {
-            return Effect.gen(function* () {
-              const source = {
-                type: "tool" as const,
-                messageID: context.assistantMessageID,
-                callID: context.toolCallID,
-              }
-              const target = yield* mutation.resolve({ path: input.path, kind: "directory" })
-              const external = target.externalDirectory
-              if (external)
+        [name]: ReadReceipt.trusted(
+          Tool.make({
+            observation: true,
+            description:
+              "Read a text file, PDF or supported image, page through a large UTF-8 text file or extracted PDF text by line offset, or list a directory page. Relative paths resolve from the current location; absolute paths inside it are accepted, while external absolute paths require external_directory approval.",
+            input: Input,
+            output: Output,
+            toModelOutput: ({ input, output }) => {
+              if (
+                !("encoding" in output) ||
+                output.encoding !== "base64" ||
+                (!SUPPORTED_IMAGE_MIMES.has(output.mime) && output.mime !== "application/pdf")
+              )
+                return []
+              return [
+                {
+                  type: "text",
+                  text: output.mime === "application/pdf" ? "PDF read successfully" : "Image read successfully",
+                },
+                { type: "file", data: output.content, mime: output.mime, name: input.path },
+              ]
+            },
+            execute: (input, context) => {
+              return Effect.gen(function* () {
+                const source = {
+                  type: "tool" as const,
+                  messageID: context.assistantMessageID,
+                  callID: context.toolCallID,
+                }
+                const target = yield* mutation.resolve({ path: input.path, kind: "directory" })
+                const absolute = AbsolutePath.make(target.canonical)
+                // Select and hold the object before either permission can suspend.
+                // Unsupported platforms continue the ordinary path without receipts.
+                const pin = yield* reader.pin(absolute)
+                const external =
+                  target.externalDirectory && pin
+                    ? {
+                        ...target.externalDirectory,
+                        directory: pin.kind === "directory" ? target.canonical : path.dirname(target.canonical),
+                        resource: path
+                          .join(pin.kind === "directory" ? target.canonical : path.dirname(target.canonical), "*")
+                          .replaceAll("\\", "/"),
+                        save: path
+                          .join(pin.kind === "directory" ? target.canonical : path.dirname(target.canonical), "*")
+                          .replaceAll("\\", "/"),
+                      }
+                    : target.externalDirectory
+                if (external)
+                  yield* permission.assert({
+                    ...LocationMutation.externalDirectoryPermission(external),
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source,
+                  })
+                const resource = target.resource
+                const type = pin?.kind ?? (yield* reader.inspect(absolute))
                 yield* permission.assert({
-                  ...LocationMutation.externalDirectoryPermission(external),
+                  action: name,
+                  resources: [resource],
+                  save: ["*"],
                   sessionID: context.sessionID,
                   agent: context.agent,
                   source,
                 })
-              const resource = target.resource
-              const absolute = AbsolutePath.make(target.canonical)
-              const type = yield* reader.inspect(absolute)
-              yield* permission.assert({
-                action: name,
-                resources: [resource],
-                save: ["*"],
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source,
-              })
-              if (type === "directory")
-                return yield* reader.list(absolute, { offset: input.offset, limit: input.limit })
-              const message =
-                context.inputModalities === undefined ? yield* sessions.message(context.assistantMessageID) : undefined
-              const model =
-                context.inputModalities === undefined && message?.message.type === "assistant"
-                  ? yield* catalog.model.get(message.message.model.providerID, message.message.model.id)
-                  : undefined
-              const content = yield* reader.read(absolute, resource, {
-                offset: input.offset,
-                limit: input.limit,
-                images: (context.inputModalities ?? model?.capabilities.input)?.includes("image") === true,
-                pdfs: (context.inputModalities ?? model?.capabilities.input)?.includes("pdf") === true,
-              })
-              if ("encoding" in content && content.encoding === "base64" && SUPPORTED_IMAGE_MIMES.has(content.mime)) {
-                return yield* image
-                  .normalize(resource, { ...content, encoding: "base64" })
-                  .pipe(Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(content)))
-              }
-              if ("encoding" in content && content.encoding === "base64" && content.mime === "application/pdf")
-                return content
-              if ("encoding" in content && content.encoding === "base64")
-                return yield* Effect.fail(new ReadToolFileSystem.BinaryFileError({ resource }))
-              return content
-            }).pipe(
-              Effect.mapError((error) => {
+                if (type === "directory")
+                  return yield* reader.list(absolute, { offset: input.offset, limit: input.limit }, pin)
                 const message =
-                  error instanceof ReadToolFileSystem.BinaryFileError ||
-                  error instanceof ReadToolFileSystem.MalformedUtf8Error ||
-                  error instanceof ReadToolFileSystem.TextGrowthLimitError ||
-                  error instanceof Pdf.DecodeError ||
-                  error instanceof ReadToolFileSystem.MediaIngestLimitError ||
-                  error instanceof Image.DecodeError ||
-                  error instanceof Image.SizeError
-                    ? error.message
-                    : `Unable to read ${input.path}`
-                const safety = safetyFailure(error)
-                return new ToolFailure({
-                  message: safety?.message ?? message,
-                  metadata: {
-                    ...safety?.metadata,
-                    readFailure: readFailureReason(error),
+                  context.inputModalities === undefined
+                    ? yield* sessions.message(context.assistantMessageID)
+                    : undefined
+                const model =
+                  context.inputModalities === undefined && message?.message.type === "assistant"
+                    ? yield* catalog.model.get(message.message.model.providerID, message.message.model.id)
+                    : undefined
+                const content = yield* reader.read(
+                  absolute,
+                  resource,
+                  {
+                    offset: input.offset,
+                    limit: input.limit,
+                    images: (context.inputModalities ?? model?.capabilities.input)?.includes("image") === true,
+                    pdfs: (context.inputModalities ?? model?.capabilities.input)?.includes("pdf") === true,
                   },
-                })
-              }),
-            )
-          },
-        }),
+                  pin,
+                  pin
+                    ? (value) =>
+                        ReadReceipt.stage(
+                          context,
+                          {
+                            ...value,
+                            directory: location.directory,
+                            path: target.canonical,
+                            resource,
+                            projectID: location.project.id,
+                            workspaceID: location.workspaceID,
+                            volume: pin.identity.volume,
+                            file: pin.identity.file,
+                          },
+                          database,
+                        )
+                    : undefined,
+                )
+                if ("encoding" in content && content.encoding === "base64" && SUPPORTED_IMAGE_MIMES.has(content.mime)) {
+                  return yield* image
+                    .normalize(resource, { ...content, encoding: "base64" })
+                    .pipe(Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(content)))
+                }
+                if ("encoding" in content && content.encoding === "base64" && content.mime === "application/pdf")
+                  return content
+                if ("encoding" in content && content.encoding === "base64")
+                  return yield* Effect.fail(new ReadToolFileSystem.BinaryFileError({ resource }))
+                return content
+              }).pipe(
+                Effect.scoped,
+                Effect.mapError((error) => {
+                  const message =
+                    error instanceof ReadToolFileSystem.BinaryFileError ||
+                    error instanceof ReadToolFileSystem.MalformedUtf8Error ||
+                    error instanceof ReadToolFileSystem.TextGrowthLimitError ||
+                    error instanceof Pdf.DecodeError ||
+                    error instanceof ReadToolFileSystem.MediaIngestLimitError ||
+                    error instanceof Image.DecodeError ||
+                    error instanceof Image.SizeError
+                      ? error.message
+                      : `Unable to read ${input.path}`
+                  const safety = safetyFailure(error)
+                  return new ToolFailure({
+                    message: safety?.message ?? message,
+                    metadata: {
+                      ...safety?.metadata,
+                      readFailure: readFailureReason(error),
+                    },
+                  })
+                }),
+              )
+            },
+          }),
+        ),
       })
       .pipe(Effect.orDie)
   }),
@@ -156,6 +204,8 @@ export const node = makeLocationNode({
     PermissionV2.node,
     SessionStore.node,
     Catalog.node,
+    Database.node,
+    Location.node,
   ],
 })
 

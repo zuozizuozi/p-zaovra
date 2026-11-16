@@ -113,6 +113,28 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`read_receipt\` (
+          \`id\` text PRIMARY KEY,
+          \`session_id\` text NOT NULL,
+          \`assistant_message_id\` text NOT NULL,
+          \`call_id\` text NOT NULL,
+          \`called_seq\` integer NOT NULL,
+          \`success_seq\` integer NOT NULL,
+          \`directory\` text NOT NULL,
+          \`project_id\` text NOT NULL,
+          \`workspace_id\` text,
+          \`path\` text NOT NULL,
+          \`resource\` text NOT NULL,
+          \`digest\` text NOT NULL,
+          \`bytes\` integer NOT NULL,
+          \`volume_id\` text NOT NULL,
+          \`file_id\` text NOT NULL,
+          \`written\` text NOT NULL,
+          \`changed\` text NOT NULL,
+          CONSTRAINT \`fk_read_receipt_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`account_state\` (
           \`id\` integer PRIMARY KEY,
           \`active_account_id\` text,
@@ -662,6 +684,9 @@ export default {
       yield* tx.run(`CREATE INDEX \`memory_tidy_attempt_run_idx\` ON \`memory_tidy_attempt\` (\`run_id\`);`)
       yield* tx.run(`CREATE INDEX \`memory_tidy_attempt_day_idx\` ON \`memory_tidy_attempt\` (\`day\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`memory_tidy_run_session_idx\` ON \`memory_tidy_run\` (\`session_id\`);`)
+      yield* tx.run(
+        `CREATE UNIQUE INDEX \`read_receipt_source_idx\` ON \`read_receipt\` (\`session_id\`,\`assistant_message_id\`,\`call_id\`);`,
+      )
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`memory_note_scope_key_idx\` ON \`memory_note\` (\`scope\`,\`key\`);`)

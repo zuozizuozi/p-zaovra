@@ -44,6 +44,7 @@ let configEntries: Config.Entry[] = []
 const reader = Layer.succeed(
   ReadToolFileSystem.Service,
   ReadToolFileSystem.Service.of({
+    pin: () => Effect.succeed(undefined),
     inspect: () => (resolveFailure === undefined ? Effect.succeed(resolvedType) : Effect.die(resolveFailure)),
     read: (input, _resource, page = {}) => {
       readCalls.push({ input, page })

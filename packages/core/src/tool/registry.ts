@@ -3,6 +3,7 @@ export * as ToolRegistry from "./registry"
 import { ToolOutput, type ToolCall, type ToolDefinition, type ToolResultValue } from "@zaovra-ai/llm"
 import { Context, Effect, Layer, Scope } from "effect"
 import { Evidence } from "../evidence"
+import { ReadReceipt } from "../read-receipt"
 import { PermissionV2 } from "../permission"
 import { ToolOutputStore } from "../tool-output-store"
 import { Wildcard } from "../util/wildcard"
@@ -65,14 +66,17 @@ const registryLayer = Layer.effect(
       if (advertised && registration.identity !== advertised)
         return { inputRejected: true, result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
       const capture = resources.capture()
-      const pending = yield* settle(registration.tool, input.call, {
+      const context: Tool.Context = {
         sessionID: input.sessionID,
         agent: input.agent,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
         ...(input.inputModalities === undefined ? {} : { inputModalities: input.inputModalities }),
         ...(input.shell === undefined ? {} : { shell: input.shell }),
-      }).pipe(
+      }
+      const receipt = ReadReceipt.capture(context, registration.tool)
+      const pending = yield* settle(registration.tool, input.call, context).pipe(
+        Effect.ensuring(Effect.sync(receipt.close)),
         Effect.provideService(ToolOutputStore.Capture, capture),
         Effect.map((output) => ({ output })),
         Effect.catchTag("LLM.ToolFailure", (failure) =>
@@ -159,6 +163,7 @@ const registryLayer = Layer.effect(
       const retained = bounded.output
       const result = ToolOutput.toResultValue(retained)
       if (result.type === "error") return outputPaths.length > 0 ? { result, outputPaths } : { result }
+      if (outputPaths.length === 0) receipt.attach(retained)
       return outputPaths.length > 0 ? { result, output: retained, outputPaths } : { result, output: retained }
     })
 

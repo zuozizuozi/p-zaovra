@@ -1,8 +1,10 @@
 export * as ReadToolFileSystem from "./read-filesystem"
 
 import path from "path"
+import { createHash } from "node:crypto"
+import { ReadPin } from "../read-pin"
 import { pathToFileURL } from "url"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema, Scope } from "effect"
 import { FileSystem } from "../filesystem"
 import { FSUtil } from "../fs-util"
 import { Pdf } from "../pdf"
@@ -103,13 +105,16 @@ export class ListPage extends Schema.Class<ListPage>("ReadTool.ListPage")({
 }) {}
 
 export interface Interface {
+  readonly pin: (path: AbsolutePath) => Effect.Effect<ReadPin.Pin | undefined, FSUtil.Error, Scope.Scope>
   readonly inspect: (path: AbsolutePath) => Effect.Effect<"file" | "directory", InspectError>
   readonly read: (
     path: AbsolutePath,
     resource: string,
     page?: PageInput & { images?: boolean; pdfs?: boolean },
+    pin?: ReadPin.Pin,
+    complete?: (value: Complete & { written: string; changed: string }) => void,
   ) => Effect.Effect<FileSystem.Content | TextPage, ReadError>
-  readonly list: (path: AbsolutePath, page?: PageInput) => Effect.Effect<ListPage, FSUtil.Error>
+  readonly list: (path: AbsolutePath, page?: PageInput, pin?: ReadPin.Pin) => Effect.Effect<ListPage, FSUtil.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/ReadToolFileSystem") {}
@@ -190,175 +195,199 @@ export const read = Effect.fn("ReadTool.read")(function* (
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const file = yield* fs.open(real, { flag: "r" })
-      const info = yield* file.stat
-      if (info.type !== "File") return yield* Effect.fail(new PathKindError({ resource, expected: "a file" }))
-      const first = Option.getOrElse(
-        yield* file.readAlloc(Math.min(64 * 1024, Number(info.size) || 4 * 1024)),
-        () => new Uint8Array(),
-      )
-      const pdf = startsWith(first, [0x25, 0x50, 0x44, 0x46])
-      const mime = imageMime(first) ?? (pdf ? "application/pdf" : undefined)
-      if (mime) {
-        if (!pdf && (page.images === false || info.size > MAX_MEDIA_INGEST_BYTES)) {
-          const header = Buffer.from(first)
-          const dimensions =
-            mime === "image/png" && first.length >= 24
-              ? `${header.readUInt32BE(16)}×${header.readUInt32BE(20)}`
-              : mime === "image/gif" && first.length >= 10
-                ? `${header.readUInt16LE(6)}×${header.readUInt16LE(8)}`
-                : "unavailable from bounded header"
-          return new TextPage({
-            type: "text-page",
-            content: `Image: ${resource}\nFormat: ${mime}\nSize: ${info.size} bytes\nDimensions: ${dimensions}\nImage pixels were NOT sent to the model: ${page.images === false ? "the selected model does not declare image input support" : "the image exceeds the media ingestion limit"}. The original file remains available to the user.`,
-            mime: "text/plain",
-            offset: 1,
-            truncated: false,
-          })
-        }
-        const chunks = [first]
-        let total = first.length
-        while (total <= MAX_MEDIA_INGEST_BYTES) {
-          const chunk = yield* file.readAlloc(Math.min(64 * 1024, MAX_MEDIA_INGEST_BYTES + 1 - total))
-          if (Option.isNone(chunk)) break
-          chunks.push(chunk.value)
-          total += chunk.value.length
-        }
-        if (total > MAX_MEDIA_INGEST_BYTES)
-          return yield* Effect.fail(new MediaIngestLimitError({ resource, maximumBytes: MAX_MEDIA_INGEST_BYTES }))
-        if (pdf && page.pdfs !== true)
-          return yield* pdfPage(
-            Buffer.concat(
-              chunks.map((chunk) => Buffer.from(chunk)),
-              total,
-            ),
-            resource,
-            page,
-          )
-        return {
-          uri: pathToFileURL(real).href,
-          name: path.basename(real),
-          content: Buffer.concat(
-            chunks.map((chunk) => Buffer.from(chunk)),
-            total,
-          ).toString("base64"),
-          encoding: "base64" as const,
-          mime,
-        }
-      }
-      if (extensions.has(path.extname(resource).toLowerCase()))
-        return yield* Effect.fail(new BinaryFileError({ resource }))
-      const paged = info.size > MAX_READ_BYTES || page.offset !== undefined || page.limit !== undefined
-      if (!paged) {
-        if (binary(resource, first)) return yield* Effect.fail(new BinaryFileError({ resource }))
-        const decoder = new TextDecoder("utf-8", { fatal: true })
-        const text = [yield* decodeUtf8(resource, decoder, first)]
-        let total = first.length
-        while (true) {
-          // Initial size chooses this branch; concurrent growth must not make it unbounded.
-          const chunk = yield* file.readAlloc(MAX_READ_BYTES + 1 - total)
-          if (Option.isNone(chunk)) break
-          total += chunk.value.length
-          if (total > MAX_READ_BYTES) return yield* new TextGrowthLimitError({ resource, maximumBytes: MAX_READ_BYTES })
-          text.push(yield* decodeChunk(resource, decoder, chunk.value))
-        }
-        text.push(yield* decodeUtf8(resource, decoder))
-        return {
-          uri: pathToFileURL(real).href,
-          name: path.basename(real),
-          content: text.join(""),
-          encoding: "utf8" as const,
-          mime: FSUtil.mimeType(real),
-        }
-      }
-      const offset = page.offset ?? 1
-      const limit = Math.min(page.limit ?? MAX_READ_LINES, MAX_READ_LINES)
-      const lines: string[] = []
-      const decoder = new TextDecoder("utf-8", { fatal: true })
-      let pending = ""
-      let discard = false
-      let line = 1
-      let bytes = 0
-      let next: number | undefined
-      const append = (input: string) => {
-        if (line < offset) {
-          line++
-          return true
-        }
-        if (lines.length >= limit || bytes >= MAX_READ_BYTES) {
-          next = line
-          return false
-        }
-        const text = input.length > MAX_LINE_LENGTH ? input.slice(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX : input
-        const size = Buffer.byteLength(text, "utf-8") + (lines.length > 0 ? 1 : 0)
-        if (bytes + size > MAX_READ_BYTES) {
-          next = line
-          return false
-        }
-        lines.push(text)
-        bytes += size
-        line++
-        return true
-      }
-      const consume = (input: string) => {
-        let text = input
-        while (true) {
-          const index = text.indexOf("\n")
-          if (index === -1) {
-            if (!discard) {
-              pending += text
-              if (pending.length > MAX_LINE_LENGTH) {
-                pending = pending.slice(0, MAX_LINE_LENGTH + 1)
-                discard = true
-              }
-            }
-            break
-          }
-          const current = pending + (discard ? "" : text.slice(0, index))
-          pending = ""
-          discard = false
-          text = text.slice(index + 1)
-          if (!append(current.endsWith("\r") ? current.slice(0, -1) : current)) return false
-        }
-        return true
-      }
-      const consumeChunk = Effect.fnUntraced(function* (chunk: Uint8Array) {
-        let start = 0
-        while (start < chunk.length) {
-          if (lines.length >= limit || bytes >= MAX_READ_BYTES) {
-            next = line
-            return false
-          }
-          const newline = chunk.indexOf(10, start)
-          const end = newline === -1 ? chunk.length : newline + 1
-          const segment = chunk.subarray(start, end)
-          if (binary(resource, segment)) return yield* Effect.fail(new BinaryFileError({ resource }))
-          if (!consume(yield* decodeUtf8(resource, decoder, segment))) return false
-          start = end
-        }
-        return true
-      })
-      let done = !(yield* consumeChunk(first))
-      while (!done) {
-        const chunk = yield* file.readAlloc(64 * 1024)
-        if (Option.isNone(chunk)) break
-        done = !(yield* consumeChunk(chunk.value))
-      }
-      if (!done) {
-        const tail = yield* decodeUtf8(resource, decoder)
-        if (!discard) pending += tail
-        if (pending) append(pending.endsWith("\r") ? pending.slice(0, -1) : pending)
-      }
-      if (lines.length === 0 && offset !== 1) return yield* Effect.fail(new OffsetOutOfRangeError({ offset }))
-      return new TextPage({
-        type: "text-page",
-        content: lines.join("\n"),
-        mime: FSUtil.mimeType(real),
-        offset,
-        truncated: next !== undefined,
-        ...(next === undefined ? {} : { next }),
-      })
+      return yield* readOpened(file, real, resource, page)
     }),
   )
+})
+
+type Opened = {
+  readonly stat: Effect.Effect<{ type: string; size: bigint }, FSUtil.Error>
+  readonly readAlloc: (size: number) => Effect.Effect<Option.Option<Uint8Array>, FSUtil.Error>
+}
+export interface Complete {
+  readonly digest: string
+  readonly bytes: number
+  readonly text: string
+}
+
+/** Consumes the existing stream once; callers may observe only a natural full-text EOF. */
+export const readOpened = Effect.fn("ReadTool.readOpened")(function* (
+  file: Opened,
+  real: string,
+  resource: string,
+  page: PageInput & { images?: boolean; pdfs?: boolean } = {},
+  complete?: (value: Complete) => Effect.Effect<void, FSUtil.Error>,
+) {
+  const info = yield* file.stat
+  if (info.type !== "File") return yield* Effect.fail(new PathKindError({ resource, expected: "a file" }))
+  const first = Option.getOrElse(
+    yield* file.readAlloc(Math.min(64 * 1024, Number(info.size) || 4 * 1024)),
+    () => new Uint8Array(),
+  )
+  const pdf = startsWith(first, [0x25, 0x50, 0x44, 0x46])
+  const mime = imageMime(first) ?? (pdf ? "application/pdf" : undefined)
+  if (mime) {
+    if (!pdf && (page.images === false || info.size > MAX_MEDIA_INGEST_BYTES)) {
+      const header = Buffer.from(first)
+      const dimensions =
+        mime === "image/png" && first.length >= 24
+          ? `${header.readUInt32BE(16)}×${header.readUInt32BE(20)}`
+          : mime === "image/gif" && first.length >= 10
+            ? `${header.readUInt16LE(6)}×${header.readUInt16LE(8)}`
+            : "unavailable from bounded header"
+      return new TextPage({
+        type: "text-page",
+        content: `Image: ${resource}\nFormat: ${mime}\nSize: ${info.size} bytes\nDimensions: ${dimensions}\nImage pixels were NOT sent to the model: ${page.images === false ? "the selected model does not declare image input support" : "the image exceeds the media ingestion limit"}. The original file remains available to the user.`,
+        mime: "text/plain",
+        offset: 1,
+        truncated: false,
+      })
+    }
+    const chunks = [first]
+    let total = first.length
+    while (total <= MAX_MEDIA_INGEST_BYTES) {
+      const chunk = yield* file.readAlloc(Math.min(64 * 1024, MAX_MEDIA_INGEST_BYTES + 1 - total))
+      if (Option.isNone(chunk)) break
+      chunks.push(chunk.value)
+      total += chunk.value.length
+    }
+    if (total > MAX_MEDIA_INGEST_BYTES)
+      return yield* Effect.fail(new MediaIngestLimitError({ resource, maximumBytes: MAX_MEDIA_INGEST_BYTES }))
+    if (pdf && page.pdfs !== true)
+      return yield* pdfPage(
+        Buffer.concat(
+          chunks.map((chunk) => Buffer.from(chunk)),
+          total,
+        ),
+        resource,
+        page,
+      )
+    return {
+      uri: pathToFileURL(real).href,
+      name: path.basename(real),
+      content: Buffer.concat(
+        chunks.map((chunk) => Buffer.from(chunk)),
+        total,
+      ).toString("base64"),
+      encoding: "base64" as const,
+      mime,
+    }
+  }
+  if (extensions.has(path.extname(resource).toLowerCase())) return yield* Effect.fail(new BinaryFileError({ resource }))
+  const paged = info.size > MAX_READ_BYTES || page.offset !== undefined || page.limit !== undefined
+  if (!paged) {
+    if (binary(resource, first)) return yield* Effect.fail(new BinaryFileError({ resource }))
+    const decoder = new TextDecoder("utf-8", { fatal: true })
+    const text = [yield* decodeUtf8(resource, decoder, first)]
+    const hash = complete ? createHash("sha256").update(first) : undefined
+    let total = first.length
+    while (true) {
+      // Initial size chooses this branch; concurrent growth must not make it unbounded.
+      const chunk = yield* file.readAlloc(MAX_READ_BYTES + 1 - total)
+      if (Option.isNone(chunk)) break
+      total += chunk.value.length
+      if (total > MAX_READ_BYTES) return yield* new TextGrowthLimitError({ resource, maximumBytes: MAX_READ_BYTES })
+      text.push(yield* decodeChunk(resource, decoder, chunk.value))
+      hash?.update(chunk.value)
+    }
+    text.push(yield* decodeUtf8(resource, decoder))
+    const content = text.join("")
+    if (complete && hash) yield* complete({ digest: hash.digest("hex"), bytes: total, text: content })
+    return {
+      uri: pathToFileURL(real).href,
+      name: path.basename(real),
+      content,
+      encoding: "utf8" as const,
+      mime: FSUtil.mimeType(real),
+    }
+  }
+  const offset = page.offset ?? 1
+  const limit = Math.min(page.limit ?? MAX_READ_LINES, MAX_READ_LINES)
+  const lines: string[] = []
+  const decoder = new TextDecoder("utf-8", { fatal: true })
+  let pending = ""
+  let discard = false
+  let line = 1
+  let bytes = 0
+  let next: number | undefined
+  const append = (input: string) => {
+    if (line < offset) {
+      line++
+      return true
+    }
+    if (lines.length >= limit || bytes >= MAX_READ_BYTES) {
+      next = line
+      return false
+    }
+    const text = input.length > MAX_LINE_LENGTH ? input.slice(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX : input
+    const size = Buffer.byteLength(text, "utf-8") + (lines.length > 0 ? 1 : 0)
+    if (bytes + size > MAX_READ_BYTES) {
+      next = line
+      return false
+    }
+    lines.push(text)
+    bytes += size
+    line++
+    return true
+  }
+  const consume = (input: string) => {
+    let text = input
+    while (true) {
+      const index = text.indexOf("\n")
+      if (index === -1) {
+        if (!discard) {
+          pending += text
+          if (pending.length > MAX_LINE_LENGTH) {
+            pending = pending.slice(0, MAX_LINE_LENGTH + 1)
+            discard = true
+          }
+        }
+        break
+      }
+      const current = pending + (discard ? "" : text.slice(0, index))
+      pending = ""
+      discard = false
+      text = text.slice(index + 1)
+      if (!append(current.endsWith("\r") ? current.slice(0, -1) : current)) return false
+    }
+    return true
+  }
+  const consumeChunk = Effect.fnUntraced(function* (chunk: Uint8Array) {
+    let start = 0
+    while (start < chunk.length) {
+      if (lines.length >= limit || bytes >= MAX_READ_BYTES) {
+        next = line
+        return false
+      }
+      const newline = chunk.indexOf(10, start)
+      const end = newline === -1 ? chunk.length : newline + 1
+      const segment = chunk.subarray(start, end)
+      if (binary(resource, segment)) return yield* Effect.fail(new BinaryFileError({ resource }))
+      if (!consume(yield* decodeUtf8(resource, decoder, segment))) return false
+      start = end
+    }
+    return true
+  })
+  let done = !(yield* consumeChunk(first))
+  while (!done) {
+    const chunk = yield* file.readAlloc(64 * 1024)
+    if (Option.isNone(chunk)) break
+    done = !(yield* consumeChunk(chunk.value))
+  }
+  if (!done) {
+    const tail = yield* decodeUtf8(resource, decoder)
+    if (!discard) pending += tail
+    if (pending) append(pending.endsWith("\r") ? pending.slice(0, -1) : pending)
+  }
+  if (lines.length === 0 && offset !== 1) return yield* Effect.fail(new OffsetOutOfRangeError({ offset }))
+  return new TextPage({
+    type: "text-page",
+    content: lines.join("\n"),
+    mime: FSUtil.mimeType(real),
+    offset,
+    truncated: next !== undefined,
+    ...(next === undefined ? {} : { next }),
+  })
 })
 
 export const list = Effect.fn("ReadTool.list")(function* (fs: FSUtil.Interface, input: string, page: PageInput = {}) {
@@ -396,14 +425,97 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     return Service.of({
+      pin: (path) =>
+        ReadPin.acquire(path).pipe(
+          Effect.mapError((cause) => new FSUtil.FileSystemError({ method: "pinRead", cause })),
+        ),
       inspect: (path) => inspect(fs, path),
-      read: (path, resource, page) => read(fs, path, resource, page),
-      list: (path, page) => list(fs, path, page),
+      read: (path, resource, page, pin, complete) =>
+        pin ? readPinned(pin, path, resource, page, complete) : read(fs, path, resource, page),
+      list: (path, page, pin) => (pin ? listPinned(fs, pin, path, page) : list(fs, path, page)),
     })
   }),
 )
 
 export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node] })
+
+const native = <A>(operation: () => A) =>
+  Effect.try({
+    try: operation,
+    catch: (cause) => new FSUtil.FileSystemError({ method: "readPinned", cause }),
+  })
+
+export const readPinned = Effect.fn("ReadTool.readPinned")(function* (
+  pin: ReadPin.Pin,
+  real: string,
+  resource: string,
+  page: PageInput & { images?: boolean; pdfs?: boolean } = {},
+  complete?: (value: Complete & { written: string; changed: string }) => void,
+) {
+  const before = yield* native(pin.snapshot)
+  return yield* readOpened(
+    {
+      stat: Effect.succeed({ type: pin.kind === "file" ? "File" : "Directory", size: before.size }),
+      readAlloc: (size) =>
+        native(() => pin.read(size)).pipe(Effect.map((bytes) => (bytes.length ? Option.some(bytes) : Option.none()))),
+    },
+    real,
+    resource,
+    page,
+    complete
+      ? (value) =>
+          Effect.gen(function* () {
+            const after = yield* native(pin.snapshot)
+            // This is a stable metadata observation around the actual byte stream, not
+            // a filesystem snapshot or evidence that the logical path still names it.
+            if (
+              before.size !== after.size ||
+              before.size !== BigInt(value.bytes) ||
+              before.written !== after.written ||
+              before.changed !== after.changed
+            )
+              return
+            complete({ ...value, written: after.written.toString(), changed: after.changed.toString() })
+          })
+      : undefined,
+  )
+})
+
+const listPinned = Effect.fn("ReadTool.listPinned")(function* (
+  fs: FSUtil.Interface,
+  pin: ReadPin.Pin,
+  real: string,
+  page: PageInput = {},
+) {
+  const entries: FileSystem.Entry[] = []
+  while (true) {
+    const batch = yield* native(pin.entries)
+    if (!batch.length) break
+    for (const item of batch) {
+      // Ordinary entries come from the held directory. For a reparse entry,
+      // retain the existing conservative inside-directory metadata filter.
+      const linked = item.reparse
+        ? yield* fs.realPath(path.join(real, item.name)).pipe(Effect.catch(() => Effect.void))
+        : undefined
+      if (item.reparse && (!linked || !FSUtil.contains(real, linked))) continue
+      const info = linked ? yield* fs.stat(linked).pipe(Effect.catch(() => Effect.void)) : undefined
+      if (linked && info?.type !== "File" && info?.type !== "Directory") continue
+      const directory = linked ? info?.type === "Directory" : item.directory
+      entries.push(
+        FileSystem.Entry.make({
+          path: RelativePath.make(item.name + (directory ? path.sep : "")),
+          type: directory ? "directory" : "file",
+        }),
+      )
+    }
+    yield* Effect.yieldNow
+  }
+  entries.sort((a, b) => (a.type === b.type ? a.path.localeCompare(b.path) : a.type === "directory" ? -1 : 1))
+  const offset = page.offset ?? 1
+  const selected = entries.slice(offset - 1, offset - 1 + Math.min(page.limit ?? MAX_READ_LINES, MAX_READ_LINES))
+  const truncated = offset - 1 + selected.length < entries.length
+  return new ListPage({ entries: selected, truncated, ...(truncated ? { next: offset + selected.length } : {}) })
+})
 
 const pdfPage = Effect.fn("ReadTool.pdfPage")(function* (data: Uint8Array, resource: string, page: PageInput) {
   const extracted = yield* Pdf.text(data)

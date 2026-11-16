@@ -8,6 +8,7 @@ export interface Pin {
   readonly identity: { readonly volume: string; readonly file: string }
   readonly kind: "file" | "directory"
   readonly size: bigint
+  readonly snapshot: () => { readonly size: bigint; readonly written: bigint; readonly changed: bigint }
   readonly read: (maximum: number) => Uint8Array
   readonly entries: () => readonly { name: string; directory: boolean; reparse: boolean }[]
   readonly close: () => void

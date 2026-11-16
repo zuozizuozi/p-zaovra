@@ -10,6 +10,7 @@ import { SessionRetry } from "../retry"
 import { DateTime, Effect } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { EventV2 } from "../../event"
+import { ReadReceipt } from "../../read-receipt"
 import { ModelV2 } from "../../model"
 import { SessionEvent } from "../event"
 import { SessionMessage } from "../message"
@@ -430,16 +431,28 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
           })
           return
         }
-        yield* events.publish(SessionEvent.Tool.Success, {
-          sessionID: input.sessionID,
-          timestamp: yield* timestamp,
-          assistantMessageID: tool.assistantMessageID,
-          callID: event.id,
-          ...result,
-          outputPaths,
-          ...(provider.executed ? { result: event.result } : {}),
-          provider,
-        })
+        yield* events.publish(
+          SessionEvent.Tool.Success,
+          {
+            sessionID: input.sessionID,
+            timestamp: yield* timestamp,
+            assistantMessageID: tool.assistantMessageID,
+            callID: event.id,
+            ...result,
+            outputPaths,
+            ...(provider.executed ? { result: event.result } : {}),
+            provider,
+          },
+          provider.executed
+            ? undefined
+            : {
+                commit: ReadReceipt.commit(event.output, {
+                  sessionID: input.sessionID,
+                  assistantMessageID: tool.assistantMessageID,
+                  toolCallID: event.id,
+                }),
+              },
+        )
         return
       }
       case "tool-error": {

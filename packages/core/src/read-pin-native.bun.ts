@@ -121,6 +121,14 @@ export async function open(canonical: string): Promise<ReadPin.Pin | undefined> 
       identity: { volume: id.readBigUInt64LE().toString(), file: id.subarray(8, 24).toString("hex") },
       kind,
       size: standard.readBigInt64LE(8),
+      snapshot: () => {
+        if (closed) throw new Error("Read pin is closed")
+        const basic = Buffer.alloc(40)
+        const current = Buffer.alloc(24)
+        if (!kernel.symbols.GetFileInformationByHandleEx(file, 0, ptr(basic), basic.length)) fail("Read pin times")
+        if (!kernel.symbols.GetFileInformationByHandleEx(file, 1, ptr(current), current.length)) fail("Read pin size")
+        return { size: current.readBigInt64LE(8), written: basic.readBigInt64LE(16), changed: basic.readBigInt64LE(24) }
+      },
       read: (maximum) => {
         if (closed || kind !== "file") throw new Error("Read pin is closed or not a file")
         if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 65536) throw new Error("Invalid read pin bound")
