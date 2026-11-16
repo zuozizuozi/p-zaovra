@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
-import { createServer } from "node:http"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { manualProviderModels, providerModelsPatch, providerModelsReady } from "./provider-model-config"
 import { connectProviderKey, providerOperation } from "@/utils/provider-integration"
 import { resolveModelKey, resolveModelSelection } from "@/context/model-choice"
-import { discoverProviderModels } from "@/provider-discovery"
-import { validateCustomProvider, modelRow } from "./dialog-custom-provider-form"
 
 const models = [
   { id: "concrete", provider: { id: "saved" } },
@@ -163,59 +163,42 @@ test("707 discovery failure and closed form cannot report credential-only succes
 })
 
 test("707 real discovery 404, timeout and environment references retain a manual configuration path without generation", async () => {
-  const requests: string[] = []
-  const pending = Promise.withResolvers<void>()
-  let mode = "404"
-  const server = createServer(async (request, response) => {
-    requests.push(request.method + " " + request.url)
-    response.setHeader("Access-Control-Allow-Origin", "*")
-    response.setHeader("Access-Control-Allow-Headers", "*")
-    response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS")
-    if (request.method === "OPTIONS") {
-      response.writeHead(204)
-      response.end()
-      return
-    }
-    if (mode === "timeout" && request.url?.endsWith("/models")) await pending.promise
-    response.writeHead(404)
-    response.end("unsupported")
-  })
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  const address = server.address()
-  if (!address || typeof address === "string") throw new Error("Missing synthetic address")
+  // This is a transport-only test. A fresh cwd keeps HappyDOM's Node HTTP shim out
+  // of the native fetch/AbortSignal boundary without changing globals in the unit suite.
+  const directory = await mkdtemp(path.join(tmpdir(), "zaovra-discovery707-"))
   try {
-    const baseURL = `http://127.0.0.1:${address.port}/v1`
-    await expect(discoverProviderModels({ baseURL, apiKey: "synthetic" })).rejects.toThrow("http404")
-    mode = "timeout"
-    await expect(discoverProviderModels({ baseURL, apiKey: "synthetic" })).rejects.toThrow()
-    const before = requests.length
-    await expect(discoverProviderModels({ baseURL, apiKey: "{env:SYNTHETIC_707_KEY}" })).rejects.toThrow("environment")
-    expect(requests.length).toBe(before)
-    for (const apiKey of ["synthetic", "{env:SYNTHETIC_707_KEY}"]) {
-      const result = validateCustomProvider({
-        form: {
-          providerID: "manual",
-          name: "Manual",
-          baseURL,
-          apiKey,
-          protocol: "responses",
-          models: [{ ...modelRow(), id: "concrete", name: "Concrete" }],
-          headers: [],
-          err: {},
-        },
-        t: (key) => key,
-        disabledProviders: [],
-        existingProviderIDs: new Set(),
-      }).result
-      expect(result?.config.models.concrete).toBeDefined()
-      expect(result?.config.npm).toBe("@ai-sdk/openai")
-      expect(result?.config.env).toEqual(apiKey.startsWith("{env:") ? ["SYNTHETIC_707_KEY"] : undefined)
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "test",
+        "--conditions=browser",
+        path.resolve(import.meta.dir, "../../test-browser/fixtures/provider-discovery707.fixture.ts"),
+      ],
+      { cwd: directory, stdout: "pipe", stderr: "pipe" },
+    )
+    try {
+      const [stdout, stderr, exit] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ])
+      if (process.env.ZAOVRA_TEST_REPORT_DIR) {
+        const report = path.join(process.env.ZAOVRA_TEST_REPORT_DIR, "provider-discovery707-" + crypto.randomUUID())
+        await Promise.all([
+          Bun.write(report + ".stdout.log", stdout),
+          Bun.write(report + ".stderr.log", stderr),
+          Bun.write(report + ".result.json", JSON.stringify({ actual_exit: exit, signal: child.signalCode })),
+        ])
+        console.log("PROVIDER_DISCOVERY707_FIXTURE_REPORT", report)
+      }
+      expect(exit, stdout + stderr).toBe(0)
+      expect(stderr).not.toContain("ECONNRESET")
+      console.log(stdout.trim())
+    } finally {
+      if (child.exitCode === null) child.kill()
+      await child.exited
     }
-    expect(requests.every((request) => /^(GET|OPTIONS) /.test(request))).toBe(true)
-    console.log("707 synthetic discovery requests=" + requests.length + ", generation POST=0")
   } finally {
-    pending.resolve()
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await rm(directory, { recursive: true, force: true })
   }
 }, 20000)
