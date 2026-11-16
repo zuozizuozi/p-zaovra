@@ -62,12 +62,32 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     editing: undefined as string | undefined,
     text: "",
     draft: { project: "", user: "" },
-    confirming: undefined as Layer | undefined,
+    confirming: undefined as { server: string; directory?: string; layer: Layer } | undefined,
+    noteBusy: false,
+    noteError: undefined as Layer | undefined,
     pagesRevision: 0,
     saving: false,
     configError: false,
   })
   const pendingConfig = { revision: 0 }
+  const pendingNotes = { revision: 0 }
+  createEffect(
+    on(
+      () => [serverSdk().scope, directory()] as const,
+      () => {
+        pendingNotes.revision++
+        setState({
+          editing: undefined,
+          text: "",
+          draft: { project: "", user: "" },
+          confirming: undefined,
+          noteBusy: false,
+          noteError: undefined,
+        })
+      },
+    ),
+  )
+  onCleanup(() => pendingNotes.revision++)
   createEffect(
     on(
       () => serverSdk().scope,
@@ -101,157 +121,201 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
   }
   const reload = (layer: Layer) => (layer === "project" ? projectActions.refetch() : userActions.refetch())
 
-  const save = async (layer: Layer, id: string) => {
-    if (!state.text.trim()) return
-    await memory().update({ id, text: state.text }, { throwOnError: true })
-    setState("editing", undefined)
-    await reload(layer)
-  }
-  const adopt = async (layer: Layer, id: string) => {
-    await memory().update({ id, status: "verified" }, { throwOnError: true })
-    await reload(layer)
-  }
-  const remove = async (layer: Layer, id: string) => {
-    await memory().remove({ id }, { throwOnError: true })
-    await reload(layer)
-  }
-  const add = async (layer: Layer) => {
-    const text = state.draft[layer].trim()
-    if (!text) return
-    await memory().create({ location: location(), layer, kind: "preference", text }, { throwOnError: true })
-    setState("draft", layer, "")
-    await reload(layer)
+  const confirmed = (layer: Layer) =>
+    state.confirming?.layer === layer &&
+    state.confirming.server === serverSdk().scope &&
+    state.confirming.directory === directory()
+  const changeNote = async (layer: Layer, action: "add" | "save" | "adopt" | "remove" | "clear", id?: string) => {
+    if (
+      state.noteBusy ||
+      (layer === "project" ? frozen() || project.loading || !!project.error : user.loading || !!user.error)
+    )
+      return
+    if (id && !(layer === "project" ? project() : user())?.some((note) => note.id === id)) return
+    if (action === "save" && state.editing !== id) return
+    if (action === "clear" && !confirmed(layer)) return
+    const text = (action === "add" ? state.draft[layer] : state.text).trim()
+    if ((action === "add" || action === "save") && !text) return
+    const client = memory()
+    const server = serverSdk().scope
+    const target = directory()
+    const revision = ++pendingNotes.revision
+    const current = () => pendingNotes.revision === revision && serverSdk().scope === server && directory() === target
+    setState({ noteBusy: true, noteError: undefined })
+    try {
+      const accepted = await (action === "add"
+        ? client
+            .create(
+              { location: target ? { directory: target } : undefined, layer, kind: "preference", text },
+              { throwOnError: true },
+            )
+            .then((result) => result.data.data !== null)
+        : action === "save" || action === "adopt"
+          ? client
+              .update(
+                { id: id!, ...(action === "save" ? { text } : { status: "verified" as const }) },
+                { throwOnError: true },
+              )
+              .then((result) => result.data.data !== null)
+          : action === "remove"
+            ? client.remove({ id: id! }, { throwOnError: true }).then(() => true)
+            : client
+                .clear({ location: target ? { directory: target } : undefined, layer }, { throwOnError: true })
+                .then(() => true))
+      if (!current()) return
+      if (!accepted) {
+        setState("noteError", layer)
+        return
+      }
+      if (action === "add") setState("draft", layer, "")
+      if (action === "save") setState("editing", undefined)
+      if (action === "clear") {
+        setState("confirming", undefined)
+        setState("pagesRevision", (value) => value + 1)
+      }
+      await reload(layer)
+    } catch {
+      if (current()) setState("noteError", layer)
+    } finally {
+      if (current()) setState("noteBusy", false)
+    }
   }
   const tidyTarget = createMemo(() =>
     directory() ? { directory: directory()!, server: serverSdk().scope } : undefined,
   )
   const pagesTarget = createMemo(() => ({ directory: directory(), server: serverSdk().scope }))
-  const clear = async (layer: Layer) => {
-    await memory().clear({ location: location(), layer }, { throwOnError: true })
-    setState("confirming", undefined)
-    setState("pagesRevision", (value) => value + 1)
-    await reload(layer)
-  }
 
   const section = (layer: Layer, notes: () => Awaited<ReturnType<typeof read>> | undefined) => (
     <section data-slot="settings-memory-section" data-layer={layer} class="flex flex-col gap-3">
-      <div class="flex items-center justify-between gap-4">
-        <div class="flex flex-col gap-1">
-          <h3 class="text-sm font-medium">{language.t(`settings.memory.${layer}.title`)}</h3>
-          <p class="text-xs text-v2-text-text-muted">{language.t(`settings.memory.${layer}.description`)}</p>
-        </div>
-        <Show when={(notes()?.length ?? 0) > 0}>
-          <Show
-            when={state.confirming === layer}
-            fallback={
-              <ButtonV2 variant="neutral" onClick={() => setState("confirming", layer)}>
-                {language.t("settings.memory.clear")}
-              </ButtonV2>
-            }
-          >
-            <div class="flex shrink-0 items-center gap-2">
-              <span class="text-xs text-v2-text-text-muted">{language.t("settings.memory.clear.confirm")}</span>
-              <ButtonV2 variant="neutral" onClick={() => void clear(layer)}>
-                {language.t("settings.memory.clear")}
-              </ButtonV2>
-              <ButtonV2 variant="neutral" onClick={() => setState("confirming", undefined)}>
-                {language.t("common.cancel")}
-              </ButtonV2>
-            </div>
-          </Show>
-        </Show>
-      </div>
-      <SettingsListV2>
-        <Show
-          when={(notes()?.length ?? 0) > 0}
-          fallback={<p class="text-xs text-v2-text-text-muted">{language.t("settings.memory.empty")}</p>}
-        >
-          <For each={notes()}>
-            {(note) => (
-              <div data-slot="settings-memory-note" class="settings-v2-servers-row">
-                <Show
-                  when={state.editing === note.id}
-                  fallback={
-                    <>
-                      <div class="flex min-w-0 flex-col gap-1">
-                        <span class="break-words text-sm">{note.text}</span>
-                        <span class="text-xs text-v2-text-text-muted">
-                          {language.t(`settings.memory.kind.${note.kind}`)}
-                          {" · "}
-                          {language.t(`settings.memory.origin.${note.origin}`)}
-                          {" · "}
-                          {language.t(`settings.memory.status.${note.status}`)}
-                          {" · "}
-                          {new Date(note.time.observed).toLocaleDateString()}
-                        </span>
-                        <Show when={fileState(note.files)} keyed>
-                          {(status) => (
-                            <span class="text-xs text-v2-text-text-muted">
-                              {language.t(`settings.memory.files.${status}`)}
-                            </span>
-                          )}
-                        </Show>
-                        <Show when={note.sessionID} keyed>
-                          {(sessionID) => <MemorySourceLink sessionID={sessionID} seq={note.seq} />}
-                        </Show>
-                      </div>
-                      <div class="settings-v2-servers-actions">
-                        <Show when={note.status !== "verified"}>
-                          <ButtonV2 variant="neutral" onClick={() => void adopt(layer, note.id)}>
-                            {language.t("settings.memory.use")}
-                          </ButtonV2>
-                        </Show>
-                        <ButtonV2 variant="neutral" onClick={() => setState({ editing: note.id, text: note.text })}>
-                          {language.t("common.edit")}
-                        </ButtonV2>
-                        <ButtonV2 variant="neutral" onClick={() => void remove(layer, note.id)}>
-                          {language.t("common.delete")}
-                        </ButtonV2>
-                      </div>
-                    </>
-                  }
+      <fieldset disabled={state.noteBusy || (layer === "project" ? project.loading : user.loading)} class="contents">
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex flex-col gap-1">
+            <h3 class="text-sm font-medium">{language.t(`settings.memory.${layer}.title`)}</h3>
+            <p class="text-xs text-v2-text-text-muted">{language.t(`settings.memory.${layer}.description`)}</p>
+          </div>
+          <Show when={(notes()?.length ?? 0) > 0}>
+            <Show
+              when={confirmed(layer)}
+              fallback={
+                <ButtonV2
+                  variant="neutral"
+                  onClick={() => setState("confirming", { server: serverSdk().scope, directory: directory(), layer })}
                 >
-                  <TextInputV2
-                    appearance="base"
-                    class="min-w-0 flex-1"
-                    value={state.text}
-                    aria-label={language.t("common.edit")}
-                    onInput={(event) => setState("text", event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void save(layer, note.id)
-                      if (event.key === "Escape") setState("editing", undefined)
-                    }}
-                  />
-                  <div class="settings-v2-servers-actions">
-                    <ButtonV2 variant="neutral" onClick={() => void save(layer, note.id)}>
-                      {language.t("common.save")}
-                    </ButtonV2>
-                    <ButtonV2 variant="neutral" onClick={() => setState("editing", undefined)}>
-                      {language.t("common.cancel")}
-                    </ButtonV2>
-                  </div>
-                </Show>
+                  {language.t("settings.memory.clear")}
+                </ButtonV2>
+              }
+            >
+              <div class="flex shrink-0 items-center gap-2">
+                <span class="text-xs text-v2-text-text-muted">{language.t("settings.memory.clear.confirm")}</span>
+                <ButtonV2 variant="neutral" onClick={() => void changeNote(layer, "clear")}>
+                  {language.t("settings.memory.clear")}
+                </ButtonV2>
+                <ButtonV2 variant="neutral" onClick={() => setState("confirming", undefined)}>
+                  {language.t("common.cancel")}
+                </ButtonV2>
               </div>
-            )}
-          </For>
-        </Show>
-      </SettingsListV2>
-      <div class="flex items-center gap-2">
-        <TextInputV2
-          appearance="base"
-          class="min-w-0 flex-1"
-          value={state.draft[layer]}
-          placeholder={language.t(`settings.memory.${layer}.add`)}
-          aria-label={language.t(`settings.memory.${layer}.add`)}
-          onInput={(event) => setState("draft", layer, event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void add(layer)
-          }}
-        />
-        <ButtonV2 variant="neutral" disabled={!state.draft[layer].trim()} onClick={() => void add(layer)}>
-          {language.t("settings.memory.add")}
-        </ButtonV2>
-      </div>
+            </Show>
+          </Show>
+        </div>
+        <SettingsListV2>
+          <Show
+            when={(notes()?.length ?? 0) > 0}
+            fallback={<p class="text-xs text-v2-text-text-muted">{language.t("settings.memory.empty")}</p>}
+          >
+            <For each={notes()}>
+              {(note) => (
+                <div data-slot="settings-memory-note" class="settings-v2-servers-row">
+                  <Show
+                    when={state.editing === note.id}
+                    fallback={
+                      <>
+                        <div class="flex min-w-0 flex-col gap-1">
+                          <span class="break-words text-sm">{note.text}</span>
+                          <span class="text-xs text-v2-text-text-muted">
+                            {language.t(`settings.memory.kind.${note.kind}`)}
+                            {" · "}
+                            {language.t(`settings.memory.origin.${note.origin}`)}
+                            {" · "}
+                            {language.t(`settings.memory.status.${note.status}`)}
+                            {" · "}
+                            {new Date(note.time.observed).toLocaleDateString()}
+                          </span>
+                          <Show when={fileState(note.files)} keyed>
+                            {(status) => (
+                              <span class="text-xs text-v2-text-text-muted">
+                                {language.t(`settings.memory.files.${status}`)}
+                              </span>
+                            )}
+                          </Show>
+                          <Show when={note.sessionID} keyed>
+                            {(sessionID) => <MemorySourceLink sessionID={sessionID} seq={note.seq} />}
+                          </Show>
+                        </div>
+                        <div class="settings-v2-servers-actions">
+                          <Show when={note.status !== "verified"}>
+                            <ButtonV2 variant="neutral" onClick={() => void changeNote(layer, "adopt", note.id)}>
+                              {language.t("settings.memory.use")}
+                            </ButtonV2>
+                          </Show>
+                          <ButtonV2 variant="neutral" onClick={() => setState({ editing: note.id, text: note.text })}>
+                            {language.t("common.edit")}
+                          </ButtonV2>
+                          <ButtonV2 variant="neutral" onClick={() => void changeNote(layer, "remove", note.id)}>
+                            {language.t("common.delete")}
+                          </ButtonV2>
+                        </div>
+                      </>
+                    }
+                  >
+                    <TextInputV2
+                      appearance="base"
+                      class="min-w-0 flex-1"
+                      value={state.text}
+                      aria-label={language.t("common.edit")}
+                      onInput={(event) => setState("text", event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void changeNote(layer, "save", note.id)
+                        if (event.key === "Escape") setState("editing", undefined)
+                      }}
+                    />
+                    <div class="settings-v2-servers-actions">
+                      <ButtonV2 variant="neutral" onClick={() => void changeNote(layer, "save", note.id)}>
+                        {language.t("common.save")}
+                      </ButtonV2>
+                      <ButtonV2 variant="neutral" onClick={() => setState("editing", undefined)}>
+                        {language.t("common.cancel")}
+                      </ButtonV2>
+                    </div>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </Show>
+        </SettingsListV2>
+        <div class="flex items-center gap-2">
+          <TextInputV2
+            appearance="base"
+            class="min-w-0 flex-1"
+            value={state.draft[layer]}
+            placeholder={language.t(`settings.memory.${layer}.add`)}
+            aria-label={language.t(`settings.memory.${layer}.add`)}
+            onInput={(event) => setState("draft", layer, event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void changeNote(layer, "add")
+            }}
+          />
+          <ButtonV2
+            variant="neutral"
+            disabled={!state.draft[layer].trim()}
+            onClick={() => void changeNote(layer, "add")}
+          >
+            {language.t("settings.memory.add")}
+          </ButtonV2>
+        </div>
+      </fieldset>
+      <Show when={state.noteError === layer}>
+        <p role="alert">{language.t("settings.memory.note.failed")}</p>
+      </Show>
     </section>
   )
 

@@ -1685,6 +1685,7 @@ export const dict = {
   "settings.memory.index.lines": "行数",
   "settings.memory.index.bytes": "UTF-8字节数",
   "settings.memory.config.failed": "记忆设置保存失败，请重试这项修改。",
+  "settings.memory.note.failed": "笔记修改未完成，已保留输入。请检查笔记后重试。",
   "settings.memory.enabled.description":
     "关闭后不再记录新内容，新对话也不会带上笔记。已经留下的笔记仍保留在这里，直到你删除。",
   "settings.memory.tidy.title": "整理本项目的笔记",

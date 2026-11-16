@@ -1871,6 +1871,7 @@ export const dict = {
   "settings.memory.index.lines": "Lines",
   "settings.memory.index.bytes": "UTF-8 bytes",
   "settings.memory.config.failed": "Memory settings could not be saved. Try the change again.",
+  "settings.memory.note.failed": "The note change was not completed. Your input is kept; check the note and try again.",
   "settings.memory.enabled.description":
     "When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
   "settings.memory.tidy.title": "Tidy this project's notes",
