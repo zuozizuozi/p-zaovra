@@ -102,6 +102,13 @@ for (const protocol of ["openai-chat", "openai-responses"] as const)
       },
       { models: [123], labels: [], status: "invalid-label" },
       { models: ["private-test-key"], labels: [], status: "invalid-label" },
+      { models: ["https://private.example/path"], labels: [], status: "invalid-label" },
+      { models: ["private.example.com"], labels: [], status: "invalid-label" },
+      { models: ["sk-unrelated-secret"], labels: [], status: "invalid-label" },
+      { models: ["127.0.0.1"], labels: [], status: "invalid-label" },
+      { models: ["fixture-model", "sk-unrelated-secret"], labels: [], status: "invalid-label" },
+      { models: ["a", "b", "c", "d", "e"], labels: [], status: "invalid-label" },
+      { models: ["deepseek-v4.1-flash"], labels: ["deepseek-v4.1-flash"], status: "reported-label" },
     ]
     for (const [index, scenario] of scenarios.entries()) {
       let calls = 0

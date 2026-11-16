@@ -3,6 +3,7 @@ import { Effect, Option, Schema, Stream } from "effect"
 import { Sse } from "effect/unstable/encoding"
 import { usageNumbers } from "../../../packages/llm/src/route/diagnostics"
 import { startEvaluationRelay } from "./relay"
+import { observeUsage } from "./usage"
 
 /** One synthetic transport probe, no tools, no retry, no automatic budget settlement.
  * Caller must record its authorized estimate BEFORE invoking this function. This does
@@ -80,7 +81,8 @@ export async function probeEvaluationText(input: {
       return result
     }
     // The relay bounds the whole response at 4MiB before this allocation completes.
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(await response.arrayBuffer())
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
     const frames = await Effect.runPromise(
       Stream.make(text).pipe(Stream.pipeThroughChannel(Sse.decode()), Stream.runCollect),
     )
@@ -103,23 +105,23 @@ export async function probeEvaluationText(input: {
     })
     // These are provider-supplied labels, not authentication of the underlying model.
     // Keep text success separate so a READY reply cannot silently prove model identity.
-    const models = values.flatMap((value) => {
-      const response = input.protocol === "openai-responses" ? value.response : value
-      return record(response) && response.model !== undefined ? [response.model] : []
-    })
-    const labels = models.filter(
-      (model): model is string =>
-        typeof model === "string" && /^[A-Za-z0-9_.:/-]{1,160}$/.test(model) && !model.includes(input.apiKey),
-    )
-    result.responseModels = [...new Set(labels)]
+    const observer = observeUsage(input.protocol, [
+      input.apiKey,
+      relay.apiKey,
+      input.baseURL,
+      new URL(input.baseURL).hostname,
+    ])
+    observer.feed(bytes)
+    const models = observer.models("eof")
+    result.responseModels = models.labels
     result.responseModelStatus =
-      labels.length !== models.length
-        ? "invalid-label"
-        : result.responseModels.length > 1
+      models.labelStatus === "consistent"
+        ? "reported-label"
+        : models.labelStatus === "conflicting"
           ? "conflicting-labels"
-          : result.responseModels.length === 1
-            ? "reported-label"
-            : "not-reported"
+          : models.labelStatus === "unreported"
+            ? "not-reported"
+            : "invalid-label"
     const answer = input.protocol === "openai-responses" ? responses(values) : chat(values, done)
     result.pass = answer === "READY"
     result.reason =
