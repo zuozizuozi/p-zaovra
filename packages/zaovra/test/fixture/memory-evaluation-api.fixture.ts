@@ -3,6 +3,7 @@ import path from "node:path"
 import { Effect } from "effect"
 import { Zaovra } from "@zaovra-ai/client"
 import { observe } from "../../../../script/evaluation/memory/observe"
+import { collectHistory } from "../../../../script/evaluation/memory/history"
 import { Server } from "../../src/server/server"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { disposeAllInstances } from "./fixture"
@@ -78,6 +79,20 @@ test("real completed and pending admissions stay distinct without inventing back
     expect(observed.turn).toBeUndefined()
     expect(observed.evidence).toHaveLength(2)
     expect(observed.evidence[0].fingerprint).toBe(observed.evidence[1].fingerprint)
+    const diagnostics = await collectHistory({
+      client,
+      admission,
+      cut: observed.evidence[1].watermark,
+      pageSize: 3,
+    })
+    expect(diagnostics.coverage).toMatchObject({ status: "complete-through-cut", admitted: true, promoted: true })
+    expect(diagnostics.coverage.pages).toBeGreaterThan(1)
+    expect(
+      diagnostics.settlements.some((entry) => entry.kind === "step" && entry.started && entry.ended.length === 1),
+    ).toBe(true)
+    expect(diagnostics.billing).toMatchObject({ status: "unknown", total: null, reserve: "retain" })
+    expect(JSON.stringify(diagnostics)).not.toContain("Hello.")
+    expect(JSON.stringify(diagnostics)).not.toContain("Say hello only.")
     const pending = await client.sessions.prompt(
       { sessionID: session.id, resume: false, prompt: { text: "Not executed yet." } },
       { signal },
@@ -87,6 +102,11 @@ test("real completed and pending admissions stay distinct without inventing back
     expect(incomplete.artifactReady).toBe(false)
     expect(incomplete.turn).toBeUndefined()
     expect(incomplete.reason).toBe("snapshot-not-idle")
+    // A later admission cannot borrow the completed input's durable prefix or billing attribution.
+    const pendingHistory = await collectHistory({ client, admission: pending, cut: pending.admittedSeq })
+    expect(pendingHistory.coverage.status).toBe("unknown")
+    expect(pendingHistory.coverage.promoted).toBe(false)
+    expect(pendingHistory.billing.reserve).toBe("retain")
   } finally {
     await listener.stop(true)
     await disposeAllInstances()
