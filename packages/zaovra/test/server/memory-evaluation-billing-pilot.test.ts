@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import path from "node:path"
+import { randomUUID } from "node:crypto"
 import { runBillingChain } from "../../../../script/evaluation/memory/pilot"
 import { startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
 import { chains } from "../../../../script/evaluation/memory/cases"
@@ -105,7 +106,7 @@ test.skipIf(process.platform !== "win32")(
           treatment,
           baseURL: relay.baseURL,
           reserveTokens: 1,
-          environment: { ZAOVRA_EVAL_API_KEY: relay.apiKey },
+          relayKey: relay.apiKey,
         })
         if (!result.pass) console.error({ stages: result.stages, rounds, relay: await Bun.file(journal).text() })
         expect(result.pass).toBe(true)
@@ -177,7 +178,7 @@ test.skipIf(process.platform !== "win32")(
         treatment: "A",
         baseURL: `http://127.0.0.1:${provider.port}/v1`,
         reserveTokens: 1,
-        environment: { ZAOVRA_EVAL_API_KEY: "local-fixture-only" },
+        relayKey: randomUUID(),
       })
       expect(result.pass).toBe(false)
       expect(result.counts).toEqual({ planned: 5, entered: 1, completed: 0, notRun: 4 })

@@ -17,7 +17,7 @@ export async function runBillingChain(input: {
   treatment: "A" | "B"
   baseURL: string
   reserveTokens: number
-  environment: Record<string, string>
+  relayKey: string
 }) {
   const endpoint = new URL(input.baseURL)
   if (
@@ -32,7 +32,8 @@ export async function runBillingChain(input: {
     endpoint.password ||
     endpoint.search ||
     endpoint.hash ||
-    !(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && endpoint.hostname === "127.0.0.1"))
+    !/^[a-f0-9-]{36}$/.test(input.relayKey) ||
+    !(endpoint.protocol === "http:" && endpoint.hostname === "127.0.0.1")
   )
     throw new Error("invalid-billing-pilot")
   const source = path.resolve(import.meta.dir, "../../..")
@@ -70,12 +71,13 @@ export async function runBillingChain(input: {
     provider: {
       [providerID]: {
         npm: input.family === "gpt" ? "@ai-sdk/openai" : "@ai-sdk/openai-compatible",
-        options: { baseURL: endpoint.toString(), apiKey: "{env:ZAOVRA_EVAL_API_KEY}", timeout: 120000 },
+        options: { baseURL: endpoint.toString(), apiKey: input.relayKey, timeout: 120000 },
         models: {
           [input.modelID]: {
             family: input.family,
             tool_call: true,
             reasoning: true,
+            options: { maxTokens: 4096 },
             limit: { context: 32000, output: 4096 },
           },
         },
@@ -103,7 +105,7 @@ export async function runBillingChain(input: {
     taskSearch: false,
     tidy: false,
   }
-  // Credentials stay only in the explicitly supplied child environment, never config or manifest.
+  // Only the short-lived local relay capability enters this profile. No upstream key enters the backend.
   await writeFile(path.join(input.root, "manifest.json"), JSON.stringify(manifest, null, 2), { flag: "wx" })
   const stages: Array<{
     stage: number
@@ -131,7 +133,6 @@ export async function runBillingChain(input: {
         model: manifest.model,
         prompt,
         seconds: manifest.stageDeadlineSeconds,
-        providerEnvironment: input.environment,
         ...(index === 3 ? { poison: { chain: chain.id, sourceSessionID: previousSessionID! } } : {}),
       })
       phase = "session-evidence"
