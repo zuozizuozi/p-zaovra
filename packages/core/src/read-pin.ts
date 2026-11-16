@@ -21,3 +21,10 @@ export const acquire = (canonical: string) =>
     Effect.tryPromise(() => ReadPinNative.open(canonical)),
     (pin) => Effect.sync(() => pin?.close()),
   )
+
+/** Acquire only after permission; compare with the authorized original before reading. */
+export const acquireStable = (canonical: string) =>
+  Effect.acquireRelease(
+    Effect.tryPromise(() => ReadPinNative.openStable(canonical)),
+    (pin) => Effect.sync(() => pin?.close()),
+  )

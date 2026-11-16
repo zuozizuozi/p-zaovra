@@ -5,3 +5,7 @@ import type { ReadPin } from "./read-pin"
 export async function open(_canonical: string): Promise<ReadPin.Pin | undefined> {
   return undefined
 }
+
+export async function openStable(_canonical: string): Promise<ReadPin.Pin | undefined> {
+  return undefined
+}

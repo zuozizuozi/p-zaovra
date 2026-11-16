@@ -4,6 +4,15 @@ import type { ReadPin } from "./read-pin"
 
 /** Local, canonical drive paths only. Reparse traversal is refused at every component. */
 export async function open(canonical: string): Promise<ReadPin.Pin | undefined> {
+  return openTarget(canonical, false)
+}
+
+/** Deny path replacement and content writers only while this pin is held. Not permission. */
+export async function openStable(canonical: string): Promise<ReadPin.Pin | undefined> {
+  return openTarget(canonical, true)
+}
+
+async function openTarget(canonical: string, stable: boolean): Promise<ReadPin.Pin | undefined> {
   if (process.platform !== "win32" || process.arch !== "x64") return
   if (!/^[a-z]:\\/i.test(canonical) || canonical.includes("\0")) return
   const components = canonical.slice(3).split("\\").filter(Boolean)
@@ -72,11 +81,11 @@ export async function open(canonical: string): Promise<ReadPin.Pin | undefined> 
       close()
       return
     }
-    const handle = BigInt(kernel.symbols.CreateFileW(ptr(root), 0x100081, 7, null, 3, 0x02200000, null))
+    const handle = BigInt(kernel.symbols.CreateFileW(ptr(root), 0x100081, stable ? 3 : 7, null, 3, 0x02200000, null))
     if (handle === 0n || handle === 0xffffffffffffffffn) fail("Read pin root")
     handles.push(handle)
     if (!(attributes(handle) & 0x10)) throw new Error("Read pin root is not a directory")
-    for (const component of components) {
+    for (const [index, component] of components.entries()) {
       const text = Buffer.from(`${component}\0`, "utf16le")
       if (text.length > 65534) throw new Error("Read pin component is too long")
       const name = Buffer.alloc(16)
@@ -98,7 +107,9 @@ export async function open(canonical: string): Promise<ReadPin.Pin | undefined> 
         ptr(statusBlock),
         null,
         0,
-        7,
+        // Parents still allow unrelated child writes, but cannot be renamed.
+        // The final file also refuses existing/future writers and writable maps.
+        stable ? (index === components.length - 1 ? 1 : 3) : 7,
         1,
         0x00200020,
         null,
@@ -113,6 +124,7 @@ export async function open(canonical: string): Promise<ReadPin.Pin | undefined> 
     const file = handles.at(-1)!
     if (kernel.symbols.GetFileType(file) !== 1) throw new Error("Read pin accepts disk objects only")
     const kind = attributes(file) & 0x10 ? "directory" : "file"
+    if (stable && kind !== "file") throw new Error("Stable read pin requires a file")
     const id = Buffer.alloc(24)
     const standard = Buffer.alloc(24)
     if (!kernel.symbols.GetFileInformationByHandleEx(file, 18, ptr(id), id.length)) fail("Read pin identity")
