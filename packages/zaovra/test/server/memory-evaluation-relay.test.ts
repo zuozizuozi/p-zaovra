@@ -3,6 +3,103 @@ import path from "node:path"
 import { startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
 import { tmpdir } from "../fixture/fixture"
 
+test("evaluation relay closes upstream work on cancel and repeated stop without claiming EOF", async () => {
+  await using tmp = await tmpdir()
+  for (const mode of ["headers", "cancel", "unread"] as const) {
+    const started = Promise.withResolvers<void>()
+    const ended = Promise.withResolvers<void>()
+    const headers = Promise.withResolvers<Response>()
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        request.signal.addEventListener(
+          "abort",
+          () => {
+            ended.resolve()
+            headers.resolve(new Response(null, { status: 204 }))
+          },
+          { once: true },
+        )
+        started.resolve()
+        if (mode === "headers") return headers.promise
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(stream) {
+              stream.enqueue(new TextEncoder().encode("data: partial\n\n"))
+            },
+            cancel() {
+              ended.resolve()
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      },
+    })
+    const journal = path.join(tmp.path, mode + ".jsonl")
+    const relay = startEvaluationRelay({
+      baseURL: `http://127.0.0.1:${upstream.port}/v1`,
+      apiKey: "private-test-key",
+      model: "fixture",
+      protocol: "openai-chat",
+      journal,
+      maxRequests: 1,
+      maxRequestBytes: 4096,
+      maxOutput: 64,
+    })
+    const response = fetch(relay.baseURL + "/chat/completions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${relay.apiKey}` },
+      body: JSON.stringify({
+        model: "fixture",
+        stream: true,
+        max_tokens: 64,
+        messages: [{ role: "user", content: "hello" }],
+      }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => undefined)
+    try {
+      await Promise.race([
+        started.promise,
+        Bun.sleep(2000).then(() => {
+          throw new Error("fixture-not-started")
+        }),
+      ])
+      if (mode !== "headers") {
+        const reply = await response
+        expect(reply?.status).toBe(200)
+        if (mode === "cancel") {
+          const reader = reply!.body!.getReader()
+          await reader.read()
+          await reader.cancel()
+        }
+      }
+      if (mode !== "cancel") {
+        const stopping = relay.stop()
+        expect(relay.stop()).toBe(stopping)
+        await stopping
+      }
+      await Promise.race([
+        ended.promise,
+        Bun.sleep(2000).then(() => {
+          throw new Error("upstream-not-cancelled")
+        }),
+      ])
+    } finally {
+      headers.resolve(new Response(null, { status: 204 }))
+      await relay.stop()
+      await upstream.stop(true)
+      await response
+    }
+    const records = (await Bun.file(journal).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(records.filter((record) => record.phase === "admitted")).toHaveLength(1)
+    expect(records.some((record) => record.phase === "eof")).toBe(false)
+  }
+}, 20000)
+
 test("evaluation relay validates both wire protocols and bounds concurrent physical sends", async () => {
   await using tmp = await tmpdir()
   for (const protocol of ["openai-chat", "openai-responses"] as const) {
@@ -57,6 +154,16 @@ test("evaluation relay validates both wire protocols and bounds concurrent physi
       expect((await send({ ...body, unknown_provider_work: true })).status).toBe(400)
       expect(
         (await send({ ...body, [protocol === "openai-chat" ? "max_tokens" : "max_output_tokens"]: 65 })).status,
+      ).toBe(400)
+      expect(received).toHaveLength(0)
+      expect(
+        (
+          await fetch(relay.baseURL + suffix, {
+            method: "POST",
+            headers: { authorization: `Bearer ${relay.apiKey}` },
+            body: new Uint8Array([0xff]),
+          })
+        ).status,
       ).toBe(400)
       expect(received).toHaveLength(0)
       const replies = await Promise.all([send(body), send(body)])

@@ -51,7 +51,7 @@ export function startEvaluationRelay(input: {
     if (!closed) log({ phase: "denied", reason })
     return new Response(null, { status })
   }
-  log({
+  const manifest = {
     phase: "manifest",
     model: input.model,
     protocol: input.protocol,
@@ -60,129 +60,155 @@ export function startEvaluationRelay(input: {
     maxRequestBytes: input.maxRequestBytes,
     maxOutput: input.maxOutput,
     tokenLimit: "not-proven",
-  })
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    maxRequestBodySize: input.maxRequestBytes,
-    async fetch(request) {
-      const url = new URL(request.url)
-      if (
-        request.method !== "POST" ||
-        url.pathname !== "/v1" + suffix ||
-        url.search ||
-        request.headers.get("authorization") !== `Bearer ${key}`
-      )
-        return deny(403, "local-route-or-authorization")
-      const bytes = new Uint8Array(await request.arrayBuffer())
-      if (bytes.length > input.maxRequestBytes) return deny(413, "request-bytes")
-      const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
-        new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-      )
-      if (Option.isNone(parsed) || !parsed.value || typeof parsed.value !== "object")
-        return deny(400, "invalid-json")
-      const body = parsed.value as Record<string, unknown>
-      if (
-        body.model !== input.model ||
-        body.stream !== true ||
-        Option.isNone(Schema.decodeUnknownOption(route.body.schema, { onExcessProperty: "error" })(body))
-      )
-        return deny(400, "wire-model-stream-or-schema")
-      if (!localText(body.input ?? body.messages)) return deny(400, "external-input")
-      const limits = ["max_tokens", "max_completion_tokens", "max_output_tokens"].filter(
-        (name) => body[name] !== undefined,
-      )
-      const allowed =
-        input.protocol === "openai-responses" ? ["max_output_tokens"] : ["max_tokens", "max_completion_tokens"]
-      const output = body[limits[0]]
-      if (
-        limits.length !== 1 ||
-        !allowed.includes(limits[0]) ||
-        typeof output !== "number" ||
-        !Number.isSafeInteger(output) ||
-        output <= 0 ||
-        output > input.maxOutput
-      )
-        return deny(400, "wire-output-limit")
-      // No await between the limit check and durable admission: concurrent local callers cannot oversubscribe.
-      if (closed || sent >= input.maxRequests) return deny(429, "physical-request-limit")
-      const id = randomUUID()
-      log({
-        id,
-        phase: "admitted",
-        ordinal: sent + 1,
-        bytes: bytes.length,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
-        output,
-        usage: "unknown",
-      })
-      sent++
-      const controller = new AbortController()
-      active.add(controller)
-      try {
-        const response = await fetch(target, {
-          method: "POST",
-          body: bytes,
-          redirect: "error",
-          headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
-          signal: AbortSignal.any([request.signal, controller.signal, AbortSignal.timeout(120000)]),
-        })
-        log({ id, phase: "headers", status: response.status })
-        const reader = response.body?.getReader()
-        if (!reader) {
-          active.delete(controller)
-          return new Response(null, { status: response.status })
-        }
-        let received = 0
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            async pull(stream) {
-              try {
-                const chunk = await reader.read()
-                if (chunk.done) {
-                  if (!closed) log({ id, phase: "eof", bytes: received, usage: "unknown" })
-                  active.delete(controller)
-                  stream.close()
-                  return
-                }
-                received += chunk.value.length
-                if (received > 4194304) throw new Error("response-limit")
-                stream.enqueue(chunk.value)
-              } catch {
-                controller.abort()
-                active.delete(controller)
-                if (!closed) log({ id, phase: "incomplete", usage: "unknown" })
-                stream.error(new Error("evaluation-relay-stream-incomplete"))
-              }
-            },
-            async cancel() {
-              controller.abort()
-              await reader.cancel().catch(() => {})
-              active.delete(controller)
-            },
-          }),
-          {
-            status: response.status,
-            headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream" },
-          },
+  }
+  const createServer = () =>
+    Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      maxRequestBodySize: input.maxRequestBytes,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (
+          request.method !== "POST" ||
+          url.pathname !== "/v1" + suffix ||
+          url.search ||
+          request.headers.get("authorization") !== `Bearer ${key}`
         )
-      } catch {
-        controller.abort()
-        active.delete(controller)
-        if (!closed) log({ id, phase: "transport-failed", usage: "unknown" })
-        return new Response(null, { status: 502 })
-      }
-    },
-  })
+          return deny(403, "local-route-or-authorization")
+        const wire = await (async () => {
+          try {
+            const bytes = new Uint8Array(await request.arrayBuffer())
+            return {
+              bytes,
+              parsed: Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
+                new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+              ),
+            }
+          } catch {
+            return undefined
+          }
+        })()
+        if (!wire) return deny(400, "invalid-request-body")
+        const bytes = wire.bytes
+        if (bytes.length > input.maxRequestBytes) return deny(413, "request-bytes")
+        const parsed = wire.parsed
+        if (Option.isNone(parsed) || !parsed.value || typeof parsed.value !== "object") return deny(400, "invalid-json")
+        const body = parsed.value as Record<string, unknown>
+        if (
+          body.model !== input.model ||
+          body.stream !== true ||
+          Option.isNone(Schema.decodeUnknownOption(route.body.schema, { onExcessProperty: "error" })(body))
+        )
+          return deny(400, "wire-model-stream-or-schema")
+        if (!localText(body.input ?? body.messages)) return deny(400, "external-input")
+        const limits = ["max_tokens", "max_completion_tokens", "max_output_tokens"].filter(
+          (name) => body[name] !== undefined,
+        )
+        const allowed =
+          input.protocol === "openai-responses" ? ["max_output_tokens"] : ["max_tokens", "max_completion_tokens"]
+        const output = body[limits[0]]
+        if (
+          limits.length !== 1 ||
+          !allowed.includes(limits[0]) ||
+          typeof output !== "number" ||
+          !Number.isSafeInteger(output) ||
+          output <= 0 ||
+          output > input.maxOutput
+        )
+          return deny(400, "wire-output-limit")
+        // No await between the limit check and synchronous recording: concurrent local callers cannot oversubscribe.
+        if (closed || sent >= input.maxRequests) return deny(429, "physical-request-limit")
+        const id = randomUUID()
+        log({
+          id,
+          phase: "admitted",
+          ordinal: sent + 1,
+          bytes: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          output,
+          usage: "unknown",
+        })
+        sent++
+        const controller = new AbortController()
+        active.add(controller)
+        try {
+          const response = await fetch(target, {
+            method: "POST",
+            body: bytes,
+            redirect: "error",
+            headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
+            signal: AbortSignal.any([request.signal, controller.signal, AbortSignal.timeout(120000)]),
+          })
+          if (!closed) log({ id, phase: "headers", status: response.status })
+          const reader = response.body?.getReader()
+          if (!reader) {
+            active.delete(controller)
+            return new Response(null, { status: response.status })
+          }
+          let received = 0
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              async pull(stream) {
+                try {
+                  const chunk = await reader.read()
+                  if (chunk.done) {
+                    if (!closed) log({ id, phase: "eof", bytes: received, usage: "unknown" })
+                    active.delete(controller)
+                    stream.close()
+                    return
+                  }
+                  received += chunk.value.length
+                  if (received > 4194304) throw new Error("response-limit")
+                  stream.enqueue(chunk.value)
+                } catch {
+                  controller.abort()
+                  active.delete(controller)
+                  if (!closed) log({ id, phase: "incomplete", usage: "unknown" })
+                  stream.error(new Error("evaluation-relay-stream-incomplete"))
+                }
+              },
+              async cancel() {
+                controller.abort()
+                await reader.cancel().catch(() => {})
+                active.delete(controller)
+              },
+            }),
+            {
+              status: response.status,
+              headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream" },
+            },
+          )
+        } catch {
+          controller.abort()
+          active.delete(controller)
+          if (!closed) log({ id, phase: "transport-failed", usage: "unknown" })
+          return new Response(null, { status: 502 })
+        }
+      },
+    })
+  const server = (() => {
+    try {
+      log(manifest)
+      return createServer()
+    } catch {
+      closeSync(file)
+      throw new Error("evaluation-relay-start-failed")
+    }
+  })()
+  let stopping: Promise<void> | undefined
   return {
     baseURL: `http://127.0.0.1:${server.port}/v1`,
     apiKey: key,
-    async stop() {
-      if (closed) return
-      closed = true
-      for (const controller of active) controller.abort()
-      await server.stop(true)
-      closeSync(file)
+    stop() {
+      return (stopping ??= (async () => {
+        closed = true
+        for (const controller of active) controller.abort()
+        try {
+          await server.stop(true)
+        } finally {
+          closeSync(file)
+        }
+      })())
     },
   }
 }
