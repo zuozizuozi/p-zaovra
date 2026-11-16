@@ -10,6 +10,20 @@ const tokens = (value: unknown): value is number =>
 /** Numeric reports and bounded labels are separate observations, neither billing nor model authentication. */
 export function observeUsage(protocol: "openai-chat" | "openai-responses", sensitive: readonly string[] = []) {
   const decoder = new TextDecoder()
+  // Independent strict decoder: malformed bytes must not change historical usage/label semantics.
+  const strict = new TextDecoder("utf-8", { fatal: true })
+  let validBytes = true
+  let terminalCount = 0
+  let responseEnd: "completed" | "incomplete" | "failed" | undefined
+  let terminalIssue:
+    | "invalid-frame"
+    | "invalid-terminal"
+    | "duplicate-terminal"
+    | "after-terminal"
+    | "choice-limit"
+    | undefined
+  const choices = new Map<number, string | null>()
+  let done = false
   const labels = new Set<string>()
   let invalidLabel = false
   let terminal = false
@@ -23,6 +37,9 @@ export function observeUsage(protocol: "openai-chat" | "openai-responses", sensi
     if (event._tag !== "Event" || !event.data.trim()) return
     if (event.data.trim() === "[DONE]") {
       if (protocol === "openai-chat") terminal = true
+      if (protocol !== "openai-chat") terminalIssue ??= "invalid-terminal"
+      if (done) terminalIssue ??= "duplicate-terminal"
+      done = true
       return
     }
     const decoded = parse(event.data)
@@ -30,9 +47,60 @@ export function observeUsage(protocol: "openai-chat" | "openai-responses", sensi
     if (Option.isNone(frame)) {
       problem ??= "invalid-frame"
       invalidLabel = true
+      terminalIssue ??= "invalid-frame"
       return
     }
     const value = frame.value
+    if (value.type === "error" || Object.hasOwn(value, "error")) terminalIssue ??= "invalid-frame"
+    // These are bounded facts about the observed prefix, not SDK acceptance or unobserved tail bytes.
+    if (protocol === "openai-responses") {
+      if (["response.completed", "response.incomplete", "response.failed"].includes(String(value.type))) {
+        terminalCount = Math.min(terminalCount + 1, 2)
+        if (terminalCount > 1) terminalIssue ??= "duplicate-terminal"
+        const response = object(value.response)
+        const status = Option.isSome(response) ? response.value.status : undefined
+        if (
+          (status === "completed" || status === "incomplete" || status === "failed") &&
+          value.type === `response.${status}`
+        )
+          responseEnd = status
+        else terminalIssue ??= "invalid-terminal"
+      } else if (terminalCount) terminalIssue ??= "after-terminal"
+    } else {
+      if (done) terminalIssue ??= "after-terminal"
+      if (!Array.isArray(value.choices)) terminalIssue ??= "invalid-frame"
+      if (Array.isArray(value.choices)) {
+        if (value.choices.length > 16) terminalIssue ??= "choice-limit"
+        for (const choice of value.choices.slice(0, 16)) {
+          const item = object(choice)
+          if (
+            Option.isNone(item) ||
+            !Number.isInteger(item.value.index) ||
+            Number(item.value.index) < 0 ||
+            Number(item.value.index) >= 16
+          ) {
+            terminalIssue ??= "invalid-terminal"
+            continue
+          }
+          const index = Number(item.value.index)
+          const reason = item.value.finish_reason
+          if (choices.get(index)) terminalIssue ??= "duplicate-terminal"
+          if (reason == null) {
+            if (!choices.has(index)) choices.set(index, null)
+            continue
+          }
+          if (
+            typeof reason !== "string" ||
+            !["stop", "length", "tool_calls", "function_call", "content_filter"].includes(reason)
+          ) {
+            terminalIssue ??= "invalid-terminal"
+            continue
+          }
+          terminalCount = Math.min(terminalCount + 1, 17)
+          choices.set(index, reason)
+        }
+      }
+    }
     // Observe labels before the numeric usage terminal-frame filter. No text/tool data is retained.
     const source = protocol === "openai-responses" ? object(value.response) : frame
     if (Option.isSome(source) && Object.hasOwn(source.value, "model")) {
@@ -105,6 +173,11 @@ export function observeUsage(protocol: "openai-chat" | "openai-responses", sensi
   })
   return {
     feed(bytes: Uint8Array) {
+      try {
+        strict.decode(bytes, { stream: true })
+      } catch {
+        validBytes = false
+      }
       const text = decoder.decode(bytes, { stream: true })
       // Track an unfinished SSE frame without retaining its content; CRLF can cross byte chunks.
       for (const char of text) {
@@ -126,6 +199,30 @@ export function observeUsage(protocol: "openai-chat" | "openai-responses", sensi
     result() {
       if (problem || !reported) return { status: "unknown" as const, reason: problem ?? "no-terminal-usage" }
       return { status: "reported" as const, ...reported, basis: "provider-terminal-usage" as const }
+    },
+    // Final prefix observation; deliberately independent from transport end and numeric usage.
+    termination() {
+      try {
+        strict.decode()
+      } catch {
+        validBytes = false
+      }
+      const framing = validBytes && !line && !pending
+      const observed =
+        protocol === "openai-responses"
+          ? responseEnd !== undefined
+          : choices.size > 0 && [...choices.values()].every((reason) => reason !== null)
+      return {
+        status: terminalIssue || !framing ? "ambiguous" : observed ? "observed" : "unobserved",
+        responses: responseEnd ?? null,
+        chat: [...choices].flatMap(([index, reason]) => (reason === null ? [] : [{ index, reason }])),
+        done,
+        count: terminalCount,
+        issue: terminalIssue ?? null,
+        framing: framing ? "complete" : "incomplete",
+        consumer: "unproven",
+        basis: "provider-terminal-prefix-only",
+      }
     },
     // Final observation after reading ends. Cache decoder finalization so repeated reads stay conservative.
     models(end: "eof" | "incomplete" | "cancelled") {

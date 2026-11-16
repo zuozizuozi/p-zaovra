@@ -178,6 +178,43 @@ export function hostVerdict(input: {
   const command = (names: string[]) => calls.filter((call) => call.kind === "command" && names.includes(call.command!))
   const successful = (names: string[]) => command(names).filter((call) => call.record?.exit === 0)
   const scripts = (names: string[]) => trace && names.every((name) => input.artifacts[name] === fixed[name])
+  // Only stage 1 has the generic "existing tests" contract. Exact frozen package bytes
+  // also exclude pretest/posttest; later stages retain their direct-node prohibitions.
+  const originalFiles = ["package.json", "src/sum.cjs", "test/sum.test.cjs"]
+  const originalNpm =
+    input.chain === "arithmetic" &&
+    input.stage === 1 &&
+    scripts(originalFiles) &&
+    originalFiles.every((name) => input.initialArtifacts?.[name] === fixed[name]) &&
+    !calls.some(
+      (call) =>
+        (call.kind === "edit" && originalFiles.includes(call.file!)) ||
+        (call.kind === "patch" && call.files!.some((name) => originalFiles.includes(name))),
+    )
+      ? successful(["npm test", "npm run test"]).filter((call) => {
+          if (call.tool.state.status !== "completed") return false
+          const verification = object(call.tool.state.structured.verification)
+          const record = object(verification.executionRecord)
+          return (
+            record.id === call.record!.id &&
+            record.originCallID === call.tool.partID &&
+            record.sequence === call.record!.sequence &&
+            record.exit === 0 &&
+            JSON.stringify(record.scope) === JSON.stringify(call.record!.scope) &&
+            record.started === call.record!.started &&
+            record.completed === call.record!.completed &&
+            Array.isArray(verification.targets) &&
+            originalFiles.every(
+              (name) =>
+                call.record!.scope.targets.includes(path.resolve(input.directory, name)) &&
+                (verification.targets as unknown[]).some((target) => {
+                  const item = object(target)
+                  return item.path === path.resolve(input.directory, name) && item.digest === digest(fixed[name]!)
+                }),
+            )
+          )
+        })
+      : []
   // Executing model-edited JavaScript proves that command ran, not that it never
   // installed dependencies internally. Preserve unknown for that negative claim.
   const negativeTrace =
@@ -213,6 +250,7 @@ export function hostVerdict(input: {
           initial: input.initialArtifacts,
           final: input.artifacts,
           tools,
+          originalNpm: originalNpm.map((call) => call.tool),
           commands: calls.flatMap((call) =>
             call.kind === "command" && call.record && call.command
               ? [{ tool: call.tool, record: call.record, command: call.command }]
@@ -292,6 +330,8 @@ export function hostVerdict(input: {
     }
     switch (requirement) {
       case "existing-node-tests-executed-successfully":
+        if (originalNpm.length)
+          return result(requirement, "verified", "successful-bound-original-npm-script", originalNpm)
         return positive(requirement, ["node --test test/sum.test.cjs"], ["test/sum.test.cjs", "src/sum.cjs"])
       case "direct-node-current-tests-succeeded":
         return positive(requirement, ["node --test test/sum.test.cjs"])

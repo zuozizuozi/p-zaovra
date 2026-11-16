@@ -6,9 +6,94 @@ import { chains, prepare, change } from "../../../../script/evaluation/memory/ca
 import { hostVerdict, digest, writeHumanReview } from "../../../../script/evaluation/memory/host-verdict"
 import { createHostGrader } from "../../../../script/evaluation/memory/host-chain"
 import { tmpdir } from "../fixture/fixture"
+import { knownReadOnly } from "../../../../script/evaluation/memory/host-tool-evidence"
 
 type Input = Parameters<typeof hostVerdict>[0]
 type Evidence = Extract<NonNullable<Input["session"]["observation"]["turnEvidence"]>, { status: "complete" }>
+
+for (const command of ["npm test", "npm run test"])
+  for (const scenario of [
+    "bound",
+    "changed-package",
+    "pretest",
+    "changed-source",
+    "changed-test",
+    "missing-record",
+    "missing-targets",
+    "wrong-digest",
+    "failed",
+    "later-stage",
+  ])
+    test(`stage1 original npm alias ${command}: ${scenario}`, () => {
+      const input = fixture("arithmetic", scenario === "later-stage" ? 3 : 1)
+      input.requirements = [
+        "existing-node-tests-executed-successfully",
+        "no-dependency-install",
+        ...(scenario === "later-stage" ? ["no-npm-test"] : []),
+      ]
+      input.initialArtifacts = { ...input.artifacts }
+      const tool = bash(input, command, 1, scenario === "failed" ? 1 : 0)
+      const output = tool.state.structured as Record<string, unknown>
+      const record = tool.state.structured.executionRecord as { scope: { targets: string[] } }
+      const targets = ["package.json", "src/sum.cjs", "test/sum.test.cjs"].map((name) => ({
+        path: path.join(input.directory, name),
+        digest: digest(input.artifacts[name]!),
+      }))
+      record.scope.targets = targets.map((target) => target.path)
+      output.verification = { executionRecord: structuredClone(record), targets }
+      if (scenario === "changed-package") input.artifacts["package.json"] = '{"scripts":{"test":"echo passed"}}'
+      if (scenario === "pretest")
+        input.artifacts["package.json"] = input.artifacts["package.json"]!.replace(
+          '"test":',
+          '"pretest": "npm install", "test":',
+        )
+      if (scenario === "changed-source") input.artifacts["src/sum.cjs"] += "// changed\n"
+      if (scenario === "changed-test") input.artifacts["test/sum.test.cjs"] += "// changed\n"
+      if (scenario === "missing-record") delete output.executionRecord
+      if (scenario === "missing-targets") output.verification = {}
+      if (scenario === "wrong-digest") targets[0]!.digest = "0".repeat(64)
+      const report = hostVerdict(input)
+      expect(report.checks[0]!.status === "verified").toBe(scenario === "bound")
+      expect(report.checks[1]!.status).toBe("unknown")
+      if (scenario === "bound") {
+        expect(report.codeReview?.executions[0]!.files["package.json"]).toBe(input.artifacts["package.json"])
+        expect(report.checks[1]!.reason).toBe("needs-bound-human-rubric")
+      }
+      if (scenario === "later-stage") expect(report.checks[2]!.status).toBe("violated")
+    })
+
+for (const name of ["glob", "grep"])
+  test(`${name} empty input path is root but empty output path remains invalid`, () => {
+    const input = fixture()
+    const tool = {
+      name,
+      state: {
+        status: "completed",
+        input: { path: "", pattern: "**/*" },
+        structured: {
+          entries: [{ path: "package.json", type: "file" }],
+          matches: [],
+          truncated: false,
+          partial: false,
+          skippedRecords: 0,
+        },
+      },
+    } as unknown as Evidence["tools"][number]
+    if (tool.state.status !== "completed") throw new Error("fixture-not-completed")
+    const search = tool.state.input as Record<string, unknown>
+    const output = tool.state.structured as Record<string, unknown>
+    expect(knownReadOnly(tool, input.directory)).toBe(true)
+    for (const value of ["..", path.resolve(input.directory, "../escape"), "bad\0path", 17]) {
+      search.path = value
+      expect(knownReadOnly(tool, input.directory)).toBe(false)
+    }
+    search.path = ""
+    for (const value of ["", "..", path.resolve(input.directory, "../escape")]) {
+      output.entries = [{ path: value, type: "file" }]
+      output.matches = [{ entry: { path: value, type: "file" }, line: 1, offset: 0, text: "x", submatches: [] }]
+      expect(knownReadOnly(tool, input.directory)).toBe(false)
+    }
+  })
 
 // These are adapter counterexamples, not evidence that a real model used tools.
 function fixture(chain: Input["chain"] = "arithmetic", stage = 1): Input {

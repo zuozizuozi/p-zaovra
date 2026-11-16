@@ -155,6 +155,7 @@ export function startEvaluationRelay(options: {
           labelsRecorded = true
           pendingLabels.delete(controller)
           log({ id, phase: "response-model-observed", end, ...usage.models(end) })
+          log({ id, phase: "response-termination-observed", end, ...usage.termination() })
         }
         pendingLabels.set(controller, () => recordModels("cancelled"))
         try {

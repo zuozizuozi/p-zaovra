@@ -52,7 +52,7 @@ export function knownReadOnly(tool: Tool, directory: string) {
   if (
     !["glob", "grep"].includes(tool.name) ||
     typeof input.pattern !== "string" ||
-    fixturePath(directory, input.path ?? ".", true) === undefined
+    fixturePath(directory, input.path === "" ? "." : (input.path ?? "."), true) === undefined
   )
     return false
   if (tool.name === "glob") {
@@ -136,6 +136,7 @@ export function arithmeticReview(input: {
   final: Record<string, string>
   tools: readonly Tool[]
   commands: Array<{ tool: Tool; record: SessionOutcome.ExecutionRecord; command: string }>
+  originalNpm?: readonly Tool[]
 }) {
   const current = { ...input.initial }
   const versions: CodeExecution[] = []
@@ -161,7 +162,7 @@ export function arithmeticReview(input: {
       return
     if (event.command) {
       const entry =
-        event.command.command === "node --test test/sum.test.cjs"
+        event.command.command === "node --test test/sum.test.cjs" || input.originalNpm?.includes(event.tool)
           ? "test/sum.test.cjs"
           : ["node --test test/math.test.cjs", "npm run check"].includes(event.command.command)
             ? "test/math.test.cjs"
