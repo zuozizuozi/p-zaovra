@@ -50,6 +50,8 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
   )
   // Viewing/reopening never starts a task. Poll only while a task is actually running.
   createEffect(() => {
+    // Resource accessors throw after a failed load. Keep the local refresh UI alive.
+    if (tasks.error || automatic.error) return
     if (!tasks()?.some((task) => task.executing) && !automatic()?.enabled) return
     const timer = setInterval(() => {
       if (!tasks.loading) void Promise.resolve(actions.refetch()).catch(() => undefined)
@@ -69,7 +71,12 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     dailyTokens: Number(state.dailyTokens),
   })
   const blocked = (layer: "project" | "user" = "project") =>
-    props.disabled || (layer === "project" && props.projectFrozen)
+    props.disabled ||
+    (layer === "project" && props.projectFrozen) ||
+    tasks.loading ||
+    automatic.loading ||
+    !!tasks.error ||
+    !!automatic.error
   const submit = async () => {
     if (state.busy || !state.request || blocked(state.request.layer)) return
     const request = state.request
@@ -103,6 +110,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     setState("busy", false)
   }
   const disableAutomatic = async () => {
+    if (automatic.error) return
     const preference = automatic()
     if (state.busy || !preference) return
     setState({ busy: true, error: false })
@@ -238,7 +246,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
       <div data-slot="memory-automatic" class="flex flex-col gap-2 border-t border-v2-border-base pt-3">
         <p class="text-xs">{language.t("settings.memory.automatic.description")}</p>
         <Show
-          when={automatic()?.enabled}
+          when={!automatic.error && automatic()?.enabled}
           fallback={
             <ButtonV2
               variant="neutral"
@@ -279,14 +287,15 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
       </Show>
       <ButtonV2
         variant="neutral"
-        disabled={state.busy || tasks.loading}
-        onClick={() =>
+        disabled={state.busy || tasks.loading || automatic.loading}
+        onClick={() => {
+          setState("error", false)
           void Promise.all([actions.refetch(), automaticActions.refetch()]).catch(() => setState("error", true))
-        }
+        }}
       >
         {language.t("settings.memory.task.refresh")}
       </ButtonV2>
-      <For each={tasks.loading ? [] : tasks()}>
+      <For each={tasks.loading || tasks.error ? [] : tasks()}>
         {(task) => (
           <div data-slot="memory-tidy-task" class="flex flex-col gap-2 border-t border-v2-border-base pt-3">
             <p class="text-sm">

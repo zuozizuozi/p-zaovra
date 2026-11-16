@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { render } from "solid-js/web"
 import { MemoryRouter, Route } from "@solidjs/router"
-import { createSignal } from "solid-js"
+import { createSignal, ErrorBoundary } from "solid-js"
 import type { MemoryAutomaticPreference, MemoryTidyTask } from "@zaovra-ai/sdk/v2/client"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { DialogProvider } from "@zaovra-ai/ui/context/dialog"
@@ -56,9 +56,12 @@ let automatic: MemoryAutomaticPreference | null = null
 let tasks: MemoryTidyTask[] = []
 let target: ((value: string) => void) | undefined
 let hold: Promise<void> | undefined
+let failedRead: "tidy" | "automatic" | undefined
+let readFailures = 0
+const renderErrors: unknown[] = []
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 150; i++) {
+async function until(check: () => boolean, attempts = 150) {
+  for (let i = 0; i < attempts; i++) {
     if (check()) return
     await Bun.sleep(10)
   }
@@ -85,6 +88,10 @@ async function mount(initial: MemoryTidyTask[] = []) {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === `/api/memory/${failedRead}`) {
+        readFailures++
+        return Response.json({ message: "Read unavailable" }, { status: 503 })
+      }
       if (request.method === "GET" && path === "/api/memory/automatic") return Response.json({ data: automatic })
       if (request.method === "GET" && path === "/api/memory/pages") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery")
@@ -199,7 +206,19 @@ async function mount(initial: MemoryTidyTask[] = []) {
       <I18nProvider value={language}>
         <DialogProvider>
           <MemoryRouter>
-            <Route path="*" component={() => <SettingsMemoryV2 directory={directory()} />} />
+            <Route
+              path="*"
+              component={() => (
+                <ErrorBoundary
+                  fallback={(error) => {
+                    renderErrors.push(error)
+                    return <p data-slot="unexpected-boundary">Unexpected read error</p>
+                  }}
+                >
+                  <SettingsMemoryV2 directory={directory()} />
+                </ErrorBoundary>
+              )}
+            />
           </MemoryRouter>
         </DialogProvider>
       </I18nProvider>
@@ -223,6 +242,86 @@ afterEach(() => {
   document.body.replaceChildren()
   failure = undefined
   hold = undefined
+  failedRead = undefined
+  readFailures = 0
+  renderErrors.length = 0
+})
+
+for (const resource of ["tidy", "automatic"] as const) {
+  test(`initial ${resource} GET failure keeps refresh and blocks both spending confirmations`, async () => {
+    failedRead = resource
+    await mount()
+    await choose()
+    await until(() => readFailures > 0)
+    expect(renderErrors).toEqual([])
+    expect(document.querySelector('[data-slot="memory-tidy"] [role="alert"]')).not.toBeNull()
+    expect(action().disabled).toBe(true)
+    expect(button("Review automatic project tidy").disabled).toBe(true)
+    expect(calls).toHaveLength(0)
+    failedRead = undefined
+    button(dict["settings.memory.task.refresh"]).click()
+    await until(() => !action().disabled)
+    expect(document.querySelector('[data-slot="memory-tidy"] [role="alert"]')).toBeNull()
+    expect(calls).toHaveLength(0)
+  })
+
+  test(`running task ${resource} poll failure recovers and cancels without a duplicate submission`, async () => {
+    await mount([
+      {
+        id: "tidy-poll",
+        requestID: "poll",
+        sessionID: "ses_poll",
+        layer: "project",
+        directory: "/tidy-project",
+        model: { providerID: "configured", id: "chat-b" },
+        tokens: 200000,
+        dailyTokens: 1000000,
+        state: "active",
+        executing: true,
+        usage: { known: 0, reserved: 90, charged: 90, unknown: 1 },
+        time: { created: 1, finished: null },
+      },
+    ])
+    await choose()
+    failedRead = resource
+    await until(() => readFailures > 0, 700)
+    await Bun.sleep(20)
+    expect(renderErrors).toEqual([])
+    expect(action().disabled).toBe(true)
+    expect(button("Review automatic project tidy").disabled).toBe(true)
+    expect(calls).toHaveLength(0)
+    failedRead = undefined
+    button(dict["settings.memory.task.refresh"]).click()
+    await until(
+      () =>
+        !!button(dict["settings.memory.task.stop"]) &&
+        !document.querySelector('[data-slot="memory-tidy"] [role="alert"]'),
+    )
+    button(dict["settings.memory.task.stop"]).click()
+    await until(() => tasks[0].state === "cancelled" && !button(dict["settings.memory.task.stop"]))
+    expect(calls.map((call) => call.path)).toEqual(["/api/memory/tidy/tidy-poll/cancel"])
+    expect(tasks[0].usage).toEqual({ known: 0, reserved: 90, charged: 90, unknown: 1 })
+  }, 10000)
+}
+
+test("read failure during an unsubmitted confirmation cannot start it until refreshed", async () => {
+  await mount()
+  await choose()
+  action().click()
+  failedRead = "tidy"
+  button(dict["settings.memory.task.refresh"]).click()
+  await until(() => readFailures > 0)
+  await Bun.sleep(20)
+  expect(renderErrors).toEqual([])
+  expect(button(dict["settings.memory.task.start"]).disabled).toBe(true)
+  button(dict["settings.memory.task.start"]).click()
+  expect(calls).toHaveLength(0)
+  failedRead = undefined
+  button(dict["settings.memory.task.refresh"]).click()
+  await until(() => !button(dict["settings.memory.task.start"]).disabled)
+  button(dict["settings.memory.task.start"]).click()
+  await until(() => calls.length === 2 && !document.querySelector('[data-slot="memory-tidy-confirm"]'))
+  expect(calls.filter((call) => call.path === "/api/memory/tidy")).toHaveLength(1)
 })
 
 test("automatic consent has a separate confirmation, idempotent retry and an explicit disable", async () => {

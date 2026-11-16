@@ -14,10 +14,16 @@ test("manual memory tidy model DOM and SDK requests", async () => {
     ],
     { cwd: import.meta.dir + "/..", stdout: "pipe", stderr: "pipe" },
   )
-  const [out, err, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
-  expect(code, out + err).toBe(0)
+  try {
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    console.log(out + err)
+    expect(code, out + err).toBe(0)
+  } finally {
+    child.kill()
+    await child.exited
+  }
 }, 30000)
