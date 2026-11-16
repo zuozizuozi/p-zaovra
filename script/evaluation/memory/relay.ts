@@ -210,8 +210,9 @@ export function startEvaluationRelay(options: {
     }
   })()
   let stopping: Promise<void> | undefined
+  const baseURL = `http://127.0.0.1:${server.port}/v1`
   const handle = {
-    baseURL: `http://127.0.0.1:${server.port}/v1`,
+    baseURL,
     apiKey: key,
     stop() {
       return (stopping ??= (async () => {
@@ -228,7 +229,7 @@ export function startEvaluationRelay(options: {
   owned.set(handle, () => {
     if (closed) throw new Error("evaluation-relay-closed")
     return {
-      baseURL: handle.baseURL,
+      baseURL,
       apiKey: key,
       model: input.model,
       protocol: input.protocol,

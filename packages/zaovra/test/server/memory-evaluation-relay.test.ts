@@ -282,7 +282,9 @@ test("owned relay identity is frozen and a copied or stopped handle cannot grant
     options.model = "changed"
     options.baseURL = "http://127.0.0.1:8/v1"
     options.maxRequests = 40
+    relay.baseURL = "http://127.0.0.1:8/v1"
     expect(evaluationRelayBinding(relay)).toEqual(before)
+    relay.baseURL = before.baseURL
     expect(() => evaluationRelayBinding({ ...relay })).toThrow("evaluation-relay-not-owned")
     const response = await fetch(relay.baseURL + "/chat/completions", {
       method: "POST",
