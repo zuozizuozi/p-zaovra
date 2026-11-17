@@ -3,6 +3,71 @@ import path from "node:path"
 import { evaluationRelayBinding, startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
 import { tmpdir } from "../fixture/fixture"
 
+test("evaluation relay preserves forty-send plans and caps extended recovery plans at sixty physical sends", async () => {
+  await using tmp = await tmpdir()
+  for (const limit of [40, 60]) {
+    const received: string[] = []
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        received.push(await request.text())
+        return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
+      },
+    })
+    try {
+      const options = {
+        baseURL: `http://127.0.0.1:${upstream.port}/v1`,
+        apiKey: "local-fixture-only",
+        model: "fixture",
+        protocol: "openai-chat" as const,
+        journal: path.join(tmp.path, `limit-${limit}.jsonl`),
+        maxRequests: limit,
+        maxRequestBytes: 4096,
+        maxOutput: 64,
+      }
+      expect(() => startEvaluationRelay({ ...options, maxRequests: 61 })).toThrow("invalid-evaluation-relay")
+      expect(await Bun.file(options.journal).exists()).toBe(false)
+      const relay = startEvaluationRelay(options)
+      const body = JSON.stringify({
+        model: "fixture",
+        stream: true,
+        max_tokens: 64,
+        messages: [{ role: "user", content: "bounded local recovery fixture" }],
+      })
+      const send = async () => {
+        const response = await fetch(relay.baseURL + "/chat/completions", {
+          method: "POST",
+          headers: { authorization: `Bearer ${relay.apiKey}` },
+          body,
+          signal: AbortSignal.timeout(5000),
+        })
+        await response.text()
+        return response.status
+      }
+      try {
+        const statuses = await Promise.all(Array.from({ length: limit + 2 }, send))
+        expect(statuses.filter((status) => status === 200)).toHaveLength(limit)
+        expect(statuses.filter((status) => status === 429)).toHaveLength(2)
+        expect(await send()).toBe(429)
+        expect(received).toEqual(Array.from({ length: limit }, () => body))
+      } finally {
+        await relay.stop()
+      }
+      const records = (await Bun.file(options.journal).text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+      expect(records.filter((row) => row.phase === "admitted").map((row) => row.ordinal)).toEqual(
+        Array.from({ length: limit }, (_, index) => index + 1),
+      )
+      expect(records.filter((row) => row.phase === "denied" && row.reason === "physical-request-limit")).toHaveLength(3)
+    } finally {
+      await upstream.stop(true)
+    }
+  }
+}, 15000)
+
 test("evaluation relay closes upstream work on cancel and repeated stop without claiming EOF", async () => {
   await using tmp = await tmpdir()
   for (const mode of ["headers", "cancel", "unread"] as const) {

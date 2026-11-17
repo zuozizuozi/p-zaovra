@@ -47,7 +47,7 @@ export function startEvaluationRelay(options: {
     ![input.maxRequests, input.maxRequestBytes, input.maxOutput].every(
       (value) => Number.isSafeInteger(value) && value > 0,
     ) ||
-    input.maxRequests > 40 ||
+    input.maxRequests > 60 ||
     input.maxRequestBytes > 131072 ||
     input.maxOutput > 4096 ||
     endpoint.username ||
