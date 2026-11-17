@@ -71,17 +71,21 @@ try {
   await sidebar.waitFor({ state: "visible" })
   assert(await sidebar.isVisible(), "main sidebar")
   assert(await sidebar.locator("svg").first().isVisible(), "ZAOVRA wordmark")
-  assert.match(await sidebar.locator('[data-slot="project-heading"]').first().innerText(), /Default Project/)
-  const draft = sidebar
-    .locator('[data-slot="titlebar-tab-item"][data-active="true"]')
-    .filter({ has: page.locator('a[href*="draftId="]') })
-  await draft.waitFor({ state: "visible" })
-  assert.equal(await draft.count(), 1, "fresh profile opens one active draft tab")
-  assert.match(await draft.innerText(), /新对话|新会话|New (chat|session)/i)
-  assert.match(await page.locator('[data-slot="new-session-task"]').innerText(), /Default Project/)
+  assert.equal((await sidebar.locator('[data-slot="project-heading"]').first().innerText()).trim(), "Zaovra 项目")
+  // Drafts stay on the new-session route; the sidebar lists promoted sessions only.
+  const route = await page.waitForFunction(() => {
+    const routes = Object.keys(localStorage)
+      .filter((key) => /^zaovra\.desktop\.window\..+\.last-active-url$/.test(key))
+      .map((key) => localStorage.getItem(key))
+    return routes.length === 1 && routes[0]?.startsWith("/new-session?draftId=") ? routes[0] : false
+  })
+  const draft = new URL(await route.jsonValue(), "https://desktop.invalid")
+  assert.equal(draft.searchParams.getAll("draftId").length, 1, "one active draft route")
+  assert.equal(await sidebar.locator('[data-slot="titlebar-tab-item"]').count(), 0, "no phantom session rows")
+  assert.match(await page.locator('[data-slot="new-session-task"]').innerText(), /Zaovra 项目/)
   assert.equal(await page.getByText(/欢迎使用 Zaovra|Welcome to Zaovra|Zaovra 0\.1\.0/).count(), 0)
   assert.equal(await page.getByRole("dialog").count(), 0, "no release-notes modal")
-  assert((await stat(join(runtime.documents, "Default Project"))).isDirectory())
+  assert((await stat(join(runtime.documents, "Zaovra 项目"))).isDirectory())
   summary.assertions = {
     sidebar: true,
     logo: true,
@@ -97,7 +101,7 @@ try {
   await writeFile(
     join(record, "draft-links.json"),
     JSON.stringify(
-      await draft.locator("a").evaluateAll((links) => links.map((link) => link.getAttribute("href"))),
+      { pathname: draft.pathname, draftID: draft.searchParams.get("draftId") },
       null,
       2,
     ),
