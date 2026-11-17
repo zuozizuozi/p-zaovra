@@ -29,6 +29,7 @@ const { HttpRouter, HttpServer } = await import("effect/unstable/http")
 test("production routes bind tidy globals outside Location without starting a provider", async () => {
   const directory = path.join(root!, "project")
   await fs.mkdir(directory, { recursive: true })
+  await Bun.write(path.join(directory, "zaovra.json"), JSON.stringify({ memory: { enabled: true } }))
   const web = HttpRouter.toWebHandler(createEmbeddedRoutes().pipe(Layer.provide(HttpServer.layerServices)), {
     disableLogger: true,
   })
@@ -70,6 +71,7 @@ test("production routes bind tidy globals outside Location without starting a pr
 test("automatic HTTP settings default off, isolate directories and reject stale consent", async () => {
   const directory = path.join(root!, "automatic-project")
   await fs.mkdir(directory, { recursive: true })
+  await Bun.write(path.join(directory, "zaovra.json"), JSON.stringify({ memory: { enabled: true } }))
   const web = HttpRouter.toWebHandler(createEmbeddedRoutes().pipe(Layer.provide(HttpServer.layerServices)), {
     disableLogger: true,
   })
@@ -117,6 +119,48 @@ test("automatic HTTP settings default off, isolate directories and reject stale 
       (await (await call("PUT", { ...consent, requestID: "next", expected: consent.requestID })).json()).data.enabled,
     ).toBe(true)
     expect((await (await call()).json()).data.currentRun).toBeNull()
+  } finally {
+    await web.dispose()
+  }
+}, 30000)
+
+test("production routes without memory opt-in refuse tidy and automation without creating a task", async () => {
+  const directory = path.join(root!, "default-off-project")
+  await fs.mkdir(directory, { recursive: true })
+  const web = HttpRouter.toWebHandler(createEmbeddedRoutes().pipe(Layer.provide(HttpServer.layerServices)), {
+    disableLogger: true,
+  })
+  const call = (endpoint: string, method = "GET") => {
+    const url = new URL(`http://localhost/api/memory/${endpoint}`)
+    url.searchParams.set("location[directory]", directory)
+    return web.handler(
+      new Request(url, {
+        method,
+        headers: { "content-type": "application/json" },
+        body:
+          method === "GET"
+            ? undefined
+            : JSON.stringify({
+                requestID: "default-off",
+                model: { id: "offline", providerID: "offline" },
+                tokens: 100,
+                dailyTokens: 200,
+              }),
+      }),
+    )
+  }
+  try {
+    expect((await (await call("automatic")).json()).data).toBeNull()
+    for (const [endpoint, method] of [
+      ["tidy", "POST"],
+      ["automatic", "PUT"],
+    ]) {
+      const denied = await call(endpoint!, method!)
+      expect(denied.status).toBe(409)
+      expect((await denied.json()).reason).toBe("unauthorized")
+    }
+    expect((await (await call("tidy")).json()).data).toEqual([])
+    expect((await (await call("automatic")).json()).data).toBeNull()
   } finally {
     await web.dispose()
   }

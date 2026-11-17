@@ -30,7 +30,7 @@ import { tmpdir } from "../../core/test/fixture/tmpdir"
 
 test("memory task HTTP and generated client preserve confirmation, stop and scope boundaries", async () => {
   await using tmp = await tmpdir()
-  const state = { enabled: true, starts: 0, stops: 0 }
+  const state: { enabled?: boolean; starts: number; stops: number } = { enabled: true, starts: 0, stops: 0 }
   const started = Promise.withResolvers<void>()
   const runtime = ManagedRuntime.make(
     AppNodeBuilder.build(
@@ -222,11 +222,13 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
     await client.v2.memory.clear({}, { throwOnError: true })
     expect((await client.v2.memory.listPages({}, { throwOnError: true })).data.data).toEqual([])
     expect((await client.v2.memory.list({}, { throwOnError: true })).data.data).toEqual([])
-    state.enabled = false
-    const disabled = await fetch(new URL(`/api/memory/tidy/${prepared.id}/start`, server.url), { method: "POST" })
-    expect(disabled.status).toBe(409)
-    expect((await disabled.json()).reason).toBe("unauthorized")
-    expect(state.starts).toBe(0)
+    for (const enabled of [undefined, false]) {
+      state.enabled = enabled
+      const disabled = await fetch(new URL(`/api/memory/tidy/${prepared.id}/start`, server.url), { method: "POST" })
+      expect(disabled.status).toBe(409)
+      expect((await disabled.json()).reason).toBe("unauthorized")
+      expect(state.starts).toBe(0)
+    }
     state.enabled = true
     await client.v2.memory.startTidy({ id: prepared.id }, { throwOnError: true })
     await started.promise

@@ -105,7 +105,7 @@ export const layer = Layer.effect(
           return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
         yield* tasks.start(
           id,
-          config.entries().pipe(Effect.map((entries) => Config.latest(entries, "memory")?.enabled !== false)),
+          config.entries().pipe(Effect.map((entries) => Config.latest(entries, "memory")?.enabled === true)),
         )
         return yield* get(id, layer)
       }),
@@ -116,7 +116,7 @@ export const layer = Layer.effect(
         return yield* Effect.forEach([...current, ...old.filter((run) => run.directory === location.directory)], view)
       }),
       prepare: Effect.fn("MemoryTidy.prepare")(function* (input) {
-        if (Config.latest(yield* config.entries(), "memory")?.enabled === false)
+        if (Config.latest(yield* config.entries(), "memory")?.enabled !== true)
           return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
         const allowed = yield* scopes(input.layer)
         if (!(yield* memory.canAutomate(allowed.scope)))

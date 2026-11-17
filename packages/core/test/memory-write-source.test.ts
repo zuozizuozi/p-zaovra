@@ -163,7 +163,7 @@ test("unknown profile refuses a catalog self-declaration without preventing sear
     }),
   ))
 
-for (const change of ["disabled", "off", "tools", "provider", "model", "variant"] as const)
+for (const change of ["disabled", "unset", "off", "tools", "provider", "model", "variant"] as const)
   test(`captured memory leaf rechecks ${change} at admission`, () =>
     withMemory(
       (h, settings) =>
@@ -172,6 +172,7 @@ for (const change of ["disabled", "off", "tools", "provider", "model", "variant"
           const call = yield* h.call(session.id, { kind: "decision", text: "Only the evaluated author may write" })
           expect(yield* h.writing.allowed(session.id)).toBe(true)
           if (change === "disabled") settings.enabled = false
+          if (change === "unset") settings.enabled = undefined
           if (change === "off" || change === "tools")
             yield* h.catalog.transform((draft) =>
               draft.model.update(model.providerID, model.id, (entry) => {
@@ -638,7 +639,7 @@ windows("a published Read receipt binds a note that can be rechecked without min
 )
 
 async function withMemory(
-  body: (h: Effect.Success<typeof setup>, settings: { enabled: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
+  body: (h: Effect.Success<typeof setup>, settings: { enabled?: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
   evaluated = false,
 ) {
   await using tmp = await tmpdir()

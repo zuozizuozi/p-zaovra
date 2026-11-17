@@ -349,7 +349,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
             <div data-action="settings-memory-enabled">
               <Switch
                 hideLabel
-                checked={serverSync().data.config.memory?.enabled !== false}
+                checked={serverSync().data.config.memory?.enabled === true}
                 disabled={state.saving}
                 onChange={(enabled) => void updateMemory({ enabled })}
               >
@@ -365,7 +365,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
               <Switch
                 hideLabel
                 checked={serverSync().data.config.memory?.index?.enabled !== false}
-                disabled={state.saving || serverSync().data.config.memory?.enabled === false}
+                disabled={state.saving || serverSync().data.config.memory?.enabled !== true}
                 onChange={(enabled) => void updateMemory({ index: { enabled } })}
               >
                 {language.t("settings.memory.index.title")}
@@ -380,7 +380,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
               <Switch
                 hideLabel
                 checked={serverSync().data.config.memory?.taskSearch !== false}
-                disabled={state.saving || serverSync().data.config.memory?.enabled === false}
+                disabled={state.saving || serverSync().data.config.memory?.enabled !== true}
                 onChange={(taskSearch) => void updateMemory({ taskSearch })}
               >
                 {language.t("settings.memory.search.title")}
@@ -391,7 +391,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
             title={language.t("settings.memory.index.limits")}
             description={language.t("settings.memory.index.limits.description")}
           >
-            <fieldset class="flex gap-3" disabled={state.saving || serverSync().data.config.memory?.enabled === false}>
+            <fieldset class="flex gap-3" disabled={state.saving || serverSync().data.config.memory?.enabled !== true}>
               <label class="text-xs">
                 {language.t("settings.memory.index.lines")}
                 <TextInputV2
@@ -446,7 +446,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           {(target) => (
             <MemoryTidyPanel
               directory={target.directory}
-              disabled={serverSync().data.config.memory?.enabled === false}
+              disabled={serverSync().data.config.memory?.enabled !== true}
               projectFrozen={frozen() || !!recovery()?.automaticFrozen}
             />
           )}

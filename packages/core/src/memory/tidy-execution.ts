@@ -65,7 +65,7 @@ const layer = Layer.effect(
       const input = {
         sessionID: run.session_id,
         scope: run.scope,
-        enabled: Config.latest(yield* config.entries(), "memory")?.enabled !== false,
+        enabled: Config.latest(yield* config.entries(), "memory")?.enabled === true,
       }
       yield* store.authorize(input).pipe(Effect.mapError(() => denied("整理授权已失效，未发送模型请求。")))
       if (!(yield* idle.allows(run))) return yield* denied("应用有其他待处理任务，自动整理已暂停，未发送模型请求。")

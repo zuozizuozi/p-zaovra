@@ -46,7 +46,10 @@ mock.module("@/context/models", () => ({
 }))
 mock.module("@/context/server-sdk", () => ({ useServerSDK: () => () => ({ scope: "tidy-test", client }) }))
 mock.module("@/context/server-sync", () => ({
-  useServerSync: () => () => ({ data: { config: {} }, session: { lineage: { peek: () => undefined } } }),
+  useServerSync: () => () => ({
+    data: { config: { memory: { enabled: true } } },
+    session: { lineage: { peek: () => undefined } },
+  }),
 }))
 const { SettingsMemoryV2 } = await import("../../src/components/settings-v2/memory")
 let dispose: (() => void) | undefined

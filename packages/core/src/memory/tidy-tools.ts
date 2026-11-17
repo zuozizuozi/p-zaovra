@@ -51,7 +51,7 @@ const layer = Layer.effect(
           .authorize({
             sessionID,
             scope: run.scope,
-            enabled: Config.latest(yield* config.entries(), "memory")?.enabled !== false,
+            enabled: Config.latest(yield* config.entries(), "memory")?.enabled === true,
           })
           .pipe(
             Effect.as(permitted),

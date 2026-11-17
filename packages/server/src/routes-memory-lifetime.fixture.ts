@@ -65,6 +65,7 @@ test("production tidy retains execution across listener close, isolates director
     await Bun.write(
       path.join(directory, "zaovra.json"),
       JSON.stringify({
+        memory: { enabled: true },
         formatter: false,
         lsp: false,
         experimental: { verification: false, delivery_contract: false },

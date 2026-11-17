@@ -56,7 +56,7 @@ const layer = Layer.effectDiscard(
     const permission = yield* PermissionV2.Service
     const location = yield* Location.Service
     const config = yield* Config.Service
-    if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
+    if (Config.latest(yield* config.entries(), "memory")?.enabled !== true) return
     const project = yield* store.scope({ project: location.project.id, directory: location.directory })
     yield* tools
       .register({
@@ -77,7 +77,7 @@ const layer = Layer.effectDiscard(
                 const eligible = () =>
                   Effect.gen(function* () {
                     if (
-                      Config.latest(yield* config.entries(), "memory")?.enabled === false ||
+                      Config.latest(yield* config.entries(), "memory")?.enabled !== true ||
                       !(yield* store.canCheckFiles(scope))
                     )
                       return undefined

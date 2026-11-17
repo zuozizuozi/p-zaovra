@@ -29,12 +29,13 @@ import { tmpdir } from "./fixture/tmpdir"
 
 const model = { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") }
 
-for (const scenario of ["complete", "yield", "disable", "brief-background"] as const)
+for (const scenario of ["complete", "yield", "disable", "brief-background", "missing-config", "empty-config"] as const)
   test(`automatic host uses the real coordinator and durable task lifecycle: ${scenario}`, async () => {
     await using tmp = await tmpdir()
     const entered = Deferred.makeUnsafe<void>()
     const release = Deferred.makeUnsafe<void>()
     const state = {
+      memory: { enabled: true } as { enabled?: boolean } | undefined,
       calls: 0,
       run: (_id: SessionV2.ID): Effect.Effect<void> => Effect.die("Runner not initialized"),
     }
@@ -90,6 +91,15 @@ for (const scenario of ["complete", "yield", "disable", "brief-background"] as c
         yield* automatic.tick
         expect(state.calls).toBe(0)
         yield* automatic.confirm(directory, { requestID: "consent", model, tokens: 200, dailyTokens: 1000 })
+        if (scenario === "missing-config" || scenario === "empty-config") {
+          state.memory = scenario === "missing-config" ? undefined : {}
+          yield* automatic.tick
+          yield* TestClock.adjust("2 minutes")
+          yield* automatic.tick
+          expect(state.calls).toBe(0)
+          expect((yield* automatic.get(directory))?.current_run).toBeNull()
+          return
+        }
         yield* automatic.tick
         if (scenario === "brief-background") {
           yield* TestClock.adjust("30 seconds")
@@ -174,7 +184,7 @@ for (const scenario of ["complete", "yield", "disable", "brief-background"] as c
                   Config.Service.of({
                     entries: () =>
                       Effect.succeed([
-                        new Config.Document({ type: "document", info: new Config.Info({ memory: { enabled: true } }) }),
+                        new Config.Document({ type: "document", info: new Config.Info({ memory: state.memory }) }),
                       ]),
                   }),
                 ),

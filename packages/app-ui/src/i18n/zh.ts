@@ -1689,7 +1689,7 @@ export const dict = {
   "settings.memory.reload": "重新加载笔记",
   "settings.memory.note.failed": "笔记修改未完成，已保留输入。请检查笔记后重试。",
   "settings.memory.enabled.description":
-    "关闭后不再记录新内容，新对话也不会带上笔记。已经留下的笔记仍保留在这里，直到你删除。",
+    "实验功能，默认关闭。关闭后不再记录新内容，新对话也不会带上笔记。已经留下的笔记仍保留在这里，直到你删除。",
   "settings.memory.tidy.title": "整理本项目的笔记",
   "settings.memory.tidy.description":
     "开一个对话，逐条对照项目核对笔记，过时的标出来，重复的合并。可为本次整理选择模型，也可沿用默认；最多用30万token，只有点击才会运行。",

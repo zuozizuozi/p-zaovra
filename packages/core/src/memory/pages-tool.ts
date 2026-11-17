@@ -20,7 +20,7 @@ const layer = Layer.effectDiscard(
     const tidy = yield* MemoryTidyStore.Service
     const config = yield* Config.Service
     const location = yield* Location.Service
-    if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
+    if (Config.latest(yield* config.entries(), "memory")?.enabled !== true) return
     const scope = yield* memory.scope({ project: location.project.id, directory: location.directory })
     yield* tools
       .register({
@@ -60,7 +60,7 @@ const layer = Layer.effectDiscard(
           execute: (input, context) =>
             Effect.gen(function* () {
               const target = input.layer === "user" ? Memory.Scope.user : scope
-              if (Config.latest(yield* config.entries(), "memory")?.enabled === false)
+              if (Config.latest(yield* config.entries(), "memory")?.enabled !== true)
                 return yield* new Tool.Failure({ message: "Memory is disabled." })
               if (input.action === "list") {
                 const words = MemoryStore.terms(input.query ?? "")

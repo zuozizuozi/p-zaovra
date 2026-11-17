@@ -130,7 +130,7 @@ const layer = Layer.effectDiscard(
           execute: (input, context) =>
             Effect.gen(function* () {
               const target = input.layer === "user" ? Memory.Scope.user : scope
-              const enabled = Config.latest(yield* config.entries(), "memory")?.enabled !== false
+              const enabled = Config.latest(yield* config.entries(), "memory")?.enabled === true
               return yield* tidy
                 .guarded(
                   { sessionID: context.sessionID, scope: target, enabled },

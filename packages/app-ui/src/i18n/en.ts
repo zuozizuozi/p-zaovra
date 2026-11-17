@@ -1875,7 +1875,7 @@ export const dict = {
   "settings.memory.reload": "Reload notes",
   "settings.memory.note.failed": "The note change was not completed. Your input is kept; check the note and try again.",
   "settings.memory.enabled.description":
-    "When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
+    "Experimental and off by default. When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
   "settings.memory.tidy.title": "Tidy this project's notes",
   "settings.memory.tidy.description":
     "Starts a conversation that checks each note against the project, marks what no longer holds and merges repeats. Choose a model for this run or keep the default. It stops at 300,000 tokens and only runs when you press the button.",

@@ -32,14 +32,22 @@ function toggle(action: string) {
   if (!control) throw new Error("Missing switch " + action)
   return control
 }
-async function mount() {
+async function mount(
+  initial: {
+    memory?: {
+      enabled?: boolean
+      taskSearch?: boolean
+      index?: { enabled?: boolean; maxLines?: number; maxBytes?: number }
+    }
+  } = {
+    memory: { enabled: true, taskSearch: true, index: { enabled: true, maxLines: 100, maxBytes: 8192 } },
+  },
+) {
   const [server, setServer] = createSignal("a")
   changeServer = setServer
   const endpoints = Object.fromEntries(
     ["a", "b"].map((name) => {
-      const [config, setConfig] = createSignal({
-        memory: { enabled: true, taskSearch: true, index: { enabled: true, maxLines: 100, maxBytes: 8192 } },
-      })
+      const [config, setConfig] = createSignal(initial)
       const client = createZaovraClient({
         baseUrl: `http://${name}.invalid`,
         throwOnError: true,
@@ -161,3 +169,17 @@ test("a late save failure from another server does not disable or alert the new 
   await until(() => calls.length === 2)
   expect(calls[1].server).toBe("b")
 })
+
+for (const initial of [{}, { memory: {} }, { memory: { enabled: false } }]) {
+  test(`memory defaults off without writing config: ${JSON.stringify(initial)}`, async () => {
+    await mount(initial)
+    expect(toggle("enabled").getAttribute("aria-checked")).toBe("false")
+    expect(toggle("search").hasAttribute("disabled") || toggle("search").getAttribute("aria-disabled") === "true").toBe(
+      true,
+    )
+    expect(calls).toHaveLength(0)
+    toggle("enabled").click()
+    await until(() => calls.length === 1 && toggle("enabled").getAttribute("aria-checked") === "true")
+    expect(calls[0].body).toEqual({ memory: { enabled: true } })
+  })
+}

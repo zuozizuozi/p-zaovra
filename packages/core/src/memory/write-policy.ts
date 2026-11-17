@@ -27,7 +27,7 @@ const layer = Layer.effect(
       allowed: (sessionID, author) =>
         Effect.gen(function* () {
           const entries = yield* config.entries()
-          if (Config.latest(entries, "memory")?.enabled === false) return false
+          if (Config.latest(entries, "memory")?.enabled !== true) return false
           const session = yield* sessions.get(sessionID)
           if (
             !session ||

@@ -62,7 +62,7 @@ const layer = Layer.effect(
       load: (request, previous) =>
         Effect.gen(function* () {
           const options = Config.latest(yield* config.entries(), "memory")
-          if (!request || options?.enabled === false || options?.taskSearch === false) return SystemContext.empty
+          if (!request || options?.enabled !== true || options?.taskSearch === false) return SystemContext.empty
           const cached = Schema.decodeUnknownOption(Snapshot)(previous)
           const read = Effect.gen(function* () {
             // The Session owns this persisted snapshot. Notes changing in another

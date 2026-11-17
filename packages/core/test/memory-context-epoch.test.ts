@@ -46,7 +46,18 @@ test("memory index stays local to an admitted epoch across another session and r
               state: path.join(temp.path, "state"),
             }),
           ],
-          [Config.node, Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed([]) }))],
+          [
+            Config.node,
+            Layer.succeed(
+              Config.Service,
+              Config.Service.of({
+                entries: () =>
+                  Effect.succeed([
+                    new Config.Document({ type: "document", info: new Config.Info({ memory: { enabled: true } }) }),
+                  ]),
+              }),
+            ),
+          ],
         ],
       ),
     )

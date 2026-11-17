@@ -74,7 +74,7 @@ export const layer = Layer.effect(
       const scope = yield* memory.scope({ project: location.project.id, directory: location.directory })
       if (
         location.workspaceID ||
-        Config.latest(yield* config.entries(), "memory")?.enabled === false ||
+        Config.latest(yield* config.entries(), "memory")?.enabled !== true ||
         !(yield* memory.canAutomate(scope))
       )
         return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
