@@ -40,6 +40,35 @@ function server() {
 
 const connected = { type: "server.connected", properties: { replay: "initial", sync: 1 } }
 
+test("ordered snapshots request real turn boundaries and older pages inherit the opaque cursor mode", async () => {
+  const { kernel, commit, prompt } = server()
+  Array.from({ length: 40 }, (_, index) => commit("prompted", prompt(`msg_page_${index}`)))
+  const requests: { limit?: number; cursor?: string; boundary?: string; order?: string }[] = []
+  const client = {
+    ...kernel.client,
+    v2: {
+      ...kernel.client.v2,
+      session: {
+        ...kernel.client.v2.session,
+        messages: (input: (typeof requests)[number]) => {
+          requests.push(input)
+          return kernel.client.v2.session.messages(input)
+        },
+      },
+    },
+  }
+  const store = createServerSession(client as unknown as ZaovraClient)
+  store.apply(connected)
+  await store.sync(sessionID)
+  expect(requests[0]).toMatchObject({ boundary: "turn", order: "desc" })
+  expect(requests[0]?.cursor).toBeUndefined()
+  await store.history.loadMore(sessionID, 10)
+  expect(requests).toHaveLength(2)
+  expect(requests[1]?.cursor).toBeDefined()
+  expect(requests[1]?.boundary).toBeUndefined()
+  expect(requests[1]?.order).toBeUndefined()
+})
+
 describe("execution status", () => {
   test("an answer that a session is idle outranks an older report that it started", async () => {
     const { kernel } = server()

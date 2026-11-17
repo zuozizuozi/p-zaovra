@@ -59,6 +59,12 @@ A later snapshot is accepted only if its watermark is not behind `applied`. The 
 
 ### Older pages
 
+The ordered client's initial message request sets `boundary=turn`. The message limit is then a target count: the kernel extends a descending page back through the nearest real user message, or an ascending page up to (but not including) the next real user message. A single long turn may exceed the limit. Shell records, synthetic notices and system messages do not start a user turn. A legacy prefix without any user is returned without inventing one.
+
+These are contiguous chronological segments, not causal regrouping: a late background completion keeps its original `turn`, even when its source is on another page. Rows are never moved or assigned new ownership for pagination. Page boundaries, rows, pending inputs and the watermark are read in the same transaction.
+
+The opaque previous/next cursors retain order and boundary mode. Follow-up requests supply only the cursor and optional limit; combining a cursor with order or boundary is rejected. Calls without `boundary=turn` keep the original hard message limit, and old cursors remain valid. The client retains its limited root backfill for older servers that ignore the new parameter.
+
 The client holds a contiguous run of the newest messages and keeps the last 1024 applied durable events. An older page with watermark `w` is merged like this:
 
 1. `w > applied`: the page has seen events the client has not applied. The client catches up through `session.history` first. A page never moves `applied`.

@@ -15880,8 +15880,9 @@ export type V2SessionMessagesData = {
   query?: {
     limit?: number
     order?: "asc" | "desc"
+    boundary?: "turn"
     /**
-     * Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response. Do not combine with order.
+     * Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response. Do not combine with order or boundary.
      */
     cursor?: string
   }

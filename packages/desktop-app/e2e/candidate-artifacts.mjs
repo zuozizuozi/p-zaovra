@@ -8,6 +8,17 @@ import { _electron } from "playwright-core"
 // The launch binding contains only a loopback credential, never an upstream key.
 const binding = JSON.parse(await readFile(process.argv[2], "utf8"))
 const root = resolve(binding.output)
+const profileRoot = binding.restoreFrom ? resolve(binding.restoreFrom) : root
+if (binding.restoreFrom) {
+  assert(profileRoot.startsWith(resolve("F:/Zaovra-研发记录/逐次记录") + "\\"))
+  assert.notEqual(profileRoot, root, "restore evidence must use a fresh output directory")
+  const previous = JSON.parse(await readFile(join(profileRoot, "result.json"), "utf8"))
+  assert(previous.phases.some((phase) => phase.phase === "artifacts" && phase.pass && phase.closed))
+  assert(
+    previous.phases.every((phase) => phase.closed),
+    "previous test instances must have closed",
+  )
+}
 const endpoint = new URL(binding.baseURL)
 assert(endpoint.protocol === "http:" && endpoint.hostname === "127.0.0.1" && endpoint.pathname === "/v1")
 assert(binding.sourceSHA.match(/^[a-f0-9]{40}$/) && binding.key && binding.model)
@@ -39,7 +50,7 @@ for (const [key, leaf] of Object.entries({
   TMPDIR: "temp",
   ZAOVRA_TEST_MANAGED_CONFIG_DIR: "managed",
 })) {
-  env[key] = join(root, leaf)
+  env[key] = join(profileRoot, leaf)
   await mkdir(env[key], { recursive: true })
 }
 Object.assign(env, {
@@ -50,7 +61,7 @@ Object.assign(env, {
   ALL_PROXY: "http://127.0.0.1:9",
   NO_PROXY: "127.0.0.1,localhost,::1",
 })
-const profile = join(root, "temp", "profile")
+const profile = join(profileRoot, "temp", "profile")
 const config = join(profile, "desktop", "backend", "config", "zaovra")
 const modelConfig = JSON.stringify(
   {
@@ -90,14 +101,20 @@ const modelConfig = JSON.stringify(
 )
 
 // Only the provider is scripted. Artifact generation, verification, publication and UI use the packaged application.
-const result = { sourceSHA: binding.sourceSHA, version: binding.version, phases: [], pass: false }
+const result = {
+  sourceSHA: binding.sourceSHA,
+  version: binding.version,
+  restoreFrom: binding.restoreFrom,
+  phases: [],
+  pass: false,
+}
 const complete = binding.commands
   ? `ARTIFACT_DELIVERY: 先完成 ${binding.commands} 个独立脚本步骤，每步在 .history-fixture 中保存对应结果，再运行 generate.mjs 直接生成 PDF、PNG、SVG 并列出成果。不调用 write 或 publish_artifact。`
   : binding.direct
     ? "ARTIFACT_DELIVERY: 用项目中的脚本直接生成 PDF、PNG、SVG 并列出成果，不调用 write 或 publish_artifact。old.pdf 是旧参考文件，不是本轮新成果。"
     : "ARTIFACT_DELIVERY: 用项目中的生成和校验脚本生成 PDF、PNG、SVG 三个候选，运行真实检查，再用同一检查依次发布三个文件，最后列出成果。"
 try {
-  for (const phase of ["bootstrap", "artifacts", "restore"]) {
+  for (const phase of binding.restoreFrom ? ["restore"] : ["bootstrap", "artifacts", "restore"]) {
     const item = { phase, errors: [], closed: false }
     result.phases.push(item)
     let desktop, page, child, db
@@ -128,7 +145,7 @@ try {
         assert(
           resolve(dir)
             .toLowerCase()
-            .startsWith(root.toLowerCase() + "\\"),
+            .startsWith(profileRoot.toLowerCase() + "\\"),
         )
       page = await desktop.firstWindow({ timeout: 90000 })
       item.messagePages = []
@@ -219,6 +236,12 @@ try {
           count: messages.length,
           userID: user[0].id,
           shellCount: messages.filter((message) => message.type === "shell").length,
+        }
+        if (binding.restoreFrom) {
+          const snapshot = item.messagePages.find((page) => new URL(page.url).searchParams.get("boundary") === "turn")
+          assert(snapshot, "cold open requests a turn page")
+          assert.equal(snapshot.count, messages.length, "one chronological user turn is loaded completely")
+          assert(snapshot.types.includes("user"), "cold snapshot includes the real user")
         }
         for (let step = 0; step < binding.commands; step++)
           assert.equal(await readFile(join(project, ".history-fixture", `step_${step}.txt`), "utf8"), `STEP_${step}`)

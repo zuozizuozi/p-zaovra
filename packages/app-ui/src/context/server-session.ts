@@ -1174,7 +1174,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         v2Info.get(sessionID) ??
           (options?.retry ?? retry)(() => client.v2.session.get({ sessionID })).then((result) => result.data?.data),
         (options?.retry ?? retry)(() =>
-          client.v2.session.messages({ sessionID, limit: pageLimit(limit), order: "desc" }),
+          client.v2.session.messages({ sessionID, limit: pageLimit(limit), order: "desc", boundary: "turn" }),
         ),
       ])
       if (!info) throw sessionNotFoundError(sessionID)

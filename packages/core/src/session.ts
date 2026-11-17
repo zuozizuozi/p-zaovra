@@ -7,7 +7,7 @@ import { SessionOutcome } from "./session/outcome"
 import type { Info } from "@zaovra-ai/schema/session-outcome"
 import { Config } from "./config"
 import { ListAnchor } from "@zaovra-ai/schema/session"
-import { and, asc, desc, eq, gt, isNull, like, lt, or, sql, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, isNull, like, lt, or, sql, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -167,6 +167,7 @@ export interface Interface {
     sessionID: SessionSchema.ID
     limit?: number
     order?: "asc" | "desc"
+    boundary?: "turn"
     cursor?: {
       id: SessionMessage.ID
       direction: "previous" | "next"
@@ -380,7 +381,44 @@ const layer = Layer.effect(
         .where(where)
         .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
       const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(Effect.orDie)
-      return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
+      const complete = yield* Effect.gen(function* () {
+        const last = rows.at(-1)
+        if (input.boundary !== "turn" || input.limit === undefined || !last || rows.length < input.limit) return rows
+        if (order === "desc" && last.type === "user") return rows
+        // A turn page is a contiguous timeline segment. Background messages keep their own causal turn.
+        const user = yield* db
+          .select({ seq: SessionMessageTable.seq })
+          .from(SessionMessageTable)
+          .where(
+            and(
+              where,
+              eq(SessionMessageTable.type, "user"),
+              order === "asc" ? gt(SessionMessageTable.seq, last.seq) : lt(SessionMessageTable.seq, last.seq),
+            ),
+          )
+          .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
+          .get()
+          .pipe(Effect.orDie)
+        const rest = yield* db
+          .select()
+          .from(SessionMessageTable)
+          .where(
+            and(
+              where,
+              order === "asc" ? gt(SessionMessageTable.seq, last.seq) : lt(SessionMessageTable.seq, last.seq),
+              user
+                ? order === "asc"
+                  ? lt(SessionMessageTable.seq, user.seq)
+                  : gte(SessionMessageTable.seq, user.seq)
+                : undefined,
+            ),
+          )
+          .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
+          .all()
+          .pipe(Effect.orDie)
+        return [...rows, ...rest]
+      })
+      return yield* Effect.forEach(direction === "previous" ? complete.toReversed() : complete, decode)
     })
     const interruptResources = (sessionID: SessionSchema.ID) =>
       Effect.all(
@@ -837,7 +875,11 @@ const layer = Layer.effect(
       messages: Effect.fn("V2Session.messages")(function* (input) {
         const restore = live.capture()
         yield* result.get(input.sessionID)
-        return restore(yield* readMessages(input))
+        return restore(
+          yield* input.boundary === "turn"
+            ? db.transaction(() => readMessages(input)).pipe(Effect.catchTag("SqlError", Effect.die))
+            : readMessages(input),
+        )
       }),
       page: Effect.fn("V2Session.page")(function* (input) {
         const restore = live.capture()

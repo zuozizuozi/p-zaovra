@@ -8226,16 +8226,25 @@ export type MessagesListInput = {
   readonly limit?: {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
+    readonly boundary?: "turn" | undefined
     readonly cursor?: string | undefined
   }["limit"]
   readonly order?: {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
+    readonly boundary?: "turn" | undefined
     readonly cursor?: string | undefined
   }["order"]
+  readonly boundary?: {
+    readonly limit?: number | undefined
+    readonly order?: "asc" | "desc" | undefined
+    readonly boundary?: "turn" | undefined
+    readonly cursor?: string | undefined
+  }["boundary"]
   readonly cursor?: {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
+    readonly boundary?: "turn" | undefined
     readonly cursor?: string | undefined
   }["cursor"]
 }

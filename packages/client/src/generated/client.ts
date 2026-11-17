@@ -977,7 +977,12 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/message`,
-            query: { limit: input["limit"], order: input["order"], cursor: input["cursor"] },
+            query: {
+              limit: input["limit"],
+              order: input["order"],
+              boundary: input["boundary"],
+              cursor: input["cursor"],
+            },
             successStatus: 200,
             declaredStatuses: [400, 404, 500, 401],
             empty: false,

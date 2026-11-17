@@ -9,15 +9,19 @@ export const SessionMessagesQuery = Schema.Struct({
   limit: Schema.optional(
     Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(200)),
   ).annotate({
-    description: "Maximum number of messages to return. When omitted, the endpoint returns its default page size.",
+    description: "Maximum number of messages, or target count with boundary=turn. Defaults to the endpoint page size.",
   }),
   order: Schema.optional(Schema.Union([Schema.Literal("asc"), Schema.Literal("desc")])).annotate({
     description: "Message order for the first page. Use desc for newest first or asc for oldest first.",
   }),
+  boundary: Schema.optional(Schema.Literal("turn")).annotate({
+    description:
+      "Extend the page in its read direction to a real user boundary, even beyond limit. Preserves chronological order and message ownership. Set only on the first page; subsequent cursors retain this mode.",
+  }),
   cursor: Schema.optional(
     Schema.String.annotate({
       description:
-        "Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response. Do not combine with order.",
+        "Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response. Do not combine with order or boundary.",
     }),
   ),
 }).annotate({ identifier: "SessionMessagesQuery" })

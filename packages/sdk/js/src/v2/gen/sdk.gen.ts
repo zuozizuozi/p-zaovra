@@ -4326,6 +4326,7 @@ export class Session extends HeyApiClient {
       sessionID: string
       limit?: number
       order?: "asc" | "desc"
+      boundary?: "turn"
       cursor?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -4338,6 +4339,7 @@ export class Session extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "limit" },
             { in: "query", key: "order" },
+            { in: "query", key: "boundary" },
             { in: "query", key: "cursor" },
           ],
         },

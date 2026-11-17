@@ -618,12 +618,13 @@ type Endpoint5_0Input = {
   readonly sessionID: Endpoint5_0Request["params"]["sessionID"]
   readonly limit?: Endpoint5_0Request["query"]["limit"]
   readonly order?: Endpoint5_0Request["query"]["order"]
+  readonly boundary?: Endpoint5_0Request["query"]["boundary"]
   readonly cursor?: Endpoint5_0Request["query"]["cursor"]
 }
 const Endpoint5_0 = (raw: RawClient["server.message"]) => (input: Endpoint5_0Input) =>
   raw["session.messages"]({
     params: { sessionID: input["sessionID"] },
-    query: { limit: input["limit"], order: input["order"], cursor: input["cursor"] },
+    query: { limit: input["limit"], order: input["order"], boundary: input["boundary"], cursor: input["cursor"] },
   }).pipe(Effect.mapError(mapClientError))
 
 const adaptGroup5 = (raw: RawClient["server.message"]) => ({ list: Endpoint5_0(raw) })

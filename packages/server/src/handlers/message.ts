@@ -11,13 +11,14 @@ const Cursor = Schema.Struct({
   id: SessionMessage.ID,
   order: Schema.Union([Schema.Literal("asc"), Schema.Literal("desc")]),
   direction: Schema.Union([Schema.Literal("previous"), Schema.Literal("next")]),
+  boundary: Schema.optional(Schema.Literal("turn")),
 })
 
 const decodeCursor = Schema.decodeUnknownSync(Cursor)
 
 const cursor = {
-  encode(message: SessionMessage.Message, order: "asc" | "desc", direction: "previous" | "next") {
-    return Buffer.from(JSON.stringify({ id: message.id, order, direction })).toString("base64url")
+  encode(message: SessionMessage.Message, order: "asc" | "desc", direction: "previous" | "next", boundary?: "turn") {
+    return Buffer.from(JSON.stringify({ id: message.id, order, direction, boundary })).toString("base64url")
   },
   decode(input: string) {
     return decodeCursor(JSON.parse(Buffer.from(input, "base64url").toString("utf8")))
@@ -33,16 +34,20 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
       Effect.fn(function* (ctx) {
         if (ctx.query.cursor && ctx.query.order !== undefined)
           return yield* new InvalidCursorError({ message: "Cursor cannot be combined with order" })
+        if (ctx.query.cursor && ctx.query.boundary !== undefined)
+          return yield* new InvalidCursorError({ message: "Cursor cannot be combined with boundary" })
         const decoded = yield* Effect.try({
           try: () => (ctx.query.cursor ? cursor.decode(ctx.query.cursor) : undefined),
           catch: () => new InvalidCursorError({ message: "Invalid cursor" }),
         })
         const order = decoded?.order ?? ctx.query.order ?? "desc"
+        const boundary = decoded?.boundary ?? ctx.query.boundary
         const page = yield* session
           .page({
             sessionID: ctx.params.sessionID,
             limit: ctx.query.limit ?? DefaultMessagesLimit,
             order,
+            boundary,
             cursor: decoded ? { id: decoded.id, direction: decoded.direction } : undefined,
           })
           .pipe(
@@ -71,8 +76,8 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
         return {
           data: page.messages,
           cursor: {
-            previous: first ? cursor.encode(first, order, "previous") : undefined,
-            next: last ? cursor.encode(last, order, "next") : undefined,
+            previous: first ? cursor.encode(first, order, "previous", boundary) : undefined,
+            next: last ? cursor.encode(last, order, "next", boundary) : undefined,
           },
           watermark: page.watermark,
           execution: page.execution,
