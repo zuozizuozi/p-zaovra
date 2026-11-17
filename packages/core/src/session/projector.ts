@@ -11,6 +11,7 @@ import { SessionV1 } from "../v1/session"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
+import { ToolDisposition } from "./tool-disposition"
 import { SessionMessageTurn } from "./message-turn"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
@@ -133,6 +134,28 @@ function run(db: DatabaseService, event: SessionEvent.Event) {
     }
     const appendMessage = (message: SessionMessage.Message) => insertMessage(db, event, message)
     const adapter: SessionMessageUpdater.Adapter = {
+      getFailedAssistants(turn) {
+        return db
+          .select()
+          .from(SessionMessageTable)
+          .where(
+            and(
+              eq(SessionMessageTable.session_id, event.data.sessionID),
+              eq(SessionMessageTable.type, "assistant"),
+              turn ? sql`json_extract(${SessionMessageTable.data}, '$.turn') = ${turn}` : undefined,
+              sql`exists (select 1 from json_each(${SessionMessageTable.data}, '$.content') tool where json_extract(tool.value, '$.type') = 'tool' and json_extract(tool.value, '$.state.status') = 'error')`,
+            ),
+          )
+          .all()
+          .pipe(
+            Effect.orDie,
+            Effect.map((rows) =>
+              rows
+                .map(decodeRow)
+                .filter((message): message is SessionMessage.Assistant => message.type === "assistant"),
+            ),
+          )
+      },
       getTurn() {
         return db
           .select()
@@ -499,10 +522,14 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.Tool.Progress, (event) => run(db, event))
     yield* events.project(SessionEvent.Tool.Success, (event) => run(db, event))
     yield* events.project(SessionEvent.Tool.Failed, (event) => run(db, event))
+    yield* events.project(SessionEvent.Tool.Disposition, (event) => run(db, event))
     yield* events.project(SessionEvent.Reasoning.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Reasoning.Ended, (event) => run(db, event))
     // yield* events.project(SessionEvent.Retried, (event) => run(db, event))
     yield* events.project(SessionEvent.Compaction.Ended, (event) => run(db, event))
+    yield* events.project(SessionEvent.RevertEvent.Staged, (event) => run(db, event))
+    yield* events.project(SessionEvent.RevertEvent.Cleared, (event) => run(db, event))
+    yield* events.project(SessionEvent.RevertEvent.Committed, (event) => run(db, event))
     yield* events.project(SessionEvent.RevertEvent.Staged, (event) =>
       db
         .update(SessionTable)
@@ -562,6 +589,7 @@ const layer = Layer.effectDiscard(
         yield* SessionContextEpoch.reset(db, event.data.sessionID)
       }),
     )
+    yield* Effect.acquireRelease(ToolDisposition.listen(db, events), (unsubscribe) => unsubscribe)
   }),
 )
 

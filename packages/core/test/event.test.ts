@@ -84,6 +84,65 @@ const it = testEffect(
 const itWithoutLocation = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node])))
 
 describe("EventV2", () => {
+  it.effect("limits committed-only observers to fresh live commits and preserves default observers", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const ordinary = new Array<string>()
+      const committed = new Array<string>()
+      yield* events.listen((event) => Effect.sync(() => ordinary.push(event.id)))
+      const unsubscribe = yield* events.listen(
+        (event) =>
+          Effect.gen(function* () {
+            const stored = yield* database.db
+              .select({ id: EventTable.id })
+              .from(EventTable)
+              .where(eq(EventTable.id, event.id))
+              .get()
+              .pipe(Effect.orDie)
+            expect(stored?.id).toBe(event.id)
+            committed.push(event.id)
+          }),
+        { replay: false },
+      )
+      const first = yield* events.publish(SyncMessage, { id: "fresh", text: "one" })
+      const ephemeral = yield* events.publish(Message, { text: "ephemeral" })
+      const aggregateID = Session.ID.create()
+      const replayed = {
+        id: EventV2.ID.create(),
+        type: EventV2.versionedType(DurableMessage.type, 1),
+        aggregateID,
+        seq: 0,
+        data: durableData(aggregateID, "replay"),
+      }
+      yield* events.replayAll([replayed], { publish: true })
+      yield* events.replay(replayed, { publish: true })
+      const duplicate = yield* events.publish(SyncMessage, first.data, { id: first.id }).pipe(Effect.exit)
+      expect(Exit.isFailure(duplicate)).toBe(true)
+      expect(ordinary).toEqual([first.id, ephemeral.id, replayed.id])
+      expect(committed).toEqual([first.id])
+      const second = yield* events.publish(SyncMessage, { id: "fresh", text: "two" })
+      expect(committed).toEqual([first.id, second.id])
+      yield* unsubscribe
+      yield* events.publish(SyncMessage, { id: "fresh", text: "three" })
+      expect(committed).toEqual([first.id, second.id])
+    }),
+  )
+
+  it.effect("does not notify committed-only observers when a source transaction rolls back", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const committed = new Array<string>()
+      yield* events.listen((event) => Effect.sync(() => committed.push(event.id)), { replay: false })
+      yield* events.project(SyncMessage, () => Effect.die("source rollback"))
+      const result = yield* events.publish(SyncMessage, { id: "rollback", text: "not committed" }).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(committed).toEqual([])
+      expect(yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)).toEqual([])
+    }),
+  )
+
   it.effect("publishes events with the current location", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service
@@ -478,9 +537,9 @@ describe("EventV2", () => {
           Stream.runCollect,
           Effect.forkScoped,
         )
-      yield* Deferred.await(observed)
-      // Let the reader exhaust its local history and enter the notification wait.
-      yield* Effect.sleep("50 millis")
+        yield* Deferred.await(observed)
+        // Let the reader exhaust its local history and enter the notification wait.
+        yield* Effect.sleep("50 millis")
         yield* EventV2.Service.use((writer) =>
           writer.publish(DurableMessage, durableData(aggregateID, "external")),
         ).pipe(Effect.provide(EventV2.layerWith({})))

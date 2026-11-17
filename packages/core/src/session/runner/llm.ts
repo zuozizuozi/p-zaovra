@@ -558,6 +558,7 @@ const layer = Layer.effect(
             assistantMessageID: message.id,
             callID: tool.id,
             error: { type: "unknown", message: "Tool execution interrupted" },
+            settlement: "interrupted",
             provider: {
               executed: tool.provider?.executed === true,
               ...(tool.provider?.metadata === undefined ? {} : { metadata: tool.provider.metadata }),
@@ -1835,7 +1836,7 @@ const layer = Layer.effect(
           }
           if (settled._tag === "Failure" && isUserDeclined(settled.cause)) {
             yield* FiberSet.clear(toolFibers)
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted", false, "interrupted"))
             yield* withPublication(
               settleInterruptedTurn(session.id, {
                 publisher,
@@ -1850,7 +1851,7 @@ const layer = Layer.effect(
             (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
           ) {
             yield* FiberSet.clear(toolFibers)
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted", false, "interrupted"))
             yield* withPublication(
               settleInterruptedTurn(session.id, {
                 publisher,

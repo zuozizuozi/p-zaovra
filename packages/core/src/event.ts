@@ -133,8 +133,8 @@ export interface Interface {
   readonly all: () => Stream.Stream<Payload>
   readonly recentAfter: (id?: ID) => { readonly events: ReadonlyArray<Payload>; readonly complete: boolean }
   readonly durable: (input: { readonly aggregateID: string; readonly after?: number }) => Stream.Stream<Payload>
-  /** @deprecated Use `all()` and consume the returned stream. */
-  readonly listen: (listener: Subscriber) => Effect.Effect<Unsubscribe>
+  /** Scoped consumers can exclude replay, ephemeral notifications and duplicate commits with replay: false. */
+  readonly listen: (listener: Subscriber, options?: { readonly replay?: boolean }) => Effect.Effect<Unsubscribe>
   /** Register a projector for the lifetime of the current scope. */
   readonly project: <D extends Definition>(
     definition: D,
@@ -184,7 +184,7 @@ export const layerWith = (options?: LayerOptions) =>
       const projectors = new Map<string, Subscriber[]>()
       const recent: Payload[] = []
       // TODO: Bind durable projectors to exact type+version before supporting incompatible historical payloads.
-      const listeners = new Array<Subscriber>()
+      const listeners = new Array<{ listener: Subscriber; liveOnly: boolean }>()
       const { db } = yield* Database.Service
 
       const getOrCreate = (definition: Definition) =>
@@ -392,7 +392,7 @@ export const layerWith = (options?: LayerOptions) =>
                   version: definition.durable.version,
                 },
               }
-              yield* notify(event as Payload, true)
+              yield* notify(event as Payload, true, true)
               return event
             }
           }
@@ -409,14 +409,14 @@ export const layerWith = (options?: LayerOptions) =>
           ),
         )
 
-      function notify(event: Payload, isolateListeners: boolean) {
+      function notify(event: Payload, isolateListeners: boolean, liveCommitted = false) {
         return Effect.gen(function* () {
           recent.push(event)
           if (recent.length > 2048) recent.splice(0, recent.length - 2048)
           // A listener can unregister itself during this notification without skipping its neighbor.
           yield* Effect.forEach(
-            [...listeners],
-            (listener) => (isolateListeners ? observe(event, listener) : listener(event)),
+            listeners.filter((entry) => !entry.liveOnly || liveCommitted),
+            ({ listener }) => (isolateListeners ? observe(event, listener) : listener(event)),
             { discard: true },
           )
           const typed = pubsub.typed.get(event.type)
@@ -616,11 +616,12 @@ export const layerWith = (options?: LayerOptions) =>
           }),
         )
 
-      const listen = (listener: Subscriber): Effect.Effect<Unsubscribe> =>
+      const listen = (listener: Subscriber, options?: { readonly replay?: boolean }): Effect.Effect<Unsubscribe> =>
         Effect.sync(() => {
-          listeners.push(listener)
+          const entry = { listener, liveOnly: options?.replay === false }
+          listeners.push(entry)
           return Effect.sync(() => {
-            const index = listeners.indexOf(listener)
+            const index = listeners.indexOf(entry)
             if (index >= 0) listeners.splice(index, 1)
           })
         })

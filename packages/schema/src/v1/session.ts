@@ -1,5 +1,6 @@
 export * as SessionV1 from "./session"
 
+import { SessionToolDisposition } from "../session-tool-disposition"
 import { Effect, Schema, Types } from "effect"
 import { define, inventory } from "../event"
 import { FileDiff } from "../file-diff"
@@ -318,6 +319,8 @@ export const ToolPart = Schema.Struct({
   callID: Schema.String,
   tool: Schema.String,
   state: ToolState,
+  settledSeq: NonNegativeInt.pipe(optional),
+  failureDisposition: Schema.optional(SessionToolDisposition.Stored),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
 }).annotate({ identifier: "ToolPart" })
 export type ToolPart = Omit<Types.DeepMutable<Schema.Schema.Type<typeof ToolPart>>, "state"> & {

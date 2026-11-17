@@ -1,6 +1,7 @@
 import { castDraft, produce, type WritableDraft } from "immer"
 import { Effect } from "effect"
 import { SessionEvent } from "./session-event"
+import { SessionToolDisposition } from "./session-tool-disposition"
 import { SessionMessage } from "./session-message"
 
 export type MemoryState = {
@@ -8,6 +9,8 @@ export type MemoryState = {
 }
 
 export interface Adapter {
+  /** Failed rows in one authoritative turn; omit the turn only for structural reverts. */
+  readonly getFailedAssistants: (turn?: SessionMessage.ID) => Effect.Effect<SessionMessage.Assistant[]>
   /** The turn of the newest message, which the next non-user message continues. */
   readonly getTurn: () => Effect.Effect<SessionMessage.ID | undefined>
   /** The turn a given message belongs to. A user message is its own turn, recorded or not. */
@@ -29,6 +32,16 @@ export function memory(state: MemoryState): Adapter {
     state.messages.findLastIndex((message) => message.type === "shell" && message.callID === callID)
 
   return {
+    getFailedAssistants(turn) {
+      return Effect.sync(() =>
+        state.messages.filter(
+          (message): message is SessionMessage.Assistant =>
+            message.type === "assistant" &&
+            (turn === undefined || message.turn === turn) &&
+            message.content.some((part) => part.type === "tool" && part.state.status === "error"),
+        ),
+      )
+    },
     getTurn() {
       return Effect.sync(() => state.messages.at(-1)?.turn)
     },
@@ -88,7 +101,7 @@ export function memory(state: MemoryState): Adapter {
   }
 }
 
-export function update(source: Adapter, event: SessionEvent.Event) {
+function project(source: Adapter, event: SessionEvent.Event) {
   // Every new message records where it sits in the transcript and which user message it belongs to.
   // A user message starts its own turn; a background completion returns to the turn of the message
   // it names as its source (the task it reports on); anything else continues the turn of the
@@ -317,6 +330,35 @@ export function update(source: Adapter, event: SessionEvent.Event) {
           }
         })
       },
+      "session.next.tool.disposition": (event) =>
+        Effect.forEach(
+          event.data.reports,
+          (report) =>
+            updateOwnedAssistant(SessionMessage.ID.make(report.assistantMessageID), (draft) => {
+              const tool = latestTool(draft, report.callID)
+              const current = SessionToolDisposition.read(tool?.failureDisposition)
+              if (
+                !event.durable ||
+                event.durable.seq <= report.basisSeq ||
+                !SessionToolDisposition.read(report) ||
+                !tool ||
+                tool.state.status !== "error" ||
+                !current ||
+                report.sessionID !== event.data.sessionID ||
+                report.turnID !== draft.turn ||
+                report.assistantMessageID !== draft.id ||
+                current.sessionID !== report.sessionID ||
+                current.assistantMessageID !== report.assistantMessageID ||
+                current.turnID !== report.turnID ||
+                current.callID !== report.callID ||
+                current.basisSeq !== report.basisSeq ||
+                (draft.seq ?? -1) < 0
+              )
+                return
+              tool.failureDisposition = castDraft(report)
+            }),
+          { discard: true },
+        ),
       "session.next.tool.input.started": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
           draft.content.push(
@@ -375,6 +417,7 @@ export function update(source: Adapter, event: SessionEvent.Event) {
               resultMetadata: event.data.provider.metadata,
             }
             match.time.completed = event.data.timestamp
+            if (event.durable) match.settledSeq = event.durable.seq
             match.state = castDraft(
               SessionMessage.ToolStateCompleted.make({
                 status: "completed",
@@ -398,6 +441,8 @@ export function update(source: Adapter, event: SessionEvent.Event) {
               resultMetadata: event.data.provider.metadata,
             }
             match.time.completed = event.data.timestamp
+            if (event.durable) match.settledSeq = event.durable.seq
+            if (event.data.settlement) match.settlement = event.data.settlement
             match.state = castDraft(
               SessionMessage.ToolStateError.make({
                 status: "error",
@@ -475,3 +520,68 @@ export function update(source: Adapter, event: SessionEvent.Event) {
 }
 
 export * as SessionMessageUpdater from "./session-message-updater"
+
+// Invalidation is projection only. Business conclusions come from Core after the source commit.
+const invalidates = new Set<string>([
+  "session.next.step.started",
+  "session.next.step.ended",
+  "session.next.step.failed",
+  "session.next.tool.input.started",
+  "session.next.tool.input.ended",
+  "session.next.tool.called",
+  "session.next.tool.success",
+  "session.next.tool.failed",
+  "session.next.text.ended",
+  "session.next.shell.ended",
+  "session.next.prompted",
+  "session.next.context.updated",
+  "session.next.revert.staged",
+  "session.next.revert.cleared",
+  "session.next.revert.committed",
+])
+
+export function update(source: Adapter, event: SessionEvent.Event) {
+  return Effect.gen(function* () {
+    yield* project(source, event)
+    if (!event.durable || !invalidates.has(event.type)) return
+    const turn =
+      "assistantMessageID" in event.data
+        ? yield* source.getTurnOf(event.data.assistantMessageID)
+        : event.type === "session.next.shell.ended"
+          ? (yield* source.getCurrentShell(event.data.callID))?.turn
+          : yield* source.getTurn()
+    const reverting = event.type.startsWith("session.next.revert.")
+    if (!turn && !reverting) return
+    const failed = yield* source.getFailedAssistants(reverting ? undefined : turn)
+    for (const message of failed) {
+      if (!message.turn || (!event.type.startsWith("session.next.revert.") && message.turn !== turn)) continue
+      yield* source.updateAssistant(
+        produce(message, (draft) => {
+          for (const tool of draft.content) {
+            if (tool.type !== "tool" || tool.state.status !== "error") continue
+            const current = SessionToolDisposition.read(tool.failureDisposition)
+            if (
+              current &&
+              current.sessionID === event.data.sessionID &&
+              current.assistantMessageID === message.id &&
+              current.turnID === message.turn &&
+              current.callID === tool.id &&
+              current.basisSeq >= event.durable!.seq
+            )
+              continue
+            tool.failureDisposition = {
+              version: 1,
+              sessionID: event.data.sessionID,
+              turnID: message.turn!,
+              assistantMessageID: message.id,
+              callID: tool.id,
+              basisSeq: event.durable!.seq,
+              status: "unknown",
+              reason: "invalidated",
+            }
+          }
+        }),
+      )
+    }
+  })
+}

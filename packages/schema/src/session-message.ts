@@ -1,6 +1,7 @@
 export * as SessionMessage from "./session-message"
 
 import { Schema } from "effect"
+import { SessionToolDisposition } from "./session-tool-disposition"
 import { SessionHostState } from "./session-host-state"
 import { SessionOutcome } from "./session-outcome"
 import { optional } from "./schema"
@@ -164,6 +165,9 @@ export const AssistantTool = Schema.Struct({
     resultMetadata: ProviderMetadata.pipe(optional),
   }).pipe(optional),
   state: ToolState,
+  settledSeq: NonNegativeInt.pipe(optional),
+  settlement: Schema.Literal("interrupted").pipe(optional),
+  failureDisposition: SessionToolDisposition.Stored.pipe(optional),
   time: Schema.Struct({
     created: DateTimeUtcFromMillis,
     ran: DateTimeUtcFromMillis.pipe(optional),

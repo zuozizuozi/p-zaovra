@@ -270,6 +270,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
   const failUnsettledTools = Effect.fn("SessionRunner.failUnsettledTools")(function* (
     message: string,
     hostedOnly = false,
+    settlement?: "interrupted",
   ) {
     for (const [callID, tool] of tools) {
       if (tool.settled || (hostedOnly && !tool.providerExecuted)) continue
@@ -280,6 +281,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         assistantMessageID: tool.assistantMessageID,
         callID,
         error: { type: "unknown", message },
+        ...(settlement ? { settlement } : {}),
         provider: {
           executed: tool.providerExecuted,
           ...(tool.providerMetadata === undefined ? {} : { metadata: tool.providerMetadata }),

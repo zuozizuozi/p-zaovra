@@ -1,6 +1,7 @@
 export * as SessionEvent from "./session-event"
 
 import { Schema } from "effect"
+import { SessionToolDisposition } from "./session-tool-disposition"
 import { SessionHostState } from "./session-host-state"
 import { SessionOutcome } from "./session-outcome"
 import { optional } from "./schema"
@@ -350,6 +351,13 @@ export namespace Reasoning {
 }
 
 export namespace Tool {
+  export const Disposition = Event.define({
+    type: "session.next.tool.disposition",
+    ...options,
+    schema: { ...Base, reports: Schema.Array(SessionToolDisposition.Info) },
+  })
+  export type Disposition = typeof Disposition.Type
+
   const ToolBase = {
     ...Base,
     assistantMessageID: SessionMessage.ID,
@@ -440,6 +448,8 @@ export namespace Tool {
     ...options,
     schema: {
       ...ToolBase,
+      // Set only by host interruption settlement, never inferred from provider/tool error text.
+      settlement: Schema.Literal("interrupted").pipe(optional),
       error: UnknownError,
       result: Schema.Unknown.pipe(optional),
       provider: Schema.Struct({
@@ -584,6 +594,7 @@ export const DurableDefinitions = Event.inventory(
   Tool.Progress,
   Tool.Success,
   Tool.Failed,
+  Tool.Disposition,
   Reasoning.Started,
   Reasoning.Ended,
   Retried,
@@ -625,6 +636,7 @@ export const Definitions = Event.inventory(
   Tool.Progress,
   Tool.Success,
   Tool.Failed,
+  Tool.Disposition,
   Retried,
   Compaction.Started,
   Compaction.Delta,
