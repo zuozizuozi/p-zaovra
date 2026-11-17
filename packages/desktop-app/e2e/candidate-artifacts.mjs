@@ -91,9 +91,11 @@ const modelConfig = JSON.stringify(
 
 // Only the provider is scripted. Artifact generation, verification, publication and UI use the packaged application.
 const result = { sourceSHA: binding.sourceSHA, version: binding.version, phases: [], pass: false }
-const complete = binding.direct
-  ? "ARTIFACT_DELIVERY: 用项目中的脚本直接生成 PDF、PNG、SVG 并列出成果，不调用 write 或 publish_artifact。old.pdf 是旧参考文件，不是本轮新成果。"
-  : "ARTIFACT_DELIVERY: 用项目中的生成和校验脚本生成 PDF、PNG、SVG 三个候选，运行真实检查，再用同一检查依次发布三个文件，最后列出成果。"
+const complete = binding.commands
+  ? `ARTIFACT_DELIVERY: 先完成 ${binding.commands} 个独立脚本步骤，每步在 .history-fixture 中保存对应结果，再运行 generate.mjs 直接生成 PDF、PNG、SVG 并列出成果。不调用 write 或 publish_artifact。`
+  : binding.direct
+    ? "ARTIFACT_DELIVERY: 用项目中的脚本直接生成 PDF、PNG、SVG 并列出成果，不调用 write 或 publish_artifact。old.pdf 是旧参考文件，不是本轮新成果。"
+    : "ARTIFACT_DELIVERY: 用项目中的生成和校验脚本生成 PDF、PNG、SVG 三个候选，运行真实检查，再用同一检查依次发布三个文件，最后列出成果。"
 try {
   for (const phase of ["bootstrap", "artifacts", "restore"]) {
     const item = { phase, errors: [], closed: false }
@@ -129,6 +131,18 @@ try {
             .startsWith(root.toLowerCase() + "\\"),
         )
       page = await desktop.firstWindow({ timeout: 90000 })
+      item.messagePages = []
+      page.on("response", async (response) => {
+        if (!/\/api\/session\/[^/]+\/messages?(\?|$)/.test(response.url())) return
+        const body = await response.json().catch(() => undefined)
+        if (!body?.data || !Array.isArray(body.data)) return
+        item.messagePages.push({
+          url: response.url(),
+          count: body.data.length,
+          next: !!body.cursor?.next,
+          types: body.data.map((message) => message.type),
+        })
+      })
       page.setDefaultTimeout(15000)
       page.on("pageerror", (error) => item.errors.push({ name: error.name, message: error.message.slice(0, 300) }))
       await page.locator('[data-component="desktop-sidebar-v2"]').waitFor({ state: "visible", timeout: 90000 })
@@ -146,6 +160,7 @@ try {
       db = new DatabaseSync(join(profile, "desktop", "backend", "data", "zaovra", "zaovra.db"), { readOnly: true })
       const project = join(item.runtime.documents, "Zaovra 项目")
       if (phase === "artifacts") {
+        if (binding.commands) await mkdir(join(project, ".history-fixture"), { recursive: true })
         await writeFile(join(project, "generate.mjs"), await readFile(binding.generator))
         if (binding.direct) {
           await writeFile(
@@ -167,6 +182,7 @@ try {
                 row.data.content.some((part) => part.type === "text" && part.text.includes("ARTIFACT_DONE")),
             ),
           "delivery completes",
+          binding.commands ? 5400000 : 60000,
         )
       }
       const tools = rows(db)
@@ -182,13 +198,31 @@ try {
       assert.deepEqual(
         tools.map((part) => [part.name, part.state.status]),
         binding.direct
-          ? [["bash", "completed"]]
+          ? Array.from({ length: (binding.commands ?? 0) + 1 }, () => ["bash", "completed"])
           : [
               ["bash", "completed"],
               ["bash", "completed"],
               ...Array.from({ length: 3 }, () => ["publish_artifact", "completed"]),
             ],
       )
+      if (binding.commands) {
+        const messages = rows(db)
+        const user = messages.filter((message) => message.type === "user")
+        assert.equal(user.length, 1, "one human turn; command records must not become new prompts")
+        assert(messages.length > 270, "history exceeds initial page plus five automatic older pages")
+        assert(messages.filter((message) => message.type === "shell").length >= binding.commands)
+        assert(
+          messages.every((message) => message.data.turn === user[0].id),
+          "durable command and reply ownership is preserved",
+        )
+        item.history = {
+          count: messages.length,
+          userID: user[0].id,
+          shellCount: messages.filter((message) => message.type === "shell").length,
+        }
+        for (let step = 0; step < binding.commands; step++)
+          assert.equal(await readFile(join(project, ".history-fixture", `step_${step}.txt`), "utf8"), `STEP_${step}`)
+      }
       if (!binding.direct) {
         const checks = tools[1].state.structured.verification
         assert(checks && checks.exit === 0 && checks.targets.length >= 4)
@@ -278,6 +312,14 @@ try {
         await page.screenshot({ path: join(root, phase + "-" + name + "-window.png") })
         await panel.getByRole("button", { name: "关闭", exact: true }).click()
         await panel.waitFor({ state: "hidden" })
+      }
+      if (binding.commands) {
+        await page.mouse.move(700, 350)
+        await page.mouse.wheel(0, -100000)
+        await page.getByText(complete, { exact: true }).waitFor({ state: "visible", timeout: 30000 })
+        assert.equal((await page.locator(`[data-message-id="${item.history.userID}"]`).count()) > 0, true)
+        item.humanPromptVisible = true
+        await page.screenshot({ path: join(root, phase + "-human-prompt.png") })
       }
       assert.equal(db.prepare("select count(*) as n from memory_note").get().n, 0)
       assert.equal(Object.values(db.prepare("pragma quick_check").get())[0], "ok")

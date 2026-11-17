@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import path from "node:path"
 import { startEvaluationRelay } from "../../../script/evaluation/memory/relay"
 
@@ -8,6 +8,8 @@ if (!root.startsWith(path.resolve("F:/Zaovra-研发记录/逐次记录") + path.
   throw new Error("isolated-output-required")
 const name = process.argv[3]
 const direct = process.argv[4] === "direct"
+const commands = Number(process.argv[5] ?? 0)
+if (![0, 300].includes(commands) || (commands && !direct)) throw new Error("unsupported-history-fixture")
 if (!name || !/^[a-z0-9-]+$/.test(name)) throw new Error("fresh-fixture-name-required")
 const source = path.resolve(import.meta.dir, "../../..")
 const output = path.join(root, name)
@@ -18,17 +20,22 @@ const asarSHA256 = createHash("sha256")
 if (asarSHA256 !== "3e4e80dd7ec7b6275864e260b3da7cf71cbeb1dcd6b68a2e2d86d3fb417b62ba")
   throw new Error("candidate-changed")
 const observations: object[] = []
+const key = commands ? randomUUID() : "fixture-only"
 const upstream = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   idleTimeout: 0,
+  maxRequestBodySize: commands ? 2097152 : 131072,
   async fetch(request) {
+    if (request.headers.get("authorization") !== `Bearer ${key}`) return new Response(null, { status: 401 })
+    if (observations.length >= (commands ? 40 : 16)) return new Response(null, { status: 429 })
     if (request.method !== "POST" || new URL(request.url).pathname !== "/v1/chat/completions")
       return new Response(null, { status: 404 })
     const body = (await request.json()) as {
       model: string
       messages: { role: string; content: string | { text?: string }[] }[]
     }
+    if (body.model !== "fixture") return new Response(null, { status: 400 })
     const content = (message: (typeof body.messages)[number]) =>
       typeof message.content === "string"
         ? message.content
@@ -37,7 +44,8 @@ const upstream = Bun.serve({
       (message) => message.role === "user" && content(message).startsWith("ARTIFACT_DELIVERY"),
     )
     if (user < 0) throw new Error("fixture-prompt-mismatch")
-    const outputs = body.messages.slice(user + 1).filter((message) => message.role === "tool")
+    const allOutputs = body.messages.slice(user + 1).filter((message) => message.role === "tool")
+    const outputs = allOutputs.slice(commands)
     const files = ["proof.pdf", "proof.png", "proof.svg"]
     const tool = direct
       ? outputs.length === 0
@@ -75,7 +83,12 @@ const upstream = Bun.serve({
               check: "call_artifact_1",
               expectedDigest: null,
             }
-    observations.push({ step: outputs.length, action: tool ?? "text", outputs: outputs.map(content), at: Date.now() })
+    observations.push({
+      step: allOutputs.length,
+      action: allOutputs.length < commands ? "history-batch" : (tool ?? "text"),
+      ...(!commands ? { outputs: outputs.map(content) } : {}),
+      at: Date.now(),
+    })
     const chunk = (delta: object, finish_reason: string | null = null) =>
       "data: " +
       JSON.stringify({
@@ -87,39 +100,63 @@ const upstream = Bun.serve({
         ...(finish_reason ? { usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } } : {}),
       }) +
       "\n\n"
-    const delta = tool
+    const history = allOutputs.length < commands
+    const delta = history
       ? {
           role: "assistant",
-          tool_calls: [
-            {
-              index: 0,
-              id: "call_artifact_" + outputs.length,
+          tool_calls: Array.from({ length: Math.min(10, commands - allOutputs.length) }, (_, offset) => {
+            const step = allOutputs.length + offset
+            return {
+              index: offset,
+              id: "call_history_" + step,
               type: "function",
-              function: { name: tool, arguments: JSON.stringify(args) },
-            },
-          ],
+              function: {
+                name: "bash",
+                arguments: JSON.stringify({
+                  command: `[IO.File]::WriteAllText('.history-fixture/step_${step}.txt', 'STEP_${step}'); Write-Output 'STEP_${step}'`,
+                  description: `Complete independent fixture step ${step}`,
+                }),
+              },
+            }
+          }),
         }
-      : {
-          role: "assistant",
-          content:
-            "ARTIFACT_DONE\n\n[PDF](proof.pdf)\n\n[PNG](proof.png)\n\n[SVG](proof.svg)\n\n" +
-            (direct ? "脚本已生成文件，请预览。[旧参考](old.pdf)不是新成果。" : "完成文件完整性检查，视觉效果请预览。"),
-        }
-    return new Response(chunk(delta) + chunk({}, tool ? "tool_calls" : "stop") + "data: [DONE]\n\n", {
+      : tool
+        ? {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_artifact_" + outputs.length,
+                type: "function",
+                function: { name: tool, arguments: JSON.stringify(args) },
+              },
+            ],
+          }
+        : {
+            role: "assistant",
+            content:
+              "ARTIFACT_DONE\n\n[PDF](proof.pdf)\n\n[PNG](proof.png)\n\n[SVG](proof.svg)\n\n" +
+              (direct
+                ? "脚本已生成文件，请预览。[旧参考](old.pdf)不是新成果。"
+                : "完成文件完整性检查，视觉效果请预览。"),
+          }
+    return new Response(chunk(delta) + chunk({}, history || tool ? "tool_calls" : "stop") + "data: [DONE]\n\n", {
       headers: { "content-type": "text/event-stream" },
     })
   },
 })
-const relay = startEvaluationRelay({
-  baseURL: `http://127.0.0.1:${upstream.port}/v1`,
-  apiKey: "fixture-only",
-  model: "fixture",
-  protocol: "openai-chat",
-  journal: path.join(root, name + "-relay.jsonl"),
-  maxRequests: 16,
-  maxRequestBytes: 131072,
-  maxOutput: 4096,
-})
+const relay = commands
+  ? { baseURL: `http://127.0.0.1:${upstream.port}/v1`, apiKey: key, stop: async () => {} }
+  : startEvaluationRelay({
+      baseURL: `http://127.0.0.1:${upstream.port}/v1`,
+      apiKey: "fixture-only",
+      model: "fixture",
+      protocol: "openai-chat",
+      journal: path.join(root, name + "-relay.jsonl"),
+      maxRequests: 16,
+      maxRequestBytes: 131072,
+      maxOutput: 4096,
+    })
 try {
   const binding = path.join(root, name + "-binding.json")
   writeFileSync(
@@ -129,6 +166,7 @@ try {
       executable,
       asarSHA256,
       direct,
+      commands,
       sourceSHA: "b1c4f1e8f96127bec5cae427763e90574159bb6e",
       version: "0.2.4-beta.1",
       model: "fixture",

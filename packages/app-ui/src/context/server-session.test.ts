@@ -667,6 +667,76 @@ describe("V2 server session store", () => {
     expect(ctx.requests.get).toEqual(["ses_child", "ses_root"])
   })
 
+  test("cold lineage resolution survives ordered-feed negotiation before its read returns", async () => {
+    const gate = Promise.withResolvers<void>()
+    const sessions = { ses_child: info("ses_child") }
+    const ctx = setup({ sessions, getWait: () => gate.promise })
+    const pending = ctx.store.lineage.resolve("ses_child")
+    expect(ctx.requests.get).toEqual(["ses_child"])
+    ctx.store.apply({ type: "server.connected", properties: { sync: 1 } })
+    sessions.ses_child = { ...info("ses_child"), title: "current generation" }
+    gate.resolve()
+    await pending
+    expect(ctx.store.lineage.peek("ses_child")?.session.id).toBe("ses_child")
+    expect(ctx.store.lineage.peek("ses_child")?.session.title).toBe("current generation")
+    expect(ctx.requests.get).toEqual(["ses_child", "ses_child"])
+  })
+
+  test("retired missing-session answers do not override a newly readable session", async () => {
+    const gate = Promise.withResolvers<void>()
+    const sessions: Record<string, SessionV2Info> = {}
+    const ctx = setup({ sessions, getWait: () => gate.promise })
+    const pending = ctx.store.lineage.resolve("ses_child")
+    ctx.store.apply({ type: "server.connected", properties: { sync: 1 } })
+    sessions.ses_child = info("ses_child")
+    gate.resolve()
+    await pending
+    expect(ctx.store.lineage.peek("ses_child")?.session.id).toBe("ses_child")
+    expect(ctx.requests.get).toHaveLength(2)
+  })
+
+  test("current missing-session answers still fail after a retired read", async () => {
+    const gate = Promise.withResolvers<void>()
+    const ctx = setup({ sessions: {}, getWait: () => gate.promise })
+    const pending = ctx.store.lineage.resolve("ses_child")
+    ctx.store.apply({ type: "server.connected", properties: { sync: 1 } })
+    gate.resolve()
+    await expect(pending).rejects.toThrow("Session not found: ses_child")
+    expect(ctx.store.lineage.peek("ses_child")).toBeUndefined()
+    expect(ctx.requests.get).toHaveLength(2)
+  })
+
+  test("retired transport failures resolve through the current generation", async () => {
+    const gate = Promise.withResolvers<void>()
+    let reads = 0
+    const ctx = setup({ getWait: () => (++reads === 1 ? gate.promise : Promise.resolve()) })
+    const pending = ctx.store.lineage.resolve("ses_child")
+    ctx.store.apply({ type: "server.connected", properties: { sync: 1 } })
+    gate.reject(new Error("retired transport"))
+    await pending
+    expect(ctx.store.lineage.peek("ses_child")?.session.id).toBe("ses_child")
+    expect(ctx.requests.get).toHaveLength(2)
+  })
+
+  test("retired lineage readers join a current read without replacing its result", async () => {
+    const old = Promise.withResolvers<void>()
+    const current = Promise.withResolvers<void>()
+    let reads = 0
+    const sessions = { ses_child: info("ses_child") }
+    const ctx = setup({ sessions, getWait: () => (++reads === 1 ? old.promise : current.promise) })
+    const pending = ctx.store.lineage.resolve("ses_child")
+    ctx.store.apply({ type: "server.connected", properties: { sync: 1 } })
+    sessions.ses_child = { ...info("ses_child"), title: "current result" }
+    const next = ctx.store.lineage.resolve("ses_child")
+    old.resolve()
+    await Promise.resolve()
+    current.resolve()
+    const results = await Promise.all([pending, next])
+    expect(results.map((result) => result.session.title)).toEqual(["current result", "current result"])
+    expect(ctx.store.lineage.peek("ses_child")?.session.title).toBe("current result")
+    expect(ctx.requests.get).toHaveLength(2)
+  })
+
   test("loads and adapts V2 messages into the desktop timeline", async () => {
     const ctx = setup({ pages: [{ data: [assistant("msg_002", "answer", 2), user("msg_001", "question", 1)] }] })
 

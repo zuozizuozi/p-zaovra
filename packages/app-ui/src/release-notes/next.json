@@ -19,6 +19,10 @@
     {
       "title": "改文件和模型兼容性修复",
       "description": "补全缺失补丁边界标记，改善编辑失败的提示；修复 DeepSeek 自动降级后的模式记录和 Windows 读取缺失文件的错误分类"
+    },
+    {
+      "title": "网页预览重开后保留进度",
+      "description": "修复本地网页预览关闭后重开时读取不到已保存进度的问题。同项目页面继续共享原有存储，不同项目保持隔离"
     }
   ],
   "en": [
@@ -41,6 +45,10 @@
     {
       "title": "File editing and model compatibility fixes",
       "description": "Accepts patches with missing boundary markers and improves edit-failure guidance. Fixes mode provenance after DeepSeek fallback and error classification for missing files on Windows"
+    },
+    {
+      "title": "Restore saved progress when reopening previews",
+      "description": "Fixes saved progress becoming temporarily unreadable when reopening a local web preview. Pages in the same project keep their existing shared storage, while different projects remain isolated"
     }
   ]
 }

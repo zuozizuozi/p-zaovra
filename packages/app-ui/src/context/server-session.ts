@@ -335,16 +335,23 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     const active = generation(sessionID)
     const request = client.v2.session
       .get({ sessionID }, { signal: AbortSignal.timeout(10_000), throwOnError: true })
-      .then((result) => {
-        if (!result.data?.data) throw sessionNotFoundError(sessionID)
-        v2Info.set(sessionID, result.data.data)
-        const session = adaptSession(result.data.data)
-        if (generations.get(sessionID) !== active) return session
-        const remembered = remember(session)
-        // User messages show the session's agent and model when they carry none of their own.
-        if (capable) flush(sessionID)
-        return remembered
-      })
+      .then(
+        (result) => {
+          // A route cannot finish resolving with a retired read: its lineage cache would
+          // still be empty and the route would mistake the existing session for a deletion.
+          if (generations.get(sessionID) !== active) return resolve(sessionID, options)
+          if (!result.data?.data) throw sessionNotFoundError(sessionID)
+          v2Info.set(sessionID, result.data.data)
+          const remembered = remember(adaptSession(result.data.data))
+          // User messages show the session's agent and model when they carry none of their own.
+          if (capable) flush(sessionID)
+          return remembered
+        },
+        (error) => {
+          if (generations.get(sessionID) !== active) return resolve(sessionID, options)
+          throw error
+        },
+      )
     requests.set(sessionID, request)
     const cleanup = () => {
       if (requests.get(sessionID) === request) requests.delete(sessionID)
