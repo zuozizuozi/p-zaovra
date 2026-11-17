@@ -101,6 +101,11 @@
     }
   }
 
+  [data-slot="background-command-state"] {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
   [data-slot="basic-tool-tool-subtitle"] {
     flex-shrink: 1;
     min-width: 0;

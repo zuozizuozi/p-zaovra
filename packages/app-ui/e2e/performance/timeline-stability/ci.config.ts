@@ -19,11 +19,13 @@ export default defineConfig({
     "task-mascot.spec.ts",
     "scroll-interaction.spec.ts",
     "directory-recovery.spec.ts",
+    "background-label.spec.ts",
   ],
   grep: [
     /(?:error card keeps \w+ details behind disclosure|completed work folds without hiding the delivered response|synthetic continuations share one disclosure and preserve final text|empty checks remain absent and error recovery remains available beside its card|error-only replies and synthetic continuation share one resident heading|streams empty, short, and long parallel shells to staggered completion|replaces thinking with streamed reasoning and text without a blank visible turn|jump to latest overrides a just-finished wheel gesture without waiting for another event)$/,
     /scroll-interaction\.spec\.ts/,
     /directory-recovery\.spec\.ts/,
+    /background-label\.spec\.ts/,
   ],
   fullyParallel: false,
   workers: 1,
