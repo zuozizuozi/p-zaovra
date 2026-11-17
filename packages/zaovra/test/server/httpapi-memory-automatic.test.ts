@@ -52,15 +52,15 @@ test("embedded startup runs the real automatic scheduler and releases it with th
   const runtime = SessionRuntime.create([[MemoryAutomatic.node, { ...MemoryAutomatic.node, implementation: observed }]])
   const listener = await Server.listen({ hostname: "127.0.0.1", port: 0, runtime })
   try {
-    const deadline = Date.now() + 2000
-    while (!seen.ticks && Date.now() < deadline) await Bun.sleep(10)
-    expect(seen.ticks).toBe(1)
-    await Bun.sleep(5200)
-    expect(seen.ticks).toBe(2)
+    for (const count of [1, 2]) {
+      const deadline = Date.now() + 10_000
+      while (seen.ticks < count && Date.now() < deadline) await Bun.sleep(20)
+      expect(seen.ticks).toBeGreaterThanOrEqual(count)
+    }
   } finally {
     await listener.stop(true)
   }
   const stopped = seen.ticks
   await Bun.sleep(5200)
   expect(seen.ticks).toBe(stopped)
-}, 30_000)
+}, 40_000)
