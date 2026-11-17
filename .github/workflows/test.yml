@@ -106,7 +106,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      ZAOVRA_E2E_REPORT_DIR: ${{ runner.temp }}/desktop-browser
       PLAYWRIGHT_PORT: "63427"
       PLAYWRIGHT_BASE_URL: http://127.0.0.1:63427
       PLAYWRIGHT_SERVER_HOST: "127.0.0.1"
@@ -131,6 +130,8 @@ jobs:
           }
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
+      - name: Set the browser evidence directory
+        run: echo "ZAOVRA_E2E_REPORT_DIR=$RUNNER_TEMP/desktop-browser" >> "$GITHUB_ENV"
       - name: Verify the fourteen desktop regression cases
         working-directory: packages/app-ui
         run: |
