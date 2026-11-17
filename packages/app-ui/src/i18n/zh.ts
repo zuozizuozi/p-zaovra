@@ -132,7 +132,7 @@ export const dict = {
   "session.process.record": "过程记录 {{count}} 条",
   "session.turn.stopped": "已停止",
   "session.turn.interrupted": "已中断",
-  "session.turn.declined": "你拒绝了这次操作，任务已暂停。可以告诉它换个做法",
+  "session.turn.declined": "操作未获批准，任务已暂停。可以调整权限或告诉它换个做法",
   "session.turn.error": "需要处理",
   "session.snapshot.unconfirmed": "暂时无法确认可恢复的文件改动；未备份的改动不能恢复。",
   "session.snapshot.nogit":

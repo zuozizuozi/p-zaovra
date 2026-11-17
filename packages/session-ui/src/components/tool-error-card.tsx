@@ -55,7 +55,7 @@ export function toolFailureMessage(input: {
           ? "verificationAction"
           : input.tool === "bash"
             ? "commandAction"
-            : input.tool === "read" || target
+            : input.tool === "read" || (!input.tool && /\bUnable to read\b/i.test(input.error))
               ? "readAction"
               : "actionable"
   return {

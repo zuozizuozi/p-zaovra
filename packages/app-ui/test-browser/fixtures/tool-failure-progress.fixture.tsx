@@ -4,10 +4,28 @@ import { render } from "solid-js/web"
 import type { AssistantMessage, Message, SessionStatus, ToolPart, UserMessage } from "@zaovra-ai/sdk/v2"
 import { DataProvider } from "@zaovra-ai/session-ui/context"
 import { Part } from "@zaovra-ai/session-ui/message-part"
+import { toolFailureMessage } from "@zaovra-ai/session-ui/tool-error-card"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
 import { DialogProvider } from "@zaovra-ai/ui/context/dialog"
 import { FileComponentProvider } from "@zaovra-ai/ui/context/file"
 import { dict } from "../../../ui/src/i18n/en"
+
+test("a rejected write input with a file path is not described as a read failure", () => {
+  const input = {
+    tool: "write",
+    input: { filePath: "F:/isolated/beta-proof.txt" },
+    error: 'Invalid tool input: Missing key\n  at ["path"]',
+  }
+  const original = JSON.stringify(input)
+  expect(toolFailureMessage(input).key).toBe("ui.toolErrorCard.actionable")
+  expect(toolFailureMessage({ ...input, tool: "edit" }).key).toBe("ui.toolErrorCard.actionable")
+  expect(toolFailureMessage({ ...input, tool: "read" }).key).toBe("ui.toolErrorCard.readAction")
+  expect(toolFailureMessage({ error: "Unable to read /isolated/file.txt" }).key).toBe("ui.toolErrorCard.readAction")
+  expect(toolFailureMessage({ ...input, metadata: { phase: "permission" } }).key).toBe(
+    "ui.toolErrorCard.permissionAction",
+  )
+  expect(JSON.stringify(input)).toBe(original)
+})
 
 const user: UserMessage = {
   id: "msg_user",

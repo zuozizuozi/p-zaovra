@@ -58,7 +58,14 @@ const modelConfig = JSON.stringify(
     enabled_providers: ["candidate"],
     snapshot: false,
     shell: "powershell",
-    permission: { "*": "allow", external_directory: "deny", task: "deny", webfetch: "deny", websearch: "deny" },
+    permission: {
+      "*": "allow",
+      bash: "ask",
+      external_directory: binding.denyExternal ? "deny" : "ask",
+      task: "deny",
+      webfetch: "deny",
+      websearch: "deny",
+    },
     provider: {
       candidate: {
         name: "Isolated candidate validation",
@@ -101,7 +108,7 @@ try {
   // Let the real first launch initialize its backend profile before adding a provider.
   // Pre-creating backend/config would correctly trigger the partial-upgrade guard.
   for (let phase = -1; phase < 2; phase++) {
-    const item = { phase, prompt: prompts[phase], errors: [], closed: false }
+    const item = { phase, prompt: prompts[phase], errors: [], approvals: [], closed: false }
     result.phases.push(item)
     let desktop, page, child
     try {
@@ -168,13 +175,71 @@ try {
         )
         await input.fill(prompts[phase])
         await input.press("Enter")
-        // Observe the real UI result and idle state; a successful HTTP write alone is insufficient.
-        await page
+        const answer = page
           .locator('[data-slot="session-turn-assistant-content"]')
           .getByText(phase === 0 ? "文件已写入" : "续接已完成", { exact: false })
           .last()
-          .waitFor({ state: "visible", timeout: 240000 })
-        await page.locator('[data-action="prompt-stop"]').waitFor({ state: "hidden", timeout: 240000 })
+        const database = new DatabaseSync(join(profile, "desktop", "backend", "data", "zaovra", "zaovra.db"), {
+          readOnly: true,
+        })
+        const started = Date.now()
+        try {
+          while (true) {
+            assert(Date.now() - started < 240000, "candidate turn did not settle within observation deadline")
+            const rows = database
+              .prepare("select id,type,data from session_message order by seq")
+              .all()
+              .map((row) => ({ ...row, data: JSON.parse(row.data) }))
+            const user = rows.findLastIndex((row) => row.type === "user" && row.data.text === prompts[phase])
+            const current = user < 0 ? [] : rows.slice(user + 1).filter((row) => row.type === "assistant")
+            const failed = current.find((row) => row.data.finish === "interrupted" || row.data.finish === "error")
+            if (failed) {
+              item.terminalFailure = {
+                id: failed.id,
+                finish: failed.data.finish,
+                termination: failed.data.termination,
+                observedAfterMs: Date.now() - started,
+              }
+              throw new Error("candidate turn terminated: " + JSON.stringify(item.terminalFailure))
+            }
+            const dock = page.locator('[data-notification-target^="permission:"]')
+            if (await dock.isVisible()) {
+              const id = await dock.getAttribute("data-notification-target")
+              if (!item.approvals.some((entry) => entry.id === id)) {
+                const permission = await dock.locator('[data-slot="permission-details"] > code').textContent()
+                const patterns = await dock.locator('[data-slot="permission-patterns"] code').allTextContents()
+                const tool = current
+                  .flatMap((row) => row.data.content)
+                  .findLast((part) => part.type === "tool" && part.name === "bash" && part.state.status === "running")
+                if (tool) {
+                  const project = join(item.runtime.documents, "Zaovra 项目")
+                  const command = tool.state.input.command
+                  const workdir = resolve(project, tool.state.input.workdir ?? ".")
+                  const approved =
+                    permission === "bash" &&
+                    patterns.length === 1 &&
+                    patterns[0] === command &&
+                    workdir.toLowerCase() === resolve(project).toLowerCase() &&
+                    (binding.approvedCommands ?? []).includes(command)
+                  item.approvals.push({ id, permission, patterns, command, workdir, approved })
+                  await writeFile(join(root, `phase-${phase}-approvals.json`), JSON.stringify(item.approvals, null, 2))
+                  assert(approved, "unreviewed permission request; do not grant blanket approval")
+                  await dock.getByRole("button", { name: /^(允许一次|Allow once)$/, exact: true }).click()
+                }
+              }
+            }
+            // A visible answer must also have a durable successful terminal and an idle UI.
+            if (
+              current.at(-1)?.data.finish === "stop" &&
+              (await answer.isVisible()) &&
+              !(await page.locator('[data-action="prompt-stop"]').isVisible())
+            )
+              break
+            await new Promise((done) => setTimeout(done, 250))
+          }
+        } finally {
+          database.close()
+        }
         const file = join(item.runtime.documents, "Zaovra 项目", "beta-proof.txt")
         const bytes = await readFile(file)
         assert.equal(bytes.toString(), marker + (phase === 1 ? "_CONTINUED" : ""))
@@ -247,8 +312,14 @@ try {
         row.type === "assistant" ? row.data.content.filter((part) => part.type === "tool") : [],
       )
       assert(
-        tools.some((tool) => tool.name === "write" && tool.state.status === "completed"),
-        "actual successful write tool",
+        tools.some(
+          (tool) =>
+            tool.state.status === "completed" &&
+            (tool.name === "write" ||
+              (tool.name === "bash" &&
+                item.approvals.some((entry) => entry.approved && entry.command === tool.state.input.command))),
+        ),
+        "actual successful write tool or explicitly reviewed write command, with exact artifact bytes checked above",
       )
       if (phase === 1)
         assert(

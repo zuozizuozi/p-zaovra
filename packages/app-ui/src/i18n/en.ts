@@ -144,7 +144,8 @@ export const dict = {
   "session.process.record": "{{count}} process records",
   "session.turn.stopped": "Stopped",
   "session.turn.interrupted": "Interrupted",
-  "session.turn.declined": "You declined this action, so the task is paused. Tell it what to do instead",
+  "session.turn.declined":
+    "This action wasn't approved, so the task is paused. Adjust permissions or tell it what to do instead",
   "session.turn.error": "Action needed",
   "session.snapshot.unconfirmed":
     "Recoverable file changes could not be confirmed. Changes without a backup cannot be restored.",
