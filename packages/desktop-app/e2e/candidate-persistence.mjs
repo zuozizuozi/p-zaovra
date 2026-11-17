@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdir, readFile, writeFile, stat } from "node:fs/promises"
+import { appendFile, mkdir, readFile, writeFile, stat } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import { join, resolve } from "node:path"
@@ -108,12 +108,13 @@ try {
   // Let the real first launch initialize its backend profile before adding a provider.
   // Pre-creating backend/config would correctly trigger the partial-upgrade guard.
   for (let phase = -1; phase < 2; phase++) {
+    const candidate = phase < 1 && binding.previous ? binding.previous : binding
     const item = { phase, prompt: prompts[phase], errors: [], approvals: [], closed: false }
     result.phases.push(item)
     let desktop, page, child
     try {
       desktop = await _electron.launch({
-        executablePath: binding.executable,
+        executablePath: candidate.executable,
         args: ["--user-data-dir=" + profile, "--lang=zh-CN"],
         env,
         timeout: 90000,
@@ -129,11 +130,11 @@ try {
         documents: app.getPath("documents"),
       }))
       assert.equal(item.runtime.packaged, true)
-      assert.equal(item.runtime.version, binding.version)
+      assert.equal(item.runtime.version, candidate.version)
       item.runtime.asarSHA256 = createHash("sha256")
         .update(await readFile(item.runtime.appPath))
         .digest("hex")
-      assert.equal(item.runtime.asarSHA256, binding.asarSHA256, "actual loaded archive matches frozen candidate")
+      assert.equal(item.runtime.asarSHA256, candidate.asarSHA256, "actual loaded archive matches frozen candidate")
       for (const dir of [item.runtime.userData, item.runtime.home, item.runtime.documents])
         assert(
           resolve(dir)
@@ -153,6 +154,14 @@ try {
       }
       if (phase >= 0) {
         if (phase === 1) {
+          if (binding.previous && binding.previous.version !== binding.version) {
+            const notes = page.locator("[data-release-notes]")
+            await notes.waitFor({ state: "visible" })
+            item.releaseNotes = await notes.innerText()
+            await page.screenshot({ path: join(root, "upgrade-release-notes.png") })
+            await notes.getByRole("button", { name: /^(知道了|Got it)$/, exact: true }).click()
+            await notes.waitFor({ state: "hidden" })
+          }
           const tab = page.locator('[data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"]').filter({
             has: page.locator(`a[href*="${sessionID}"]`),
           })
@@ -205,7 +214,7 @@ try {
             const dock = page.locator('[data-notification-target^="permission:"]')
             if (await dock.isVisible()) {
               const id = await dock.getAttribute("data-notification-target")
-              if (!item.approvals.some((entry) => entry.id === id)) {
+              if (!item.approvals.some((entry) => entry.id === id && entry.approved)) {
                 const permission = await dock.locator('[data-slot="permission-details"] > code').textContent()
                 const patterns = await dock.locator('[data-slot="permission-patterns"] code').allTextContents()
                 const tool = current
@@ -215,16 +224,41 @@ try {
                   const project = join(item.runtime.documents, "Zaovra 项目")
                   const command = tool.state.input.command
                   const workdir = resolve(project, tool.state.input.workdir ?? ".")
-                  const approved =
+                  const scoped =
                     permission === "bash" &&
                     patterns.length === 1 &&
                     patterns[0] === command &&
-                    workdir.toLowerCase() === resolve(project).toLowerCase() &&
-                    (binding.approvedCommands ?? []).includes(command)
-                  item.approvals.push({ id, permission, patterns, command, workdir, approved })
+                    workdir.toLowerCase() === resolve(project).toLowerCase()
+                  const decisions = binding.manualApprovalFile
+                    ? JSON.parse(await readFile(binding.manualApprovalFile, "utf8"))
+                    : []
+                  assert(Array.isArray(decisions), "approval decisions must be an explicit list")
+                  const approved =
+                    scoped &&
+                    ((binding.approvedCommands ?? []).includes(command) ||
+                      decisions.some(
+                        (entry) =>
+                          entry.id === id &&
+                          entry.permission === permission &&
+                          entry.command === command &&
+                          entry.workdir === workdir &&
+                          entry.response === "once",
+                      ))
+                  const prior = item.approvals.findIndex((entry) => entry.id === id)
+                  const entry = { id, permission, patterns, command, workdir, approved }
+                  if (prior < 0 || item.approvals[prior].approved !== approved) {
+                    await appendFile(
+                      join(root, `phase-${phase}-approval-events.jsonl`),
+                      JSON.stringify({ ...entry, at: Date.now() }) + "\n",
+                    )
+                  }
+                  item.approvals[prior < 0 ? item.approvals.length : prior] = entry
                   await writeFile(join(root, `phase-${phase}-approvals.json`), JSON.stringify(item.approvals, null, 2))
-                  assert(approved, "unreviewed permission request; do not grant blanket approval")
-                  await dock.getByRole("button", { name: /^(允许一次|Allow once)$/, exact: true }).click()
+                  assert(
+                    scoped && (approved || binding.manualApprovalFile),
+                    "unreviewed permission request; do not grant blanket approval",
+                  )
+                  if (approved) await dock.getByRole("button", { name: /^(允许一次|Allow once)$/, exact: true }).click()
                 }
               }
             }
@@ -326,10 +360,20 @@ try {
           tools.some((tool) => tool.name === "read" && tool.state.status === "completed"),
           "actual read after restart",
         )
-      const notes = db.prepare("select count(*) as count from memory_note").get().count
-      const tidy = db.prepare("select count(*) as count from memory_automatic_run").get().count
-      assert.equal(notes, 0, "default memory does not create notes")
-      assert.equal(tidy, 0, "no automatic tidy")
+      const tables = db
+        .prepare("select name from sqlite_master where type='table'")
+        .all()
+        .map((row) => row.name)
+      const notes = tables.includes("memory_note")
+        ? db.prepare("select count(*) as count from memory_note").get().count
+        : null
+      const tidy = tables.includes("memory_automatic_run")
+        ? db.prepare("select count(*) as count from memory_automatic_run").get().count
+        : null
+      if (candidate === binding) {
+        assert.equal(notes, 0, "default memory does not create notes")
+        assert.equal(tidy, 0, "no automatic tidy")
+      }
       assert.equal(Object.values(db.prepare("pragma quick_check").get())[0], "ok")
       item.database = { file: database, sessionID, users: users.length, toolCount: tools.length, notes, tidy }
       await writeFile(join(root, `phase-${phase}-messages.json`), JSON.stringify(messages, null, 2))
