@@ -20,8 +20,8 @@ for (const scenario of ["success", "unit-failure", "existing-root", "core-failur
         ? path.resolve(Bun.spawnSync(["git", "--exec-path"]).stdout.toString().trim(), "../../../bin/bash.exe")
         : "bash"
     await Promise.all(
-      ["core", "schema", "llm", "protocol", "client", "zaovra", "server", "session-ui", "app-ui"].map((name) =>
-        fs.mkdir(path.join(tmp.path, "packages", name), { recursive: true }),
+      ["core", "schema", "llm", "protocol", "client", "sdk-next", "zaovra", "server", "session-ui", "app-ui"].map(
+        (name) => fs.mkdir(path.join(tmp.path, "packages", name), { recursive: true }),
       ),
     )
     await Bun.write(path.join(tmp.path, "workflow.sh"), script)
@@ -102,6 +102,7 @@ source ./workflow.sh
       expect(trace.split("\n")[0]).toMatch(/core\trun test\t.*\/profile-core$/)
       expect(trace.includes("app-ui\trun test:browser\t")).toBe(["success", "browser-failure"].includes(scenario))
       expect(trace.includes("app-ui\trun test:replay\t")).toBe(scenario === "success")
+      expect(trace.includes("sdk-next\trun test\t")).toBe(scenario !== "core-failure")
       if (scenario === "core-failure") {
         expect(trace.trim().split("\n")).toHaveLength(1)
         expect(stdout).not.toContain("app-ui-unit exit=")
@@ -115,7 +116,7 @@ source ./workflow.sh
       expect(stdout).toContain(`customization766-fresh-root exit=${scenario === "existing-root" ? 1 : 0}`)
       if (scenario === "existing-root")
         expect(await Bun.file(path.join(tmp.path, "profile/existing")).text()).toBe("retained")
-      if (scenario === "success") expect(trace.trim().split("\n")).toHaveLength(14)
+      if (scenario === "success") expect(trace.trim().split("\n")).toHaveLength(15)
     } finally {
       if (child.exitCode === null) child.kill()
       await child.exited

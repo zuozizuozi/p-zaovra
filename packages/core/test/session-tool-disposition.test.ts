@@ -161,6 +161,41 @@ function fixture() {
 }
 
 describe("persisted tool failure dispositions", () => {
+  for (const copied of ["request", "assistant"] as const) {
+    it.live("stored negative-sequence " + copied + " cannot gain a recovered verdict", () =>
+      Effect.gen(function* () {
+        const f = yield* fixture()
+        const request = yield* f.prompt()
+        const assistant = yield* f.start()
+        yield* f.fail(assistant)
+        yield* f.success(assistant)
+        const original = (yield* f.tool(assistant)).state
+        // Historical copied rows can exist without a current import endpoint.
+        // Exercise the production SQL reader and producer against that storage
+        // state, rather than calling the pure classifier with copied objects.
+        yield* f.database.db
+          .update(SessionMessageTable)
+          .set({ seq: -1 })
+          .where(eq(SessionMessageTable.id, copied === "request" ? request : assistant))
+          .run()
+          .pipe(Effect.orDie)
+        const before = f.reports().length
+        yield* f.end(assistant)
+        const failed = yield* f.tool(assistant)
+        expect(failed.state).toEqual(original)
+        expect(failed.failureDisposition).toMatchObject({ status: "unknown" })
+        expect(
+          f
+            .reports()
+            .slice(before)
+            .flatMap((event) => (event.type === "session.next.tool.disposition" ? event.data.reports : []))
+            .some((report) => report.status === "recovered"),
+        ).toBe(false)
+        if (copied === "request") expect(f.reports()).toHaveLength(before)
+      }),
+    )
+  }
+
   for (const scenario of ["related", "duplicate-terminal", "unrelated"] as const) {
     it.live("holds an actually computed report across a concurrent " + scenario + " event", () =>
       Effect.gen(function* () {

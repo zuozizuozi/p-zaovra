@@ -9,6 +9,8 @@ import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionEvent } from "@zaovra-ai/core/session/event"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionToolDisposition } from "@zaovra-ai/schema/session-tool-disposition"
+import { SessionExecutionStatus } from "@zaovra-ai/schema/session-execution-status"
+import { ZaovraEvent } from "@zaovra-ai/protocol/groups/event"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { Server } from "../../src/server/server"
 import { AppRuntime } from "../../src/effect/app-runtime"
@@ -39,15 +41,21 @@ test("production listener and generated SDK expose committed tool dispositions",
       message: "Old string not found",
       metadata: { phase: "mutation", reason: "match-failed" },
     }
-    await AppRuntime.runPromise(
+    const cursor = await AppRuntime.runPromise(
       Effect.gen(function* () {
         const events = yield* EventV2.Service
-        yield* events.publish(SessionEvent.Prompted, {
+        const anchor = yield* events.publish(SessionEvent.Prompted, {
           ...base,
           messageID: turnID,
           prompt: Prompt.make({ text: "Update main.ts" }),
           delivery: "steer",
         })
+        yield* events.publish(SessionEvent.QualityProgress, {
+          ...base,
+          category: "operation",
+          details: { privateFixture: true },
+        })
+        yield* events.publish(SessionExecutionStatus.Changed, { sessionID, active: false, epoch: 1, revision: 1 })
         yield* events.publish(SessionEvent.Step.Started, {
           ...base,
           assistantMessageID,
@@ -84,6 +92,7 @@ test("production listener and generated SDK expose committed tool dispositions",
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         })
+        return anchor.id
       }),
     )
     const messages = await client.v2.session.messages({ sessionID, order: "asc", limit: 100 }, { throwOnError: true })
@@ -111,6 +120,29 @@ test("production listener and generated SDK expose committed tool dispositions",
     expect(reports).toHaveLength(1)
     expect(reports[0].durable?.version).toBe(1)
     expect(reports[0].data).toMatchObject({ sessionID, reports: [report] })
+    // Reconnect after an actual retained cursor. Every returned item must satisfy
+    // the current public contract, even with a private diagnostic in that range.
+    const cancel = new AbortController()
+    const replayed: ZaovraEvent[] = []
+    try {
+      const replay = await client.v2.event.subscribe({
+        headers: { "Last-Event-ID": cursor },
+        signal: AbortSignal.any([cancel.signal, AbortSignal.timeout(5000)]),
+        sseMaxRetryAttempts: 0,
+      })
+      for await (const event of replay.stream) {
+        const decoded = Schema.decodeUnknownSync(ZaovraEvent)(event)
+        replayed.push(decoded)
+        if (decoded.id === reports[0].id) break
+      }
+    } finally {
+      cancel.abort()
+    }
+    expect(replayed[0]?.type).toBe("server.connected")
+    expect(replayed.some((event) => event.type === "session.execution.status")).toBe(true)
+    expect(replayed.at(-1)).toEqual(Schema.decodeUnknownSync(ZaovraEvent)(reports[0]))
+    expect(new Set(replayed.map((event) => event.id)).size).toBe(replayed.length)
+    expect(history.data.data.some((event) => event.type === "session.next.quality.progress")).toBe(true)
     // Reading through another ordinary listener must not publish another verdict.
     const second = await Server.listen({ hostname: "127.0.0.1", port: 0 })
     try {
