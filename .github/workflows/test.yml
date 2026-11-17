@@ -102,6 +102,54 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  desktop-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ZAOVRA_E2E_REPORT_DIR: ${{ runner.temp }}/desktop-browser
+      PLAYWRIGHT_PORT: "63427"
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:63427
+      PLAYWRIGHT_SERVER_HOST: "127.0.0.1"
+      PLAYWRIGHT_SERVER_PORT: "63427"
+      FORCE_COLOR: "0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Install browser test runtime
+        run: bun x --no-install playwright-core install --with-deps --only-shell chromium
+      - name: Allow the test Chromium sandbox on Ubuntu
+        run: |
+          cat <<EOF | sudo tee /etc/apparmor.d/zaovra-test-chromium
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile zaovra-test-chromium "$HOME/.cache/ms-playwright/**/chrome-headless-shell" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
+      - name: Verify the fourteen desktop regression cases
+        working-directory: packages/app-ui
+        run: |
+          mkdir -p "$ZAOVRA_E2E_REPORT_DIR"
+          bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts --list --reporter=list > "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
+          cat "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
+          grep -Fx "Total: 14 tests in 3 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
+      - name: Run production desktop browser regressions
+        working-directory: packages/app-ui
+        run: bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts
+      - name: Preserve browser inventory, report and failure traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-browser-evidence
+          path: ${{ runner.temp }}/desktop-browser
+          if-no-files-found: error
+          retention-days: 7
+
   feedback-inbox:
     name: feedback-inbox (${{ matrix.os }})
     strategy:
