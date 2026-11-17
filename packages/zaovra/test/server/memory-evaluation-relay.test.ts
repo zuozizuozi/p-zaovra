@@ -3,6 +3,76 @@ import path from "node:path"
 import { evaluationRelayBinding, startEvaluationRelay } from "../../../../script/evaluation/memory/relay"
 import { tmpdir } from "../fixture/fixture"
 
+test("evaluation relay distinguishes local transport failure from an upstream HTTP 502 without private error text", async () => {
+  await using tmp = await tmpdir()
+  for (const mode of ["refused", "upstream"] as const) {
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch() {
+        return new Response("private-upstream-error-body", { status: 502 })
+      },
+    })
+    const baseURL = `http://127.0.0.1:${upstream.port}/v1`
+    if (mode === "refused") await upstream.stop(true)
+    const journal = path.join(tmp.path, mode + ".jsonl")
+    const relay = startEvaluationRelay({
+      baseURL,
+      apiKey: "private-transport-test-key",
+      model: "fixture",
+      protocol: "openai-chat",
+      journal,
+      maxRequests: 1,
+      maxRequestBytes: 4096,
+      maxOutput: 64,
+    })
+    try {
+      const response = await fetch(relay.baseURL + "/chat/completions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${relay.apiKey}` },
+        body: JSON.stringify({
+          model: "fixture",
+          stream: true,
+          max_tokens: 64,
+          messages: [{ role: "user", content: "local fixture" }],
+        }),
+        signal: AbortSignal.timeout(5000),
+      })
+      expect(response.status).toBe(502)
+      expect(await response.text()).toBe(mode === "refused" ? "" : "private-upstream-error-body")
+    } finally {
+      await relay.stop()
+      await upstream.stop(true)
+    }
+    const text = await Bun.file(journal).text()
+    expect(text).not.toContain("private-transport-test-key")
+    expect(text).not.toContain("private-upstream-error-body")
+    expect(text).not.toContain(baseURL)
+    expect(text).not.toContain(relay.apiKey)
+    const rows = text
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    const failed = rows.filter((row) => row.phase === "transport-failed")
+    if (mode === "upstream") {
+      expect(failed).toHaveLength(0)
+      expect(rows.filter((row) => row.phase === "headers").map((row) => row.status)).toEqual([502])
+      continue
+    }
+    expect(rows.filter((row) => row.phase === "headers")).toHaveLength(0)
+    expect(failed).toHaveLength(1)
+    expect(failed[0]).toMatchObject({
+      usage: "unknown",
+      generatedStatus: 502,
+      cancellation: { request: false, relay: false, deadline: false },
+    })
+    expect(["ECONNREFUSED", "ConnectionRefused"]).toContain(failed[0].error.code)
+    expect(failed[0].elapsedMs).toBeGreaterThanOrEqual(0)
+    expect(failed[0].elapsedMs).toBeLessThan(5000)
+    expect(Object.keys(failed[0].error).sort()).toEqual(["causeCode", "code", "name"])
+  }
+}, 15000)
+
 test("evaluation relay preserves forty-send plans and caps extended recovery plans at sixty physical sends", async () => {
   await using tmp = await tmpdir()
   for (const limit of [40, 60]) {

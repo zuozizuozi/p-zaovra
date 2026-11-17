@@ -161,6 +161,8 @@ export function startEvaluationRelay(options: {
           })
         sent++
         const controller = new AbortController()
+        const deadline = AbortSignal.timeout(120000)
+        const started = performance.now()
         active.add(controller)
         const usage = observeUsage(input.protocol, [input.apiKey, key, input.baseURL, endpoint.hostname])
         let labelsRecorded = false
@@ -178,7 +180,7 @@ export function startEvaluationRelay(options: {
             body: bytes,
             redirect: "error",
             headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
-            signal: AbortSignal.any([request.signal, controller.signal, AbortSignal.timeout(120000)]),
+            signal: AbortSignal.any([request.signal, controller.signal, deadline]),
           })
           if (!closed) log({ id, phase: "headers", status: response.status })
           const reader = response.body?.getReader()
@@ -211,11 +213,23 @@ export function startEvaluationRelay(options: {
                   if (received > 4194304) throw new Error("response-limit")
                   usage.feed(chunk.value)
                   stream.enqueue(chunk.value)
-                } catch {
+                } catch (error) {
                   recordUsage("incomplete")
+                  if (!closed)
+                    log({
+                      id,
+                      phase: "incomplete",
+                      usage: "unknown",
+                      error: transportFailure(error),
+                      elapsedMs: Math.round(performance.now() - started),
+                      cancellation: {
+                        request: request.signal.aborted,
+                        relay: controller.signal.aborted,
+                        deadline: deadline.aborted,
+                      },
+                    })
                   controller.abort()
                   active.delete(controller)
-                  if (!closed) log({ id, phase: "incomplete", usage: "unknown" })
                   stream.error(new Error("evaluation-relay-stream-incomplete"))
                 }
               },
@@ -231,11 +245,24 @@ export function startEvaluationRelay(options: {
               headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream" },
             },
           )
-        } catch {
+        } catch (error) {
           recordModels("incomplete")
+          if (!closed)
+            log({
+              id,
+              phase: "transport-failed",
+              usage: "unknown",
+              generatedStatus: 502,
+              error: transportFailure(error),
+              elapsedMs: Math.round(performance.now() - started),
+              cancellation: {
+                request: request.signal.aborted,
+                relay: controller.signal.aborted,
+                deadline: deadline.aborted,
+              },
+            })
           controller.abort()
           active.delete(controller)
-          if (!closed) log({ id, phase: "transport-failed", usage: "unknown" })
           return new Response(null, { status: 502 })
         }
       },
@@ -281,6 +308,37 @@ export function startEvaluationRelay(options: {
     }
   })
   return handle
+}
+
+function transportFailure(error: unknown) {
+  // Never serialize arbitrary error text, URLs, stacks or properties from a failed credentialed fetch.
+  const codes = new Set([
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "ECONNABORTED",
+    "ENOTFOUND",
+    "EAI_AGAIN",
+    "ETIMEDOUT",
+    "ConnectionRefused",
+    "ConnectionClosed",
+    "SocketError",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "CERT_HAS_EXPIRED",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  ])
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+  const cause = error && typeof error === "object" && "cause" in error ? error.cause : undefined
+  const causeCode = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined
+  return {
+    name:
+      error instanceof Error && ["Error", "TypeError", "AbortError", "TimeoutError"].includes(error.name)
+        ? error.name
+        : "other",
+    code: typeof code === "string" && codes.has(code) ? code : null,
+    causeCode: typeof causeCode === "string" && codes.has(causeCode) ? causeCode : null,
+  }
 }
 
 function localText(value: unknown): boolean {
