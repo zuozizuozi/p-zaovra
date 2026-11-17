@@ -6,6 +6,7 @@ import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Config } from "@zaovra-ai/core/config"
 import { Location } from "@zaovra-ai/core/location"
+import { Project } from "@zaovra-ai/core/project"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Global } from "@zaovra-ai/core/global"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
@@ -13,6 +14,7 @@ import { SystemContext } from "@zaovra-ai/core/system-context"
 import { SystemContextBuiltIns } from "@zaovra-ai/core/system-context/builtins"
 import { SystemContextRegistry } from "@zaovra-ai/core/system-context/registry"
 import { location } from "../fixture/location"
+import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
 
 const directory = AbsolutePath.make(FSUtil.resolve("/repo/packages/core"))
@@ -45,6 +47,23 @@ const itWithoutGit = testEffect(
     [Global.node, Global.layerWith({ config: "/global" })],
   ]),
 )
+const itResolvedWithoutGit = testEffect(
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      return AppNodeBuilder.build(LayerNode.group([builtInsNode, Location.node]), [
+        [
+          Location.node,
+          LayerNode.compile(Location.boundNode(Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }))),
+        ],
+        [Global.node, Global.layerWith({ config: "/global" })],
+      ])
+    }),
+  ),
+)
 const instructionFS = Layer.effect(
   FSUtil.Service,
   FSUtil.Service.pipe(
@@ -66,15 +85,31 @@ const itWithInstructions = testEffect(
 )
 
 describe("SystemContextBuiltIns", () => {
-  itWithoutGit.effect("labels a non-git project root without implying a repository", () =>
+  itWithoutGit.effect("uses the working directory as the non-git task root", () =>
     Effect.gen(function* () {
       const context = yield* SystemContextRegistry.Service
       const initialized = yield* SystemContext.initialize(yield* context.load())
 
       expect(initialized.baseline).toContain(`Working directory: ${directory}`)
-      expect(initialized.baseline).toContain(`Project root: ${projectDirectory}`)
+      expect(initialized.baseline).toContain(`Project root: ${directory}`)
+      expect(initialized.baseline).not.toContain(`Project root: ${projectDirectory}\n`)
       expect(initialized.baseline).toContain("Is directory a git repo: no")
       expect(initialized.baseline).not.toContain("Repository root:")
+    }),
+  )
+
+  itResolvedWithoutGit.live("does not advertise the resolved global filesystem root as the task project", () =>
+    Effect.gen(function* () {
+      const location = yield* Location.Service
+      const registry = yield* SystemContextRegistry.Service
+      const initialized = yield* SystemContext.initialize(yield* registry.load())
+
+      expect(location.project.id).toBe(Project.ID.global)
+      expect(location.vcs).toBeUndefined()
+      expect(location.project.directory).not.toBe(location.directory)
+      expect(initialized.baseline).toContain(`Working directory: ${location.directory}`)
+      expect(initialized.baseline).toContain(`Project root: ${location.directory}`)
+      expect(initialized.baseline).not.toContain(`Project root: ${location.project.directory}\n`)
     }),
   )
 

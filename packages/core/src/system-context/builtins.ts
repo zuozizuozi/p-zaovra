@@ -19,7 +19,10 @@ const builtIns = Layer.effectDiscard(
     const environment = [
       "<env>",
       `  Working directory: ${location.directory}`,
-      `  ${location.vcs?.type === "git" ? "Repository" : "Project"} root: ${location.project.directory}`,
+      // Non-git Project identity uses the filesystem root; it is not the user's task directory.
+      location.vcs?.type === "git"
+        ? `  Repository root: ${location.project.directory}`
+        : `  Project root: ${location.directory}`,
       `  Is directory a git repo: ${location.vcs?.type === "git" ? "yes" : "no"}`,
       `  Platform: ${process.platform}`,
       "</env>",
