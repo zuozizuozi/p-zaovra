@@ -193,7 +193,15 @@ try {
           for (const step of steps.filter((step) => step.segment === segment)) {
             const item = { ...step, approvals: [], pass: false }
             result.turns.push(item)
-            await runTurn(page, database, launch.runtime, item)
+            const beforeRequests = await relayRequests()
+            try {
+              await runTurn(page, database, launch.runtime, item)
+            } finally {
+              // Capture physical sends before the next input, including failed or deliberately stopped turns.
+              const afterRequests = await relayRequests()
+              assert.deepEqual(afterRequests.slice(0, beforeRequests.length), beforeRequests)
+              item.relayRequests = afterRequests.slice(beforeRequests.length)
+            }
             const sessions = database.prepare("select id from session where parent_id is null").all()
             assert.equal(sessions.length, 1)
             if (!sessionID) sessionID = sessions[0].id
@@ -285,6 +293,16 @@ function messages(database) {
     .prepare("select id,type,seq,data from session_message order by seq")
     .all()
     .map((row) => ({ ...row, data: JSON.parse(row.data) }))
+}
+
+async function relayRequests() {
+  if (!binding.relayJournal) return []
+  return (await readFile(binding.relayJournal, "utf8"))
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => JSON.parse(line))
+    .filter((row) => row.phase === "admitted")
+    .map((row) => row.id)
 }
 
 async function runTurn(page, database, runtime, item) {
