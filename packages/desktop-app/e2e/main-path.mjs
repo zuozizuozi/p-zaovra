@@ -10,6 +10,10 @@ const { _electron } = createRequire(import.meta.url)("playwright-core")
 
 // All model traffic is handled by this loopback fixture. UI actions use real input.
 export async function mainPath(options) {
+  const protocol = options.protocol ?? "openai"
+  assert(["openai", "responses"].includes(protocol))
+  assert(protocol !== "responses" || options.respond, "Responses requires its own fixture")
+  const endpoint = protocol === "responses" ? "/v1/responses" : "/v1/chat/completions"
   const executable = resolve(options.executable)
   const record = resolve(options.record)
   assert.equal(
@@ -102,12 +106,12 @@ export async function mainPath(options) {
         )
         return
       }
-      if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+      if (req.method !== "POST" || req.url !== endpoint) {
         res.writeHead(404).end()
         return
       }
       assert.equal(req.method, "POST")
-      assert.equal(req.url, "/v1/chat/completions")
+      assert.equal(req.url, endpoint)
       assert.equal(req.headers.authorization, "Bearer main-path-synthetic")
       const body = JSON.parse(raw.toString("utf8"))
       requests.push(body)
@@ -307,7 +311,7 @@ export async function mainPath(options) {
         await page.getByLabel("基础 URL", { exact: true }).fill(report.provider)
         await page.getByLabel("API 密钥", { exact: true }).fill("main-path-synthetic")
         await page.locator("details > summary").filter({ hasText: "高级设置" }).click()
-        await page.getByLabel("兼容协议", { exact: true }).selectOption("openai")
+        await page.getByLabel("兼容协议", { exact: true }).selectOption(protocol)
         await page.getByRole("button", { name: "获取模型", exact: true }).click()
         await page.getByText("mp-main", { exact: true }).first().waitFor({ state: "visible" })
         await page.getByRole("button", { name: "保存配置", exact: true }).click()
