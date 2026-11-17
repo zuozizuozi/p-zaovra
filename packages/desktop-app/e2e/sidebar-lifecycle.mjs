@@ -36,7 +36,8 @@ export async function sidebarLifecycle(options) {
     const row = run.page
       .locator('[data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"]')
       .filter({ has: run.page.locator('a[href*="' + session + '"]') })
-    await row.getByText("进行中", { exact: true }).waitFor({ state: "visible", timeout: 5000 })
+    const running = row.getByRole("img", { name: "执行中", exact: true })
+    await running.waitFor({ state: "visible", timeout: 5000 })
     const ring = row.locator('[data-slot="session-running-ring"]')
     await ring.waitFor({ state: "visible" })
     for (let i = 0; i < (options.animationEvidence ? 0 : 3); i++) {
@@ -78,10 +79,12 @@ export async function sidebarLifecycle(options) {
     await run.page.getByText("实时回复已到达", { exact: true }).waitFor({ state: "hidden" })
     let disconnected = options.disconnect === true
     result.ownershipFaults = 0
+    result.ownershipFaultURLs = []
     if (options.disconnect)
-      await run.page.route("**/api/session/active", (route) => {
+      await run.page.route(/\/api\/session\/(?:active|execution)(?:\?|$)/, (route) => {
         if (!disconnected) return route.continue()
         result.ownershipFaults++
+        result.ownershipFaultURLs.push(route.request().url())
         return route.abort("failed")
       })
     const restore = options.disconnect
@@ -94,8 +97,9 @@ export async function sidebarLifecycle(options) {
     result.background = []
     while (performance.now() - ended < 5000) {
       const label = await row.innerText()
-      result.background.push({ elapsedMs: performance.now() - ended, label })
-      if (!label.includes("进行中")) {
+      const active = await running.count()
+      result.background.push({ elapsedMs: performance.now() - ended, label, running: active > 0 })
+      if (!active) {
         result.metrics.backgroundIdleMs = performance.now() - ended
         break
       }
@@ -103,19 +107,21 @@ export async function sidebarLifecycle(options) {
     }
     if (restore) clearTimeout(restore)
     result.backgroundFinal = await row.innerText()
+    result.backgroundRunning = (await running.count()) > 0
     await run.capture("742-background-complete")
     result.screenshots.push("742-background-complete.jpg")
     const entered = performance.now()
     await row.locator('[data-slot="tab-link"]').click()
     await run.page.getByText("实时回复已到达", { exact: true }).waitFor({ state: "visible" })
     while (performance.now() - entered < 2000) {
-      if (!/待看|进行中/.test(await row.innerText())) {
+      if (!(await running.count()) && !(await row.innerText()).includes("待看")) {
         result.metrics.enterClearMs = performance.now() - entered
         break
       }
       await run.page.waitForTimeout(50)
     }
     result.enterFinal = await row.innerText()
+    result.enterRunning = (await running.count()) > 0
     await run.capture("742-entered")
     result.screenshots.push("742-entered.jpg")
     result.profile = run.report.profile
@@ -134,13 +140,14 @@ export async function sidebarLifecycle(options) {
     await reopened.page.waitForTimeout(300)
     result.metrics.restartReadyMs = performance.now() - restartAt
     result.reopenFinal = await reopenedRow.innerText()
+    result.reopenRunning = (await reopenedRow.getByRole("img", { name: "执行中", exact: true }).count()) > 0
     result.reopenRingCount = await reopenedRow.locator('[data-slot="session-running-ring"]').count()
     await reopened.capture("742-reopened")
     result.reopenRuntime = reopened.report.runtime
     if (options.disconnect) assert(result.ownershipFaults > 0, "actual final ownership response failed")
     if (options.expectStale)
       assert(
-        result.backgroundFinal.includes("进行中"),
+        result.backgroundRunning,
         "original background status remains stale after controlled lost ownership checks",
       )
     if (options.verify) {
@@ -157,12 +164,13 @@ export async function sidebarLifecycle(options) {
         "background completion clears running within2s",
       )
       assert(result.backgroundFinal.includes("待看"), "background completion becomes unread")
+      assert(!result.backgroundRunning, "background completion clears the running icon")
       assert(
-        !result.enterFinal.includes("进行中") && !result.enterFinal.includes("待看"),
+        !result.enterRunning && !result.enterFinal.includes("待看"),
         "entry clears unread without retaining running",
       )
       assert(
-        !result.reopenFinal.includes("进行中") && !result.reopenFinal.includes("待看") && result.reopenRingCount === 0,
+        !result.reopenRunning && !result.reopenFinal.includes("待看") && result.reopenRingCount === 0,
         "restart retains completed and viewed state",
       )
     }
