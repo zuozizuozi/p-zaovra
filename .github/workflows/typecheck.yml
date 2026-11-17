@@ -28,6 +28,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for package in core schema llm protocol client server sdk/js app-ui zaovra cli; do
+          for package in core schema llm protocol client server sdk/js sdk-next app-ui zaovra cli; do
             (cd "packages/$package" && bun typecheck)
           done

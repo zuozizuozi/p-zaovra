@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for package in core schema llm protocol client zaovra; do
+          for package in core schema llm protocol client sdk-next zaovra; do
             if [ "$package" = core ]; then
               (cd "packages/$package" && ZAOVRA_766_TEST_ROOT="${ZAOVRA_766_TEST_ROOT}-core" bun run test)
             else
@@ -132,13 +132,13 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
       - name: Set the browser evidence directory
         run: echo "ZAOVRA_E2E_REPORT_DIR=$RUNNER_TEMP/desktop-browser" >> "$GITHUB_ENV"
-      - name: Verify the fourteen desktop regression cases
+      - name: Verify the fifteen desktop regression cases
         working-directory: packages/app-ui
         run: |
           mkdir -p "$ZAOVRA_E2E_REPORT_DIR"
           bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts --list --reporter=list > "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
           cat "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
-          grep -Fx "Total: 14 tests in 3 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
+          grep -Fx "Total: 15 tests in 4 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
       - name: Run production desktop browser regressions
         working-directory: packages/app-ui
         run: bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts

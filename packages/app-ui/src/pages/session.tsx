@@ -1679,6 +1679,9 @@ export default function Page() {
   }
 
   const resumeScroll = () => {
+    // This explicit request supersedes the preceding wheel/keyboard gesture.
+    // Otherwise the next layout frame discards the only scroll-to-end request.
+    setUi("scrollGesture", 0)
     setStore("messageId", undefined)
     autoScroll.resume()
     scrollToEnd()

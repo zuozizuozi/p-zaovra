@@ -13,8 +13,39 @@ import {
   shell,
   textPart,
   userMessage,
+  userID,
   type TimelineMessage,
 } from "./fixture"
+
+test("jump to latest overrides a just-finished wheel gesture without waiting for another event", async ({ page }) => {
+  await setupTimeline(page, {
+    messages: history(20),
+    cpuRate: 4,
+    reducedMotion: true,
+  })
+  const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight))
+    .toBeGreaterThan(400)
+  await scroller.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -180 }))
+    element.scrollTop -= 180
+  })
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
+    .toBeGreaterThan(80)
+  // Deliver the final wheel and the explicit resume in the same browser task,
+  // so slow CI cannot accidentally age out the gesture guard before the click.
+  await scroller.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -1 }))
+    const button = document.querySelector<HTMLButtonElement>('button[aria-label="Jump to latest"]')
+    if (!button) throw new Error("Missing jump control")
+    button.click()
+  })
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
+    .toBeLessThanOrEqual(2)
+})
 
 test("does not reverse visible rows when the user wheels during shell remeasurement", async ({ page }, testInfo) => {
   const shellID = "prt_wheel_01_shell"
@@ -41,6 +72,13 @@ test("does not reverse visible rows when the user wheels during shell remeasurem
       closest: '[data-timeline-row="AssistantPart"]',
     },
   })
+  const details = page.locator(
+    `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
+  )
+  await expect(details).toHaveAttribute("aria-expanded", "false")
+  await details.click()
+  await expect(details).toHaveAttribute("aria-expanded", "true")
+  await expect(page.locator(`[data-timeline-part-id$=":${shellID}"]`)).toBeVisible()
   await startVisualProbe(page, regions)
   await timeline.send(partUpdated(shell(shellID, "running", lines(30))), 80)
   await scroller.evaluate((element) =>
