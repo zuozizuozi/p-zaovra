@@ -42,6 +42,7 @@ import { MemoryStore } from "@zaovra-ai/core/memory/store"
 import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
+import { MemoryAutomatic } from "@zaovra-ai/core/memory/automatic"
 import { ProjectV2 } from "@zaovra-ai/core/project"
 import { ProjectCopy } from "@zaovra-ai/core/project/copy"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
@@ -231,6 +232,8 @@ export function createRoutes(
       MemoryTidyStore.node,
       MemoryPages.node,
       MemoryTidyTasks.node,
+      MemoryAutomatic.node,
+      MemoryAutomatic.startupNode,
     ]),
     runtime.replacements,
   )
