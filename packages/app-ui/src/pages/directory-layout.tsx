@@ -43,15 +43,16 @@ export function DirectoryDataProvider(props: DirectoryProps) {
     async (target) => {
       try {
         await target.client.v2.location.get({ location: { directory: target.directory } }, { throwOnError: true })
-        return true
+        return "available" as const
       } catch (error) {
-        if (isDirectoryUnavailableError(error, target.directory)) return false
-        throw error
+        if (isDirectoryUnavailableError(error, target.directory)) return "missing" as const
+        // A failed check does not prove that the directory or its draft is gone.
+        return "failed" as const
       }
     },
   )
   createEffect(() => {
-    if (!available.loading && available() === false && props.draftID) void tabs.recoverDraft(props.draftID)
+    if (!available.loading && available() === "missing" && props.draftID) void tabs.recoverDraft(props.draftID)
   })
   const chooseProject = () => {
     layout.home.setSelection({ server: props.server?.() ?? server.key, directory: undefined })
@@ -60,45 +61,49 @@ export function DirectoryDataProvider(props: DirectoryProps) {
   return (
     <Show when={!available.loading} fallback={<DraftLoading />}>
       <Show
-        when={available()}
+        when={available() === "available"}
         fallback={
           <div role="status" class="flex min-h-64 flex-col items-center justify-center gap-4 p-6">
-            <p>{language.t("directory.unavailable.title")}</p>
+            <p>{language.t(available() === "missing" ? "directory.unavailable.title" : "common.requestFailed")}</p>
             <p class="break-all text-text-weak">{directory()}</p>
-            <p>{language.t("directory.unavailable.description")}</p>
+            <Show when={available() === "missing"}>
+              <p>{language.t("directory.unavailable.description")}</p>
+            </Show>
             <Button variant="secondary" onClick={() => void refetch()}>
-              {language.t("directory.unavailable.retry")}
+              {language.t(available() === "missing" ? "directory.unavailable.retry" : "session.review.retry")}
             </Button>
             <Button variant="secondary" onClick={chooseProject}>
               {language.t("directory.unavailable.choose")}
             </Button>
-            <ButtonV2
-              variant="outline"
-              onClick={() => {
-                const key = props.server?.() ?? server.key
-                const route = layout.route()
-                const index =
-                  route.type === "session"
-                    ? tabs.store.findIndex(
-                        (tab) => tab.type === "session" && tab.server === key && tab.sessionId === route.sessionId,
-                      )
-                    : -1
-                const conn = global.servers.list().find((item) => ServerConnection.key(item) === key)
-                if (conn) {
-                  const projects = global.ensureServerCtx(conn).projects
-                  const project = projects.list().find((item) => pathKey(item.worktree) === pathKey(directory()))
-                  if (project) projects.close(project.worktree)
-                }
-                showToast({ title: language.t("directory.unavailable.removed") })
-                if (index >= 0) {
-                  tabs.closeTab(index)
-                  return
-                }
-                chooseProject()
-              }}
-            >
-              {language.t("directory.unavailable.remove")}
-            </ButtonV2>
+            <Show when={available() === "missing"}>
+              <ButtonV2
+                variant="outline"
+                onClick={() => {
+                  const key = props.server?.() ?? server.key
+                  const route = layout.route()
+                  const index =
+                    route.type === "session"
+                      ? tabs.store.findIndex(
+                          (tab) => tab.type === "session" && tab.server === key && tab.sessionId === route.sessionId,
+                        )
+                      : -1
+                  const conn = global.servers.list().find((item) => ServerConnection.key(item) === key)
+                  if (conn) {
+                    const projects = global.ensureServerCtx(conn).projects
+                    const project = projects.list().find((item) => pathKey(item.worktree) === pathKey(directory()))
+                    if (project) projects.close(project.worktree)
+                  }
+                  showToast({ title: language.t("directory.unavailable.removed") })
+                  if (index >= 0) {
+                    tabs.closeTab(index)
+                    return
+                  }
+                  chooseProject()
+                }}
+              >
+                {language.t("directory.unavailable.remove")}
+              </ButtonV2>
+            </Show>
           </div>
         }
       >

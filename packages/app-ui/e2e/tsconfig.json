@@ -9,6 +9,8 @@
     "./performance/timeline-stability/**/*.spec.ts",
     "./performance/timeline-stability/fixture.test.ts",
     "./performance/timeline-stability/fixture.ts",
+    "./performance/timeline/session-timeline-stress.fixture.ts",
+    "./performance/timeline/timeline-test-helpers.ts",
     "./performance/unit/visual-stability.test.ts",
     "./reproduction/timeline-suspense/**/*.ts",
     "./reproduction/timeline-suspense/**/*.tsx",
