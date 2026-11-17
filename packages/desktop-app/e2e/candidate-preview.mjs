@@ -191,20 +191,21 @@ try {
           await win.evaluate((w) => w.setSize(900, 700))
           const traffic = []
           const sizes = []
+          item.terminalRequests = sizes
           page.on("websocket", (socket) => {
-            if (!new URL(socket.url()).pathname.includes("/api/pty/")) return
+            if (!/^\/(api\/)?pty\//.test(new URL(socket.url()).pathname)) return
             socket.on("framereceived", (frame) =>
               traffic.push(Buffer.isBuffer(frame.payload) ? frame.payload.toString("utf8") : frame.payload),
             )
           })
           page.on("request", (request) => {
-            if (request.method() === "PUT" && new URL(request.url()).pathname.startsWith("/api/pty/"))
+            if (request.method() === "PUT" && /^\/(api\/)?pty\//.test(new URL(request.url()).pathname))
               sizes.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() })
           })
           await page.locator('[aria-controls="terminal-panel"]').click()
           const terminal = page.locator('[data-component="terminal"]:visible').first()
           await terminal.waitFor({ state: "visible" })
-          const query = "?directory=" + encodeURIComponent(projects.a)
+          const query = "?" + new URLSearchParams({ "location[directory]": projects.a })
           await until(async () => (await api("/api/pty" + query)).data.length === 1, "one real PTY")
           item.pty = (await api("/api/pty" + query)).data[0]
           assert(/powershell|pwsh/i.test(item.pty.command), "PowerShell fixture command requires PowerShell")
@@ -217,6 +218,7 @@ try {
                 const canvas = node.querySelector("canvas")?.getBoundingClientRect()
                 return { outer: node.getBoundingClientRect().width, canvas: canvas?.width ?? 0 }
               })
+              item.terminalMeasure = measure
               return (
                 measure.outer > 200 &&
                 measure.canvas > 150 &&
@@ -234,6 +236,20 @@ try {
             assert.equal(ptys.length, 1)
             assert.equal(ptys[0].id, item.pty.id)
             item.terminalSizes.push({ windowWidth: width, ...measure, sentSize: sizes.at(-1) })
+            const expected = sizes.at(-1).body.size
+            const marker = `SIZE_CHECK_${item.terminalSizes.length}:`
+            const frameStart = traffic.length
+            const input = terminal.locator("textarea")
+            await input.pressSequentially(
+              `[Console]::WriteLine(('SIZE_'+'CHECK_${item.terminalSizes.length}:')+[Console]::WindowWidth+'x'+[Console]::WindowHeight)`,
+              { delay: 2 },
+            )
+            await input.press("Enter")
+            await until(
+              () => traffic.slice(frameStart).join("").includes(marker + expected.cols + "x" + expected.rows),
+              "shell receives the rendered terminal dimensions",
+            )
+            item.terminalSizes.at(-1).shellSize = { cols: expected.cols, rows: expected.rows }
             await page.screenshot({ path: join(root, `terminal-${item.terminalSizes.length}-${width}.png`) })
           }
           const input = terminal.locator("textarea")
