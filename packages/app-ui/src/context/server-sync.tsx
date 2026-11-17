@@ -169,7 +169,6 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const homeSessions = createHomeSessionIndexCache(queryClient, ServerConnection.key(serverSDK.server))
 
   let bootedAt = 0
-  let bootingRoot = false
   let eventFrame: number | undefined
   let eventTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -394,7 +393,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     const directory = e.name
     const key = directoryKey(directory)
     const event = e.details
-    const recent = bootingRoot || Date.now() - bootedAt < 1500
+    const recent = Date.now() - bootedAt < 1500
 
     if (event.type === "message.updated" && event.properties.info.role === "assistant") {
       const result = verifyProviderRequest(event.properties.info)
@@ -411,14 +410,14 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       applyGlobalEvent({
         event,
         project: globalStore.project,
+        recent,
         refresh: () => {
-          if (recent) return
           bootstrap.refetch()
         },
         setGlobalProject: setProjects,
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {
-        if (recent) return
+        if (event.type === "server.connected" && recent) return
         for (const directory of Object.keys(children.children)) {
           if (!children.active(directory)) continue
           queue.push(directory)

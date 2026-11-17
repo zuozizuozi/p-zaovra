@@ -86,6 +86,22 @@ const baseState = (input: Partial<State> = {}) =>
   }) as State
 
 describe("applyGlobalEvent", () => {
+  test("refreshes every explicit invalidation even immediately after another bootstrap", () => {
+    const seen: string[] = []
+    for (const type of ["server.connected", "global.disposed", "global.disposed"]) {
+      applyGlobalEvent({
+        event: { type },
+        project: [],
+        recent: true,
+        refresh: () => {
+          seen.push(type)
+        },
+        setGlobalProject() {},
+      })
+    }
+    expect(seen).toEqual(["global.disposed", "global.disposed"])
+  })
+
   test("upserts project.updated in sorted position", () => {
     const project = [{ id: "a" }, { id: "c" }] as Project[]
     let refreshCount = 0

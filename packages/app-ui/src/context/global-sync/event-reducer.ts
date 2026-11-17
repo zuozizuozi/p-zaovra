@@ -38,8 +38,11 @@ export function applyGlobalEvent(input: {
   project: Project[]
   setGlobalProject: (next: Project[] | ((draft: Project[]) => Project[])) => void
   refresh: () => void
+  recent?: boolean
 }) {
   if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
+    // Repeated connection handshakes can be redundant; explicit invalidation never is.
+    if (input.event.type === "server.connected" && input.recent) return
     input.refresh()
     return
   }
