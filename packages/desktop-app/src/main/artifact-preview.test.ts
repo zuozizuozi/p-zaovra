@@ -4,10 +4,15 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { WebContents } from "electron"
+import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
+
+const priming = { run: async () => {} }
 
 class PreviewContents extends EventEmitter {
   destroyed = false
   url = ""
+  loads: string[] = []
+  executeJavaScript = mock(async (_script: string) => priming.run())
   isDestroyed() {
     return this.destroyed
   }
@@ -20,6 +25,7 @@ class PreviewContents extends EventEmitter {
   setWindowOpenHandler() {}
   setZoomFactor() {}
   async loadURL(url: string) {
+    this.loads.push(url)
     this.url = url
     this.emit("did-stop-loading")
   }
@@ -77,12 +83,23 @@ function preview() {
 }
 
 afterEach(async () => {
+  priming.run = async () => {}
   for (const owner of owners.splice(0)) owner.emit("destroyed")
   for (const browsing of sessions.values()) expect(browsing.listenerCount("will-download")).toBe(0)
   sessions.clear()
   views.splice(0)
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
+
+async function loaded(api: ArtifactPreviewAPI, id: string) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const state = await api.state(id)
+    if (state?.error) throw new Error(state.error)
+    if (state && !state.loading) return
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  throw new Error("preview did not finish loading")
+}
 
 function download(view: PreviewView, gesture = true) {
   const event = {
@@ -167,6 +184,7 @@ test("817 actual preview controller reopens edited files and replacement owner w
   await writeFile(path.join(directory, "index.html"), "first version")
   const api = preview()
   await api.open({ id: "first", target: "index.html", directory })
+  await loaded(api, "first")
   const first = views[0]
   const url = first.webContents.url
   const partition = first.options.webPreferences.partition
@@ -176,12 +194,14 @@ test("817 actual preview controller reopens edited files and replacement owner w
   expect(first.webContents.isDestroyed()).toBe(true)
   await writeFile(path.join(directory, "index.html"), "edited version")
   await api.open({ id: "edited", target: "index.html", directory })
+  await loaded(api, "edited")
   expect(views[1].webContents.url).toBe(url)
   expect(views[1].options.webPreferences.partition).toBe(partition)
   expect(await (await sessions.get(partition)!.handlers.get("oc")!(new Request(url))).text()).toBe("edited version")
   owners[0].emit("destroyed")
   const replacement = preview()
   await replacement.open({ id: "replacement", target: "index.html", directory })
+  await loaded(replacement, "replacement")
   expect(views[2].webContents.url).toBe(url)
   expect(views[2].options.webPreferences.partition).toBe(partition)
   expect(sessions.get(partition)!.handlers.size).toBe(1)
@@ -197,8 +217,10 @@ test("817 preview project switches isolate persistent sessions, routes and navig
   await writeFile(path.join(directory, "second", "index.html"), "second")
   const api = preview()
   await api.open({ id: "first", target: "index.html", directory: path.join(directory, "first") })
+  await loaded(api, "first")
   const first = views[0]
   await api.open({ id: "second", target: "index.html", directory: path.join(directory, "second") })
+  await loaded(api, "second")
   const second = views[1]
   expect(first.webContents.isDestroyed()).toBe(true)
   expect(second.options.webPreferences.partition).not.toBe(first.options.webPreferences.partition)
@@ -228,4 +250,30 @@ test("817 preview project switches isolate persistent sessions, routes and navig
   expect(remote.options.webPreferences.partition.startsWith("persist:")).toBe(false)
   expect(sessions.get(remote.options.webPreferences.partition)!.handlers.size).toBe(0)
   expect(remote.webContents.url).toBe("https://example.com/")
+})
+
+test("local preview primes storage before user scripts, keeps target state, and cancels late initialization", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "zaovra-preview-prime-"))
+  directories.push(directory)
+  await writeFile(path.join(directory, "index.html"), "<script>localStorage.getItem('saved')</script>")
+  const waiting = Promise.withResolvers<void>()
+  priming.run = () => waiting.promise
+  const api = preview()
+  await api.open({ id: "first", target: "index.html", directory })
+  const first = views[0].webContents
+  expect(first.loads).toHaveLength(1)
+  expect(first.loads[0].endsWith("/.zaovra-preview-storage")).toBe(true)
+  expect(first.executeJavaScript).toHaveBeenCalledWith("void localStorage.length")
+  first.emit("page-title-updated", {}, "internal document")
+  expect(await api.state("first")).toMatchObject({ loading: true, title: "index.html" })
+  await api.action({ id: "first", action: "close" })
+  waiting.resolve()
+  priming.run = async () => {}
+  await api.open({ id: "second", target: "index.html", directory })
+  await loaded(api, "second")
+  expect(first.loads).toHaveLength(1)
+  expect(first.isDestroyed()).toBe(true)
+  expect(views[1].webContents.loads).toEqual([first.loads[0], new URL("index.html", first.loads[0]).href])
+  expect(await api.state("first")).toBeUndefined()
+  expect(await api.state("second")).toMatchObject({ loading: false, title: "index.html" })
 })

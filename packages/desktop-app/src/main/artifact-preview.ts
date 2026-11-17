@@ -81,6 +81,7 @@ export function createArtifactPreview(owner: WebContents) {
       owned.add(contents)
       const state: ArtifactState = { url, title: input.target, loading: true, zoom: 1 }
       current = { id: input.id, view, state }
+      let initializingStorage = Boolean(local)
       contents.setWindowOpenHandler(() => {
         state.error = "该链接需要新窗口，请在外部浏览器中打开"
         return { action: "deny" }
@@ -103,6 +104,7 @@ export function createArtifactPreview(owner: WebContents) {
         }
       })
       contents.on("page-title-updated", (_event, title) => {
+        if (initializingStorage) return
         state.title = title
       })
       contents.on("did-start-loading", () => {
@@ -110,6 +112,7 @@ export function createArtifactPreview(owner: WebContents) {
         state.error = undefined
       })
       contents.on("did-stop-loading", () => {
+        if (initializingStorage) return
         state.loading = false
         if (!contents.isDestroyed()) state.url = contents.getURL()
       })
@@ -125,7 +128,20 @@ export function createArtifactPreview(owner: WebContents) {
       })
       view.setVisible(false)
       window.contentView.addChildView(view)
-      void contents.loadURL(url).catch(() => {
+      const load = async () => {
+        if (local) {
+          // Electron 42 can cache an empty localStorage area when a custom-scheme
+          // page reads it during parsing. Prime the unchanged project origin in a
+          // script-free document before any user code runs; never copy or reset data.
+          await contents.loadURL(local.storageURL)
+          if (opening !== request || contents.isDestroyed()) return
+          await contents.executeJavaScript("void localStorage.length")
+          if (opening !== request || contents.isDestroyed()) return
+        }
+        initializingStorage = false
+        await contents.loadURL(url)
+      }
+      void load().catch(() => {
         state.loading = false
         state.error = "页面加载失败，请确认网站服务已启动"
       })

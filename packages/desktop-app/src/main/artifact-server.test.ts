@@ -62,6 +62,18 @@ test("817 project origin and persistent storage identity survive fresh sources, 
   const response = await reopened.respond(new Request(reopened.url))
   expect(await response.text()).toBe("updated version")
   expect(response.headers.get("cache-control")).toBe("no-store")
+  const storage = await first.respond(new Request(first.storageURL))
+  expect(new URL(first.storageURL).host).toBe(new URL(first.url).host)
+  expect(new URL(first.storageURL).protocol).toBe(new URL(first.url).protocol)
+  expect(storage.status).toBe(200)
+  expect(await storage.text()).toBe("<!doctype html><meta charset=utf-8>")
+  expect(storage.headers.get("content-security-policy")).toBe("default-src 'none'")
+  expect(storage.headers.get("cache-control")).toBe("no-store")
+  expect((await first.respond(new Request(first.storageURL, { method: "POST" }))).status).toBe(405)
+  expect(
+    (await first.respond({ url: first.storageURL, method: "GET", initiatorOrigin: "https://outside.invalid" })).status,
+  ).toBe(403)
+  expect((await first.respond(new Request(new URL("/.other", first.url)))).status).toBe(403)
 })
 
 test("817 protocol responses isolate projects and reject foreign initiators, hidden files and escaping links", async () => {

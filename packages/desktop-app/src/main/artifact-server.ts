@@ -94,6 +94,7 @@ export async function artifactSource(target: string, directory: string) {
   }
   return {
     url: `${origin}/${relative.split(path.sep).map(encodeURIComponent).join("/")}`,
+    storageURL: `${origin}/.zaovra-preview-storage`,
     partition: `persist:${host}`,
     accepts,
     async respond(request: Pick<Request, "url" | "method"> & { initiatorOrigin?: string }) {
@@ -102,6 +103,14 @@ export async function artifactSource(target: string, directory: string) {
         if (!accepts(request.url) || (request.initiatorOrigin && request.initiatorOrigin !== origin))
           return new Response(null, { status: 403 })
         const pathname = decodeURIComponent(new URL(request.url).pathname)
+        if (pathname === "/.zaovra-preview-storage")
+          return new Response(request.method === "HEAD" ? null : "<!doctype html><meta charset=utf-8>", {
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Content-Security-Policy": "default-src 'none'",
+              "Cache-Control": "no-store",
+            },
+          })
         if (pathname.split("/").some((part) => part.startsWith("."))) return new Response(null, { status: 403 })
         const resolved = await realpath(path.resolve(root, `.${pathname}`))
         const relative = path.relative(root, resolved)

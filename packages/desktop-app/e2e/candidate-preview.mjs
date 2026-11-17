@@ -98,7 +98,7 @@ try {
         await save("A_SAVED")
         await close()
         assert.equal((await open("a", "index.html")).value, "A_SAVED")
-        for (let cycle = 0; cycle < (binding.cycles ?? 0); cycle++) {
+        for (let cycle = 0; cycle < (binding.cycles ?? 20); cycle++) {
           await save("A_SAVED")
           await close()
           assert.equal((await open("a", "index.html")).value, "A_SAVED")
