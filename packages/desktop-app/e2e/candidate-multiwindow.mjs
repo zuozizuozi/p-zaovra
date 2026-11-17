@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import { join, resolve } from "node:path"
 import { _electron } from "playwright-core"
+import { observeComposer } from "./composer-observer.mjs"
 
 // The launch binding contains only a loopback credential, never an upstream key.
 const binding = JSON.parse(await readFile(process.argv[2], "utf8"))
@@ -91,6 +92,8 @@ const modelConfig = JSON.stringify(
 
 // Both windows, admission, retry cancellation and file tools use the packaged app.
 const result = { sourceSHA: binding.sourceSHA, version: binding.version, phases: [], cycles: [], pass: false }
+const observers = new Map()
+const composerTraces = []
 let sessionID
 try {
   for (const phase of ["bootstrap", "shared"]) {
@@ -141,6 +144,7 @@ try {
         { timeout: 90000 },
       )
       db = new DatabaseSync(join(profile, "desktop", "backend", "data", "zaovra", "zaovra.db"), { readOnly: true })
+      if (binding.auditComposer) observers.set(first, await observeComposer(first))
       await submit(first, "SHARED_SEED: 请创建 shared-proof.txt。")
       await first.getByText("SHARED_READY", { exact: false }).last().waitFor({ state: "visible" })
       await until(() => rows(db).findLast((row) => row.type === "assistant")?.data.finish === "stop", "seed finishes")
@@ -158,6 +162,7 @@ try {
       await second.locator('[data-component="desktop-sidebar-v2"]').waitFor({ state: "visible", timeout: 90000 })
       await second.locator(`[data-component="desktop-sidebar-v2"] a[href*="/session/${sessionID}"]`).first().click()
       await second.getByText("SHARED_READY", { exact: false }).last().waitFor({ state: "visible" })
+      if (binding.auditComposer) observers.set(second, await observeComposer(second))
       assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2)
 
       for (const cycle of [1, 2, 3]) {
@@ -178,6 +183,10 @@ try {
           await stopButton(page).waitFor({ state: "visible" })
         }
         const rateUser = rows(db).findLast((row) => row.type === "user")
+        if (binding.auditComposer) {
+          await sender.locator('[data-slot="session-turn-retry"]').waitFor({ state: "visible" })
+          await observers.get(sender).evaluate((probe) => probe.mark("stopping"))
+        }
         await stopButton(sender).click()
         await until(
           () =>
@@ -247,8 +256,9 @@ try {
       }
       for (const [index, page] of pages.entries()) {
         await foreground(desktop, page)
-        await page.screenshot({ path: join(root, `shared-window-${index + 1}.png`) })
+        await capture(desktop, page, `shared-window-${index + 1}.png`)
       }
+      await finishObservation(first)
       await first.close()
       await foreground(desktop, second)
       await submit(second, "SHARED_AFTER_CLOSE: 关闭另一窗口后继续，只回复 SHARED_SURVIVED。")
@@ -273,9 +283,13 @@ try {
       item.pass = true
     } finally {
       if (db) db.close()
+      for (const page of pages)
+        await finishObservation(page).catch((error) =>
+          item.errors.push({ name: error.name, message: String(error.message).slice(0, 300) }),
+        )
       for (const [index, page] of pages.entries())
         if (!page.isClosed()) {
-          await page.screenshot({ path: join(root, `${phase}-${index}-final.png`) }).catch(() => {})
+          await capture(desktop, page, `${phase}-${index}-final.png`).catch(() => {})
           await writeFile(
             join(root, `${phase}-${index}-ui.txt`),
             await page
@@ -326,6 +340,62 @@ try {
   }
   assert(result.phases.every((phase) => phase.closed && phase.errors.length === 0))
   assert(result.phases[1].pass && result.cycles.length === 3)
+  if (binding.auditComposer) {
+    const pointers = composerTraces.flatMap((trace) => trace.pointers)
+    const tags = [
+      "SHARED_SEED",
+      "SHARED_AFTER_CLOSE",
+      ...[1, 2, 3].flatMap((cycle) => [`SHARED_RATE_${cycle}`, `SHARED_RESUME_${cycle}`]),
+    ]
+    for (const tag of tags) {
+      const events = pointers.filter((event) => event.tag === tag)
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["pointerdown", "pointerup", "click"],
+        `${tag}: one physical click only`,
+      )
+      assert(
+        events.every((event) => event.trusted),
+        `${tag}: real input events`,
+      )
+    }
+    const geometry = []
+    const sampled = new Set()
+    for (const trace of composerTraces) {
+      assert(!trace.overflow, "complete bounded renderer trace")
+      for (const tag of tags.filter((tag) => tag !== "SHARED_SEED")) {
+        const frames = trace.frames.filter((frame) => frame.tag === tag && frame.visible === "visible")
+        if (!frames.length) continue
+        sampled.add(tag)
+        assert(frames.length > 2 && frames.every((frame) => frame.inputConnected), `${tag}: mounted composer sampled`)
+        assert(new Set(frames.map((frame) => `${frame.width}x${frame.height}`)).size === 1, "fixed viewport")
+        const bottoms = frames.map((frame) => frame.formBottom)
+        assert(bottoms.every(Number.isFinite), "real form bounds recorded")
+        const drift = Math.max(...bottoms) - Math.min(...bottoms)
+        const gap = Math.max(...frames.slice(1).map((frame, index) => frame.at - frames[index].at))
+        geometry.push({ tag, samples: frames.length, drift, maximumFrameGapMs: gap })
+        assert(drift <= 2, `${tag}: composer bottom drifts ${drift}px`)
+        assert(gap <= 100, `${tag}: frame sampling gap ${gap}ms cannot exclude the old 170ms jump`)
+      }
+      const active = trace.changes.filter((change) => /^SHARED_(RATE|RESUME|AFTER_CLOSE)/.test(change.tag))
+      assert(
+        !active.some((change) => change.text.some((text) => text.includes("已插入"))),
+        "idle followup never says inserted into another active task",
+      )
+      assert(
+        !active.some(
+          (change) => /^SHARED_RATE/.test(change.tag) && change.text.some((text) => /执行出错|需要处理/.test(text)),
+        ),
+        "retry remains nonterminal",
+      )
+    }
+    assert.deepEqual(
+      [...sampled].sort(),
+      tags.filter((tag) => tag !== "SHARED_SEED").sort(),
+      "all followup transitions sampled",
+    )
+    result.composerAudit = { geometry, physicalClicks: tags.length, userInputs: 8 }
+  }
   result.pass = true
 } catch (error) {
   result.failure = { name: error.name, message: String(error.message).slice(0, 1800) }
@@ -355,6 +425,7 @@ async function until(condition, label, timeout = 60000) {
   }
 }
 async function foreground(desktop, page) {
+  for (const probe of observers.values()) await probe.evaluate((value) => value.mark("inactive"))
   const window = await desktop.browserWindow(page)
   await window.evaluate((win) => {
     win.show()
@@ -364,6 +435,34 @@ async function foreground(desktop, page) {
 }
 async function submit(page, text) {
   await composer(page).waitFor({ state: "visible" })
+  if (observers.has(page)) await observers.get(page).evaluate((probe, tag) => probe.mark(tag), text.split(":")[0])
   await composer(page).fill(text)
+  if (binding.auditComposer) {
+    const button = page.locator('[data-action="prompt-submit"]')
+    assert(await button.isEnabled(), "first click has an enabled submit button")
+    const box = await button.boundingBox()
+    assert(box && box.width > 0 && box.height > 0, "real submit button coordinates")
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    return
+  }
   await page.locator('[data-action="prompt-submit"]').click()
+}
+
+async function finishObservation(page) {
+  const probe = observers.get(page)
+  if (!probe) return
+  const trace = await probe.evaluate((value) => value.stop())
+  observers.delete(page)
+  await probe.dispose()
+  composerTraces.push(trace)
+  await writeFile(join(root, `composer-trace-${composerTraces.length}.json`), JSON.stringify(trace))
+}
+
+async function capture(desktop, page, name) {
+  const window = await desktop.browserWindow(page)
+  const png = await window.evaluate(async (window) =>
+    (await window.webContents.capturePage()).toPNG().toString("base64"),
+  )
+  assert(png.length > 100, "nonempty native screenshot")
+  await writeFile(join(root, name), Buffer.from(png, "base64"))
 }
