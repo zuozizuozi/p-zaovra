@@ -139,7 +139,7 @@ jobs:
           mkdir -p "$ZAOVRA_E2E_REPORT_DIR"
           bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts --list --reporter=list > "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
           cat "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
-          grep -Fx "Total: 15 tests in 4 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
+          grep -Fx "Total: 23 tests in 4 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
       - name: Run production desktop browser regressions
         working-directory: packages/app-ui
         run: bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts

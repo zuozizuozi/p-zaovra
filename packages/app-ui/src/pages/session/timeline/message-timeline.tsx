@@ -1276,7 +1276,14 @@ export function MessageTimeline(props: {
             />
           }
         >
-          <details data-component="process-tool-group" onToggle={() => onSizeChange?.()}>
+          <details
+            data-component="process-tool-group"
+            open={open()}
+            onToggle={(event) => {
+              setToolOpen(contextOpenKey(), event.currentTarget.open)
+              onSizeChange?.()
+            }}
+          >
             <summary class="cursor-pointer text-xs text-text-weak">
               {language.t(
                 `session.process.${(() => {
@@ -1292,7 +1299,14 @@ export function MessageTimeline(props: {
                 return (
                   <Show when={message()}>
                     {(message) => (
-                      <MessagePart part={part} message={message()} deferToolContent onContentRendered={onSizeChange} />
+                      <MessagePart
+                        part={part}
+                        message={message()}
+                        toolOpen={toolOpen[part.id] ?? false}
+                        onToolOpenChange={(open) => setToolOpen(part.id, open)}
+                        deferToolContent
+                        onContentRendered={onSizeChange}
+                      />
                     )}
                   </Show>
                 )

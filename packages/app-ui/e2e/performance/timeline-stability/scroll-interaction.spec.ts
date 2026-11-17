@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import {
   defineVisualRegions,
   reportVisualStability,
@@ -11,6 +11,7 @@ import {
   partUpdated,
   setupTimeline,
   shell,
+  sessionID,
   textPart,
   userMessage,
   userID,
@@ -72,20 +73,17 @@ test("does not reverse visible rows when the user wheels during shell remeasurem
       closest: '[data-timeline-row="AssistantPart"]',
     },
   })
-  const details = page.locator(
-    `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
-  )
-  await expect(details).toHaveAttribute("aria-expanded", "false")
-  await details.click()
-  await expect(details).toHaveAttribute("aria-expanded", "true")
+  await openShell(page, shellID)
   await expect(page.locator(`[data-timeline-part-id$=":${shellID}"]`)).toBeVisible()
   await startVisualProbe(page, regions)
   await timeline.send(partUpdated(shell(shellID, "running", lines(30))), 80)
+  await expect(page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="bash-pre"]`)).toContainText("line 30")
   await scroller.evaluate((element) =>
     element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -180 })),
   )
   await scroller.evaluate((element) => (element.scrollTop -= 180))
   await timeline.send(partUpdated(shell(shellID, "running", lines(50))), 250)
+  await expect(page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="bash-pre"]`)).toContainText("line 50")
   const trace = await stopVisualProbe<keyof typeof regions>(page)
   await reportVisualStability(testInfo, "wheel-during-resize", trace, rowPairPlan(regions, 1))
 })
@@ -141,6 +139,7 @@ test("does not pull a keyboard-scrolled user during shell remeasurement", async 
     cpuRate: 4,
   })
   const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
+  await openShell(page, shellID)
   await scroller.focus()
   for (let index = 0; index < 3; index++) {
     await scroller.press("PageUp")
@@ -173,7 +172,15 @@ test("does not pull a keyboard-scrolled user during shell remeasurement", async 
     anchor: { selector: `[data-timeline-key="${anchor}"]` },
   })
   await startVisualProbe(page, regions)
+  const refreshed = page.waitForResponse(
+    async (response) =>
+      new URL(response.url()).pathname === `/api/session/${sessionID}/message` &&
+      response.ok() &&
+      JSON.stringify(await response.json()).includes("line 50"),
+  )
   await timeline.send(partUpdated(shell(shellID, "running", lines(50))), 400)
+  expect(JSON.stringify(await (await refreshed).json())).toContain("line 50")
+  await timeline.settle()
   const trace = await stopVisualProbe<keyof typeof regions>(page)
   await reportVisualStability(testInfo, "keyboard-during-resize", trace, anchorPlan(regions))
 })
@@ -190,6 +197,7 @@ test("tracks keyboard scrolling from a focused timeline descendant", async ({ pa
   const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
   const row = page.locator(`[data-timeline-part-id$=":${shellID}"]`).first()
   const trigger = page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="collapsible-trigger"]`)
+  await openProcess(page)
   await row.evaluate((element) => element.setAttribute("tabindex", "0"))
   await row.focus()
   for (let index = 0; index < 3; index++) {
@@ -229,6 +237,7 @@ test("does not claim keyboard scrolling owned by a nested scrollable", async ({ 
   })
   const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
   const nested = page.locator(`[data-timeline-part-id$=":${shellID}"] [data-scrollable]`)
+  await openShell(page, shellID)
   await nested.evaluate((element) => (element.scrollTop = element.scrollHeight))
   await nested.focus()
   await page.waitForFunction(() => {
@@ -249,7 +258,9 @@ test("does not claim keyboard scrolling owned by a nested scrollable", async ({ 
   expect(await nested.evaluate((element) => element.scrollTop)).toBeLessThan(nestedBefore)
 
   await nested.evaluate((element) => (element.scrollTop = 0))
-  await scroller.evaluate((element) => (element.scrollTop = Math.min(300, element.scrollHeight - element.clientHeight)))
+  // Keep the nested control mounted while testing which scroller owns its boundary key.
+  await scroller.evaluate((element) => (element.scrollTop = Math.max(0, element.scrollTop - 100)))
+  await expect(nested).toBeVisible()
   const boundaryBefore = await scroller.evaluate((element) => element.scrollTop)
   expect(boundaryBefore).toBeGreaterThan(0)
   await nested.press("PageUp")
@@ -266,6 +277,37 @@ test("does not claim keyboard scrolling owned by a nested scrollable", async ({ 
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeLessThan(nonOverflowBefore)
 })
 
+test("preserves expanded command output after its virtual row leaves and returns", async ({ page }, info) => {
+  const shellID = "prt_scroll_return_shell"
+  await setupTimeline(page, {
+    v2ToolUpdates: true,
+    messages: [...history(80), userMessage(), assistantMessage([shell(shellID, "completed", lines(50))])],
+    cpuRate: 4,
+    reducedMotion: true,
+  })
+  const started = performance.now()
+  await openShell(page, shellID)
+  const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
+  const group = page.locator('[data-component="process-tool-group"]')
+  const viewport = await scroller.boundingBox()
+  expect(viewport).not.toBeNull()
+  await page.mouse.move(viewport!.x + viewport!.width / 2, viewport!.y + 40)
+  await page.mouse.wheel(0, -100000)
+  await expect(group).toHaveCount(0)
+  await page.getByRole("button", { name: /Jump to latest/i }).click()
+  await expect(group).toHaveCount(1)
+  await info.attach("scroll-return-observation", {
+    body: JSON.stringify({
+      elapsedMs: performance.now() - started,
+      groupOpen: await group.getAttribute("open"),
+      outputVisible: await page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="bash-scroll"]`).isVisible(),
+    }),
+    contentType: "application/json",
+  })
+  await expect(group).toHaveAttribute("open", "")
+  await expect(page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="bash-scroll"]`)).toBeVisible()
+})
+
 test("jump to latest lands on stable final rows after offscreen growth", async ({ page }, testInfo) => {
   const shellID = "prt_jump_01_shell"
   const followingID = "prt_jump_02_following"
@@ -280,10 +322,19 @@ test("jump to latest lands on stable final rows after offscreen growth", async (
     cpuRate: 4,
   })
   const scroller = page.locator(".scroll-view__viewport", { has: page.locator("[data-timeline-row]") })
+  await openShell(page, shellID)
   await scroller.evaluate(
     (element) => (element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 600)),
   )
+  const refreshed = page.waitForResponse(
+    async (response) =>
+      new URL(response.url()).pathname === `/api/session/${sessionID}/message` &&
+      response.ok() &&
+      JSON.stringify(await response.json()).includes("line 50"),
+  )
   await timeline.send(partUpdated(shell(shellID, "running", lines(50))), 300)
+  expect(JSON.stringify(await (await refreshed).json())).toContain("line 50")
+  await timeline.settle()
   const regions = defineVisualRegions({
     shell: { selector: `[data-timeline-part-id$=":${shellID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
     following: {
@@ -294,6 +345,7 @@ test("jump to latest lands on stable final rows after offscreen growth", async (
   await startVisualProbe(page, regions)
   await page.getByRole("button", { name: /Jump to latest/i }).click()
   await expect(page.locator(`[data-timeline-part-id$=":${followingID}"]`)).toBeVisible()
+  await expect(page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="bash-pre"]`)).toContainText("line 50")
   await page.waitForTimeout(600)
   const trace = await stopVisualProbe<keyof typeof regions>(page)
   await reportVisualStability(
@@ -323,12 +375,13 @@ test("handles a single row taller than the viewport", async ({ page }, testInfo)
       assistantMessage([shell(shellID, "running"), textPart(followingID, "After tall row")], { completed: false }),
     ],
     settings: { shellToolPartsExpanded: true },
-    // Leave enough room above the composer for the probe to observe both rows.
-    // The expanded tool must still exceed the actual timeline viewport below.
-    viewport: { width: 900, height: 500 },
+    // The shell output is capped, so use a viewport shorter than its expanded row.
+    // Keep the real geometry assertion below; more output lines alone cannot make it taller.
+    viewport: { width: 900, height: 420 },
     cpuRate: 4,
     seedHistory: true,
   })
+  await openShell(page, shellID)
   const regions = defineVisualRegions({
     shell: { selector: `[data-timeline-part-id$=":${shellID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
     following: {
@@ -338,6 +391,7 @@ test("handles a single row taller than the viewport", async ({ page }, testInfo)
   })
   await startVisualProbe(page, regions)
   await timeline.send(partUpdated(shell(shellID, "completed", lines(100))), 700)
+  await expect(page.locator(`[data-timeline-part-id$=":${shellID}"] [data-slot="bash-pre"]`)).toContainText("line 100")
   const dimensions = await page.locator(`[data-timeline-part-id$=":${shellID}"]`).evaluate((element) => {
     const row = element.closest('[data-timeline-row="AssistantPart"]')!
     const viewport = element.closest(".scroll-view__viewport")!
@@ -362,6 +416,31 @@ test("handles a single row taller than the viewport", async ({ page }, testInfo)
     ]),
   )
 })
+
+async function openProcess(page: Page) {
+  const details = page.locator(
+    `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
+  )
+  await expect(details).toHaveAttribute("aria-expanded", "false")
+  await details.click()
+  await expect(details).toHaveAttribute("aria-expanded", "true")
+  const group = page.locator('[data-component="process-tool-group"]')
+  // Completed commands are grouped; a running command remains an individual row.
+  if (await group.count()) {
+    await expect(group).toHaveCount(1)
+    if ((await group.getAttribute("open")) === null) await group.locator(":scope > summary").click()
+    await expect(group).toHaveAttribute("open", "")
+  }
+}
+
+async function openShell(page: Page, shellID: string) {
+  await openProcess(page)
+  const tool = page.locator(`[data-timeline-part-id$=":${shellID}"]`)
+  const trigger = tool.locator('[data-slot="collapsible-trigger"]')
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") await trigger.click()
+  await expect(trigger).toHaveAttribute("aria-expanded", "true")
+  await expect(tool.locator('[data-slot="bash-scroll"]')).toBeVisible()
+}
 
 function history(count: number): TimelineMessage[] {
   return Array.from({ length: count }, (_, index) => {
