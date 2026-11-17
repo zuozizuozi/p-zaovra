@@ -83,9 +83,14 @@ describe("LocationServiceMap", () => {
             fs.writeFile(
               path.join(blocked.path, "zaovra.json"),
               JSON.stringify({
+                memory: { enabled: true },
                 experimental: { policies: [{ effect: "deny", action: "provider.use", resource: "test" }] },
               }),
             ),
+          )
+
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(allowed.path, "zaovra.json"), JSON.stringify({ memory: { enabled: true } })),
           )
 
           const update = (directory: string) =>

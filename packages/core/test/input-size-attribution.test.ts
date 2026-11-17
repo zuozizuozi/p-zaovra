@@ -57,6 +57,7 @@ const it = testEffect(
               new Config.Document({
                 type: "document",
                 info: new Config.Info({
+                  memory: { enabled: true },
                   experimental: new ConfigExperimental.Experimental({
                     verification: false,
                     delivery_contract: false,
