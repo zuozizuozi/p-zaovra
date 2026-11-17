@@ -133,13 +133,13 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
       - name: Set the browser evidence directory
         run: echo "ZAOVRA_E2E_REPORT_DIR=$RUNNER_TEMP/desktop-browser" >> "$GITHUB_ENV"
-      - name: Verify the fifteen desktop regression cases
+      - name: Verify the desktop regression inventory
         working-directory: packages/app-ui
         run: |
           mkdir -p "$ZAOVRA_E2E_REPORT_DIR"
           bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts --list --reporter=list > "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
           cat "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
-          grep -Fx "Total: 26 tests in 5 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
+          grep -Fx "Total: 28 tests in 6 files" "$ZAOVRA_E2E_REPORT_DIR/inventory.txt"
       - name: Run production desktop browser regressions
         working-directory: packages/app-ui
         run: bun x --no-install playwright test --config e2e/performance/timeline-stability/ci.config.ts
