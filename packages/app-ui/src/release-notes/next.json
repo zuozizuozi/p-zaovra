@@ -1,46 +1,46 @@
 {
   "zh": [
     {
-      "title": "记忆：Zaovra 会记住以前对话里的事",
-      "description": "你说过“以后都……”“记住……”的话、项目里跑通过的测试和构建命令，会留到以后的对话里用；模型也可以查到本项目以前的对话。每个项目各记各的"
+      "title": "修复版 Beta：记忆默认关闭",
+      "description": "本次优先修复稳定性。记忆仍处于试验阶段，新配置默认关闭；已有显式设置保留。需要时可在设置中开启试用，已有笔记不会因关闭而删除。记忆质量与成本验收尚未完成"
     },
     {
-      "title": "记了什么你都看得到、改得了",
-      "description": "设置里新增“记忆”页：每一条都能改、能删、能清空，删掉的不会再被记回来；不想用可以一键关闭，已有的笔记不会丢"
+      "title": "工具出错后的状态更准确",
+      "description": "保留原始工具错误，并单独显示后续是否已恢复；证据不足时不判定为已恢复。重开会话后仍保留这些状态"
     },
     {
-      "title": "整理记忆由你决定",
-      "description": "“现在整理”会开一个普通对话，逐条核对笔记、标出过时的、合并重复的，最多用 30 万 token；你不点它不会运行"
+      "title": "停止与续聊衔接更稳",
+      "description": "手动停止后，新消息可以继续当前会话；没有新消息时不会因停止而重发。切换会话和重连时，也会核对实际执行状态"
     },
     {
-      "title": "补丁格式不完整也能改文件",
-      "description": "模型写补丁时漏掉开头或结尾标记，以前会直接失败，现在能正常应用"
+      "title": "修复同步与跳转到最新内容",
+      "description": "修复切换同步方式后消息未初始化的问题；向上滚动后点击跳转到底部，现在会立即回到最新内容"
     },
     {
-      "title": "停止标记不再挂错位置",
-      "description": "任务里跑过命令再点停止，“已停止”现在标在你发的那条消息上"
+      "title": "改文件和模型兼容性修复",
+      "description": "补全缺失补丁边界标记，改善编辑失败的提示；修复 DeepSeek 自动降级后的模式记录和 Windows 读取缺失文件的错误分类"
     }
   ],
   "en": [
     {
-      "title": "Memory: Zaovra remembers earlier conversations",
-      "description": "Things you said with \"from now on\" or \"remember\", and the test and build commands that worked in a project, carry into later conversations; the model can also look up earlier conversations in the same project. Each project keeps its own"
+      "title": "Repair Beta: memory is off by default",
+      "description": "This release prioritizes stability. Memory remains experimental and is off in new configurations; explicit existing settings are preserved. You can enable it in Settings, and turning it off does not delete saved notes. Memory quality and cost acceptance is not complete"
     },
     {
-      "title": "You can see and change everything it kept",
-      "description": "A new Memory page in Settings lets you edit, delete or clear every note; a deleted note is not recorded again. One switch turns memory off without losing existing notes"
+      "title": "Clearer status after tool errors",
+      "description": "Original tool errors stay visible, with a separate indication of subsequent recovery. Insufficient evidence is not treated as recovery. These states remain available after reopening a session"
     },
     {
-      "title": "Tidying memory is your call",
-      "description": "\"Tidy now\" starts an ordinary conversation that checks each note, marks what is out of date and merges repeats, using at most 300,000 tokens. It never runs unless you press it"
+      "title": "More reliable stop and continuation",
+      "description": "A new message can continue the session after a manual stop; stopping alone does not resend the request. Session switching and reconnection also check the actual execution state"
     },
     {
-      "title": "Patches with a missing marker still apply",
-      "description": "When a model leaves off the opening or closing marker of a patch, the edit used to fail; it now applies"
+      "title": "Synchronization and jump-to-latest fixes",
+      "description": "Fixed missing message initialization after switching synchronization modes. Clicking the jump-to-bottom control after scrolling up now returns immediately to the latest content"
     },
     {
-      "title": "Stop is shown on the right message",
-      "description": "After a task that ran commands, pressing Stop now marks the message you sent"
+      "title": "File editing and model compatibility fixes",
+      "description": "Accepts patches with missing boundary markers and improves edit-failure guidance. Fixes mode provenance after DeepSeek fallback and error classification for missing files on Windows"
     }
   ]
 }

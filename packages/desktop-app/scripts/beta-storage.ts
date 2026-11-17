@@ -8,9 +8,9 @@ import { BetaError, betaErrorDetails, betaOperation, betaResponseError } from ".
 
 export const versionPattern = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
 
-// New Betas are numbered on this line. Earlier lines stay readable so the release before a
-// line change is still a valid predecessor.
-const line = "0.3"
+// Ship the stability Beta before the memory release. Older and manually reviewed
+// lines remain readable; an already-published newer line must never be downgraded.
+const line = "0.2"
 
 export function requireBetaVersion(version: string | undefined) {
   const match = /^0\.[23]\.(0|[1-9]\d*)-beta\.1$/.exec(version ?? "")
@@ -26,6 +26,8 @@ export function nextBetaVersion(keys: string[], current?: string) {
   })
   if (current) {
     if (!versionPattern.test(current)) throw new Error("Invalid current Beta version")
+    if (semver.order(current, "0.3.0-beta.1") >= 0)
+      throw new Error("Published Beta is newer than the repair line; review the release line before reserving")
     versions.push(current)
   }
   // Legacy releases remain readable; each new release advances the visible patch number.
