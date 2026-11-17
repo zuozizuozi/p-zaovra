@@ -442,11 +442,18 @@ async function runTurn(page, database, runtime, item) {
       if (item.mode === "error") {
         const errors = tools.filter(
           (tool) =>
-            tool.name === "bash" && tool.state.input?.command === item.command && tool.state.structured?.exit === 7,
+            tool.name === "bash" &&
+            tool.state.structured?.exit === 7 &&
+            item.approvals.some((entry) => entry.approved && entry.command === tool.state.input?.command),
         )
         assert.equal(errors.length, 1, "one actual exit7 tool error, not a simulated statement")
         assert.equal(tools.length, 1, "no repair or repeated tool execution during deliberate error")
-        item.errorObserved = { toolID: errors[0].id, status: errors[0].state.status, exit: 7 }
+        item.errorObserved = {
+          toolID: errors[0].id,
+          command: errors[0].state.input.command,
+          status: errors[0].state.status,
+          exit: 7,
+        }
       }
       item.successfulTerminal = current.at(-1).id
       break
