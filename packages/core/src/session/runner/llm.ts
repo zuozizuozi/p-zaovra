@@ -3009,6 +3009,9 @@ const layer = Layer.effect(
       const session = yield* getSession(sessionID)
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
+      // A reopened location hydrates its agents and provider catalog asynchronously,
+      // just as on the ordinary run path. Do not resolve a model before it is ready.
+      yield* plugins.wait(PluginInternal.readyID)
       const agent = yield* agents.select(session.agent)
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent, session.id), session.id)
       const system =

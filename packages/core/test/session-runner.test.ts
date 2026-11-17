@@ -4776,6 +4776,39 @@ describe("SessionRunnerLLM", () => {
       }),
   )
 
+  it.effect("manual compaction waits for cold location plugins before resolving its model", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      const entered = yield* Deferred.make<void>()
+      const ready = yield* Deferred.make<void>()
+      let resolved = false
+      pluginWaitHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(ready)))
+      modelResolveHook = Effect.sync(() => {
+        resolved = true
+      })
+      requests.length = 0
+      response = fragmentFixture("text", "cold-summary", [handoff("Preserve the task after reopening")]).completeEvents
+      const runner = yield* SessionRunner.Service
+      const running = yield* runner.compact(sessionID).pipe(Effect.forkChild)
+      expect(
+        yield* Effect.raceFirst(
+          Deferred.await(entered).pipe(Effect.as("waiting")),
+          Fiber.join(running).pipe(Effect.as("finished")),
+        ),
+      ).toBe("waiting")
+      expect(resolved).toBe(false)
+      expect(requests).toHaveLength(0)
+      yield* Deferred.succeed(ready, undefined)
+      expect(yield* Fiber.join(running)).toBe(true)
+      expect(resolved).toBe(true)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.context(sessionID))[0]).toMatchObject({
+        type: "compaction",
+        summary: handoff("Preserve the task after reopening"),
+      })
+    }),
+  )
+
   for (const context of [undefined, 0]) {
     it.effect(`manually compacts with unknown context metadata (${context}) without guessing a model limit`, () =>
       Effect.gen(function* () {

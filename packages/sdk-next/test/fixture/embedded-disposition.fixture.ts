@@ -195,23 +195,27 @@ test("embedded host persists real failed-read recovery through its ordinary rout
           true,
         )
         expect(compactedContext.some((message) => message.id === original.id)).toBe(false)
-        // The fresh runner refreshes system context before compacting. That
-        // committed source legitimately recalculates the report's basis, while
-        // the original error, evidence, status and all other fields must stay.
+        // Unchanged initialized context must preserve the entire report. If the
+        // fresh runner observes a real context change, only that committed source
+        // may advance its basis; the original error and evidence must stay.
         const refreshed = (yield* reopened.sessions.history({ sessionID: saved.sessionID, limit: 100 })).data
           .slice(saved.history.length)
           .find((event) => event.type === "session.next.context.updated")
         const basisSeq = refreshed?.durable?.seq
-        if (basisSeq === undefined) throw new Error("Missing fresh runner context update")
+        if (refreshed && basisSeq === undefined) throw new Error("Context update lacks a durable sequence")
         const retained = yield* reopened.sessions.message({ sessionID: saved.sessionID, messageID: original.id })
-        expect(retained).toEqual({
-          ...original,
-          content: original.content.map((part) =>
-            part.type === "tool" && part.id === "call-1"
-              ? { ...part, failureDisposition: { ...part.failureDisposition, basisSeq } }
-              : part,
-          ),
-        })
+        expect(retained).toEqual(
+          refreshed
+            ? {
+                ...original,
+                content: original.content.map((part) =>
+                  part.type === "tool" && part.id === "call-1"
+                    ? { ...part, failureDisposition: { ...part.failureDisposition, basisSeq } }
+                    : part,
+                ),
+              }
+            : original,
+        )
         if (retained?.type !== "assistant") throw new Error("Original message was removed by compaction")
         yield* reopened.sessions.prompt({
           sessionID: saved.sessionID,
