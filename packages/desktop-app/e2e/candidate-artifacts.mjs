@@ -394,7 +394,8 @@ try {
     assert.equal(item.errors.length, 0)
   }
   assert(result.phases.every((phase) => phase.closed && phase.errors.length === 0))
-  assert(result.phases[1].pass)
+  assert(result.phases.some((phase) => phase.phase === "restore" && phase.pass))
+  assert(result.phases.every((phase) => phase.phase === "bootstrap" || phase.pass))
   result.pass = true
 } catch (error) {
   result.failure = { name: error.name, message: String(error.message).slice(0, 1800) }
