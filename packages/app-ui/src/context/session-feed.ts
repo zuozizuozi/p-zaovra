@@ -296,6 +296,9 @@ export function createSessionFeed(
       for (const event of missed) {
         const decoded = decode(event)
         if (!decoded || decoded === "unreadable" || !reducible.has(decoded.type)) continue
+        // A page read before deletion can contain rows no longer in this transcript.
+        // Refuse it rather than resurrect them while replaying only the retained page.
+        if (decoded.type === "session.next.revert.committed") return "expired" as const
         // Events since the page was read may have changed its messages, but never add to it: every
         // message they created is newer than the page. A step only closes the page's last unfinished
         // assistant if no newer assistant existed at that point, as the kernel decides it.
@@ -303,15 +306,27 @@ export function createSessionFeed(
           {
             ...scoped,
             appendMessage: () => Effect.void,
-            getTurn: () => Effect.succeed(undefined),
+            getTurn: () =>
+              Effect.succeed(
+                [...older.messages, ...state.messages]
+                  .filter((message) => (message.seq ?? -1) >= 0 && message.seq! <= event.seq)
+                  .toSorted(bySequence)
+                  .at(-1)?.turn,
+              ),
+            // The failed page need not contain the assistant that supplied new evidence.
+            // Its immutable ownership may be read from the newer page already held.
+            getTurnOf: (id) =>
+              scoped.getTurnOf(id).pipe(Effect.flatMap((turn) => (turn ? Effect.succeed(turn) : memory.getTurnOf(id)))),
             getCurrentAssistant: () =>
               state.messages.some((message) => message.type === "assistant" && (message.seq ?? 0) < event.seq)
                 ? Effect.succeed(undefined)
                 : scoped.getCurrentAssistant(),
             getCurrentShell: (callID) =>
-              state.messages.some((message) => message.type === "shell" && message.callID === callID)
-                ? Effect.succeed(undefined)
-                : scoped.getCurrentShell(callID),
+              memory
+                .getCurrentShell(callID)
+                .pipe(Effect.flatMap((shell) => (shell ? Effect.succeed(shell) : scoped.getCurrentShell(callID)))),
+            updateShell: (shell) =>
+              older.messages.some((message) => message.id === shell.id) ? scoped.updateShell(shell) : Effect.void,
           },
           event,
           decoded.type,

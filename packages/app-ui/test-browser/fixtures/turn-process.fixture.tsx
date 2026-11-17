@@ -85,8 +85,29 @@ const value = {
 
 function mount(blocked = false, before = false) {
   const tools = blocked ? [failure] : [failure, success]
-  const parts = { user: [request], first: [failure], last: blocked ? [answer] : [success, answer] }
-  const quiet = quietToolFailures({ message: last, messages: [user, first, last], parts, working: false })
+  const owner = { ...first, id: "msg_first", sessionID: "ses_process", turn: "msg_request", seq: 2 }
+  const reported: ToolPart = {
+    ...failure,
+    messageID: owner.id,
+    sessionID: owner.sessionID,
+    settledSeq: 3,
+    failureDisposition: {
+      version: 1,
+      sessionID: owner.sessionID,
+      assistantMessageID: owner.id,
+      turnID: owner.turn,
+      callID: failure.callID,
+      basisSeq: 8,
+      status: blocked ? "failed" : "exploratory",
+      reason: blocked ? "tool-error" : "exploratory-miss",
+    },
+  }
+  const quiet = quietToolFailures({
+    message: owner,
+    messages: [owner],
+    parts: { [owner.id]: [reported] },
+    working: false,
+  })
   const [state, setState] = createStore({ folded: true })
   const host = document.createElement("main")
   document.body.append(host)
@@ -151,7 +172,9 @@ test("normal completion folds exploratory failure into a neutral count, and expa
   const fixture = mount()
   try {
     // Folded, the heading already names what happened and how many attempts failed.
-    expect(fixture.host.querySelector("[data-slot=process-counts]")?.textContent).toBe("编辑 1 项、另外1项操作（1个失败）")
+    expect(fixture.host.querySelector("[data-slot=process-counts]")?.textContent).toBe(
+      "编辑 1 项、另外1项操作（1个失败）",
+    )
     expect(fixture.host.textContent).toContain("用时 4 秒")
     expect(fixture.host.querySelector("[data-slot=turn-terminal-status]")).toBeNull()
     expect(fixture.host.textContent).not.toContain("当前未执行")

@@ -1636,6 +1636,35 @@ export type SessionsContextOutput = {
                     }
                     readonly result?: JsonValue
                   }
+              readonly settledSeq?: number
+              readonly settlement?: "interrupted"
+              readonly failureDisposition?:
+                | {
+                    readonly version: 1
+                    readonly sessionID: string
+                    readonly turnID: string
+                    readonly assistantMessageID: string
+                    readonly callID: string
+                    readonly basisSeq: number
+                    readonly status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown"
+                    readonly reason:
+                      | "invalidated"
+                      | "incomplete"
+                      | "unverified"
+                      | "same-operation"
+                      | "exploratory-miss"
+                      | "no-changes"
+                      | "tool-error"
+                      | "verification"
+                      | "uncertain"
+                      | "interrupted"
+                    readonly evidence?: {
+                      readonly assistantMessageID: string
+                      readonly callID: string
+                      readonly settledSeq: number
+                    }
+                  }
+                | { readonly [x: string]: JsonValue }
               readonly time: {
                 readonly created: number
                 readonly ran?: number
@@ -2746,6 +2775,7 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly assistantMessageID: string
           readonly callID: string
+          readonly settlement?: "interrupted"
           readonly error: {
             readonly type: "unknown"
             readonly message: string
@@ -2756,6 +2786,42 @@ export type SessionsHistoryOutput = {
             readonly executed: boolean
             readonly metadata?: { readonly [x: string]: { readonly [x: string]: JsonValue } }
           }
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.tool.disposition"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly reports: ReadonlyArray<{
+            readonly version: 1
+            readonly sessionID: string
+            readonly turnID: string
+            readonly assistantMessageID: string
+            readonly callID: string
+            readonly basisSeq: number
+            readonly status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown"
+            readonly reason:
+              | "invalidated"
+              | "incomplete"
+              | "unverified"
+              | "same-operation"
+              | "exploratory-miss"
+              | "no-changes"
+              | "tool-error"
+              | "verification"
+              | "uncertain"
+              | "interrupted"
+            readonly evidence?: {
+              readonly assistantMessageID: string
+              readonly callID: string
+              readonly settledSeq: number
+            }
+          }>
         }
       }
     | {
@@ -3971,6 +4037,7 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly assistantMessageID: string
         readonly callID: string
+        readonly settlement?: "interrupted"
         readonly error: {
           readonly type: "unknown"
           readonly message: string
@@ -3981,6 +4048,42 @@ export type SessionsEventsOutput =
           readonly executed: boolean
           readonly metadata?: { readonly [x: string]: { readonly [x: string]: unknown } }
         }
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.tool.disposition"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly reports: ReadonlyArray<{
+          readonly version: 1
+          readonly sessionID: string
+          readonly turnID: string
+          readonly assistantMessageID: string
+          readonly callID: string
+          readonly basisSeq: number
+          readonly status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown"
+          readonly reason:
+            | "invalidated"
+            | "incomplete"
+            | "unverified"
+            | "same-operation"
+            | "exploratory-miss"
+            | "no-changes"
+            | "tool-error"
+            | "verification"
+            | "uncertain"
+            | "interrupted"
+          readonly evidence?: {
+            readonly assistantMessageID: string
+            readonly callID: string
+            readonly settledSeq: number
+          }
+        }>
       }
     }
   | {
@@ -5452,6 +5555,35 @@ export type SessionsMessageOutput = {
                     }
                     readonly result?: JsonValue
                   }
+              readonly settledSeq?: number
+              readonly settlement?: "interrupted"
+              readonly failureDisposition?:
+                | {
+                    readonly version: 1
+                    readonly sessionID: string
+                    readonly turnID: string
+                    readonly assistantMessageID: string
+                    readonly callID: string
+                    readonly basisSeq: number
+                    readonly status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown"
+                    readonly reason:
+                      | "invalidated"
+                      | "incomplete"
+                      | "unverified"
+                      | "same-operation"
+                      | "exploratory-miss"
+                      | "no-changes"
+                      | "tool-error"
+                      | "verification"
+                      | "uncertain"
+                      | "interrupted"
+                    readonly evidence?: {
+                      readonly assistantMessageID: string
+                      readonly callID: string
+                      readonly settledSeq: number
+                    }
+                  }
+                | { readonly [x: string]: JsonValue }
               readonly time: {
                 readonly created: number
                 readonly ran?: number
@@ -8686,6 +8818,35 @@ export type MessagesListOutput = {
                     }
                     readonly result?: JsonValue
                   }
+              readonly settledSeq?: number
+              readonly settlement?: "interrupted"
+              readonly failureDisposition?:
+                | {
+                    readonly version: 1
+                    readonly sessionID: string
+                    readonly turnID: string
+                    readonly assistantMessageID: string
+                    readonly callID: string
+                    readonly basisSeq: number
+                    readonly status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown"
+                    readonly reason:
+                      | "invalidated"
+                      | "incomplete"
+                      | "unverified"
+                      | "same-operation"
+                      | "exploratory-miss"
+                      | "no-changes"
+                      | "tool-error"
+                      | "verification"
+                      | "uncertain"
+                      | "interrupted"
+                    readonly evidence?: {
+                      readonly assistantMessageID: string
+                      readonly callID: string
+                      readonly settledSeq: number
+                    }
+                  }
+                | { readonly [x: string]: JsonValue }
               readonly time: {
                 readonly created: number
                 readonly ran?: number

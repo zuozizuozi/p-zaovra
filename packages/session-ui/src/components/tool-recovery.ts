@@ -1,9 +1,6 @@
 import type { AssistantMessage, Message, Part, ToolPart } from "@zaovra-ai/sdk/v2"
-import { SessionRequest } from "@zaovra-ai/schema/session-request"
-import { diagnosticFailures, formattingFailures } from "./formatting-failures"
-import { displayTurnOwners, isContinuation } from "./turn-ownership"
+import { SessionToolDisposition } from "@zaovra-ai/schema/session-tool-disposition"
 
-/** Display-only evidence. A later successful operation never changes the stored failure or verification verdict. */
 type RecoveryInput = {
   message: AssistantMessage
   messages: readonly Message[]
@@ -12,250 +9,65 @@ type RecoveryInput = {
   historyComplete?: boolean
 }
 
-/** A cancelled in-flight tool belongs to the turn's interruption marker, not a second failure card. */
-export function toolExecutionInterrupted(message: Pick<AssistantMessage, "finish" | "error"> | undefined, part: Part) {
-  return (
-    (message?.finish === "interrupted" ||
-      message?.finish === "stopped" ||
-      message?.error?.name === "MessageAbortedError") &&
-    part.type === "tool" &&
-    part.state.status === "error" &&
-    /^(?:Error:\s*)?Tool execution interrupted[.!]?$/i.test(part.state.error.trim())
-  )
-}
-
-function toolFailureTurn(input: RecoveryInput) {
-  const messages = input.messages
-    .filter((message) => message.sessionID === input.message.sessionID)
-    .toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
-  const owners = displayTurnOwners(messages, (id) => input.parts[id] ?? [])
-  messages.forEach((message) => {
-    if (message.role === "assistant") owners.set(message.id, owners.get(message.parentID) ?? message.parentID)
-  })
-  const request = owners.get(input.message.id)
-  const active = messages.findLast((message) => message.role === "assistant")
-  if (!request) return
-  return { messages, owners, request, working: !!(input.working && active && owners.get(active.id) === request) }
-}
-
-/** Pending evidence is a light process entry, not a claim that the failed operation recovered. */
-export function toolFailureInProgress(input: RecoveryInput) {
-  return input.working && (toolFailureTurn(input)?.working ?? false)
-}
-
-function settledTools(input: RecoveryInput) {
-  const scope = toolFailureTurn(input)
-  if (!scope || scope.working) return
-  const turn = scope.messages.filter(
-    (message): message is AssistantMessage =>
-      message.role === "assistant" && scope.owners.get(message.id) === scope.request,
-  )
-  const last = turn.at(-1)
-  if (typeof last?.time.completed !== "number" || !last.finish || last.finish === "tool-calls") return
-  const tools = turn
-    .flatMap((message) => input.parts[message.id] ?? [])
-    .filter((part): part is ToolPart => part.type === "tool")
-  if (tools.some((part) => part.state.status === "pending" || part.state.status === "running")) return
-  return { tools, last, request: scope.request, messages: scope.messages }
-}
-
-export function recoveredToolFailures(input: RecoveryInput) {
-  const tools = settledTools(input)?.tools
-  return tools
-    ? recoveries(tools).filter((part) => part.tool !== "read" || quietToolFailures(input).includes(part))
-    : []
-}
-
-function recoveries(tools: ToolPart[]) {
-  return tools.filter((part, index) => {
-    if (part.state.status !== "error" || verification(part)) return false
-    if (part.tool === "read" && part.state.metadata?.readFailure !== "not_found") return false
-    if (part.tool === "edit" && /^\s*(?:Error:\s*)?No changes to apply:/i.test(part.state.error)) return true
-    const metadata = part.state.metadata
-    if (/\bOutcome may have occurred\b|\btimeout\b|\btimed out\b|\bpartial/i.test(part.state.error)) return false
-    if (metadata?.timeout || (metadata?.phase === "mutation" && metadata.reason !== "match-failed")) return false
-    const end = part.state.time.end
-    return tools.slice(index + 1).some((success) => {
-      if (success.state.status !== "completed" || success.state.time.end < end || verification(success)) return false
-      if (formattingFailures(success.state.metadata).length || diagnosticFailures(success.state.metadata).length)
-        return false
-      if (typeof success.state.metadata.exit === "number" && success.state.metadata.exit !== 0) return false
-      if (success.state.metadata.timeout || success.state.metadata.job_id) return false
-      return sameOperation(part, success)
-    })
-  })
-}
-
-/** Exploratory misses are quiet only after a successful alternative, never merely because prose claims success. */
-export function quietToolFailures(input: RecoveryInput) {
-  const settled = settledTools(input)
-  const recovered = settled ? recoveries(settled.tools).filter((part) => part.tool !== "read") : []
-  if (!settled || settled.last.error || settled.last.finish !== "stop") return recovered
-  if (!(input.parts[settled.last.id] ?? []).some((part) => part.type === "text" && part.text.trim())) return recovered
-  const agents = new Map(
-    input.messages.filter((message) => message.role === "assistant").map((message) => [message.id, message.agent]),
-  )
-  const users = (
-    settled.tools.some(
-      (part) =>
-        part.tool === "read" && part.state.status === "error" && part.state.metadata?.readFailure === "not_found",
-    )
-      ? settled.messages
-      : []
-  )
-    .slice(0, settled.messages.findIndex((message) => message.id === settled.request) + 1)
-    .filter((message) => message.role === "user" && !isContinuation(input.parts[message.id] ?? []))
-    .map((message) => {
-      const parts = input.parts[message.id] ?? []
-      const text = parts.filter(
-        (part): part is Extract<Part, { type: "text" }> => part.type === "text" && !part.synthetic,
-      )
-      const source = text.find((part) => typeof part.metadata?.zaovraRequestText === "string")?.metadata
-      return {
-        id: message.id,
-        type: "user",
-        text:
-          typeof source?.zaovraRequestText === "string"
-            ? source.zaovraRequestText
-            : text.map((part) => part.text).join("\n"),
-        visibleText: text.map((part) => part.text).join("\n"),
-        files: parts.filter((part) => part.type === "file"),
-        agents: parts.filter((part) => part.type === "agent"),
-        subtask: source?.zaovraRequestSubtask,
-        invocation: source?.zaovraRequestInvocation,
-      }
-    })
-  const requested = SessionRequest.requested(users, () => "")
-  const scope = users.slice(users.findIndex((message) => message.id === requested.sourceMessageID))
-  const start = scope[0]
-  // A continuation at a page boundary is not evidence of the original request.
-  const startKnown =
-    start &&
-    !/^(?:补充要求|追加要求|修改要求)\s*[。.!！]*$/u.test(start.text.trim()) &&
-    (input.historyComplete === true || SessionRequest.continuationText(start.text) === undefined)
-  // Missing request pages or opaque attachment/delegation sources cannot prove a file was unrequested.
-  const request =
-    startKnown &&
-    scope.every((message) => message.text.trim() && !message.files.length && !message.agents.length && !message.subtask)
-      ? requested
-      : undefined
-  const sources = new Set(request?.entries.map((entry) => entry.sourceMessageID))
-  // Match the source text, so punctuation in a filename cannot be split across clauses.
-  const originalText = request
-    ? scope
-        .filter((message) => sources.has(message.id))
-        .flatMap((message) => [
-          message.text,
-          message.visibleText,
-          ...(typeof message.invocation === "string" ? [message.invocation] : []),
-        ])
-    : undefined
-  const exploratory = (part: ToolPart) =>
-    part.state.status === "error" &&
-    !verification(part) &&
-    !uncertain(part) &&
-    (part.tool === "read"
-      ? part.state.metadata?.readFailure === "not_found"
-      : ["list", "glob", "grep", "websearch"].includes(part.tool) &&
-        /\b(?:ENOENT|file not found|no such file|does not exist|no (?:results|matches)(?: found)?)\b/i.test(
-          part.state.error,
-        ))
-  // An unresolved verification, mutation, permission or unknown error prevents an outcome-neutral claim.
+/** Read the persisted verdict, never infer recovery from the visible page. */
+export function toolFailureDisposition(message: AssistantMessage | undefined, part: Part) {
+  if (!message || part.type !== "tool" || part.state.status !== "error") return
+  const report = SessionToolDisposition.read(part.failureDisposition)
   if (
-    settled.tools.some(
-      (part) =>
-        (part.state.status === "error" && !recovered.includes(part) && !exploratory(part)) ||
-        (part.state.status === "completed" &&
-          (formattingFailures(part.state.metadata).length > 0 ||
-            diagnosticFailures(part.state.metadata).length > 0 ||
-            !!part.state.metadata.timeout ||
-            !!part.state.metadata.job_id ||
-            (typeof part.state.metadata.exit === "number" && part.state.metadata.exit !== 0) ||
-            (verification(part) && (part.state.metadata.exit !== 0 || !!part.state.metadata.execution)))),
-    )
+    !report ||
+    !message.turn ||
+    !Number.isSafeInteger(message.seq) ||
+    message.seq! < 0 ||
+    !Number.isSafeInteger(part.settledSeq) ||
+    part.settledSeq! < message.seq! ||
+    report.basisSeq < part.settledSeq! ||
+    report.sessionID !== message.sessionID ||
+    part.sessionID !== message.sessionID ||
+    report.assistantMessageID !== message.id ||
+    part.messageID !== message.id ||
+    report.callID !== part.callID ||
+    report.turnID !== message.turn
   )
-    return recovered
-  return settled.tools.filter((part, index, tools) => {
-    if (recovered.includes(part)) return true
-    if (part.state.status !== "error" || !exploratory(part)) return false
-    const path = part.state.input.path ?? part.state.input.filePath
-    const filename = typeof path === "string" ? path.split(/[\\/]/).at(-1)?.trim().toLowerCase() : undefined
-    const unrequested =
-      originalText &&
-      filename &&
-      filename !== "." &&
-      filename !== ".." &&
-      !originalText.some((text) => text.replaceAll("\\", "/").toLowerCase().includes(filename))
-    const end = part.state.time.end
-    return tools
-      .slice(index + 1)
-      .some(
-        (next) =>
-          next.state.status === "completed" &&
-          next.state.time.end >= end &&
-          (part.tool !== "read" ||
-            ((next.tool === "read" || (next.tool === "write" && unrequested)) &&
-              typeof (part.state.input.path ?? part.state.input.filePath) === "string" &&
-              !!(part.state.input.path ?? part.state.input.filePath) &&
-              (part.state.input.path ?? part.state.input.filePath) ===
-                (next.state.input.path ?? next.state.input.filePath) &&
-              !!agents.get(part.messageID) &&
-              agents.get(part.messageID) === agents.get(next.messageID))) &&
-          !next.state.metadata.timeout &&
-          !next.state.metadata.job_id &&
-          (typeof next.state.metadata.exit !== "number" || next.state.metadata.exit === 0),
-      )
+    return
+  return report
+}
+
+export function toolExecutionInterrupted(message: AssistantMessage | undefined, part: Part) {
+  return toolFailureDisposition(message, part)?.status === "interrupted"
+}
+
+/** Only a live backend status and the current durable turn may quiet pending evidence. */
+export function toolFailureInProgress(input: RecoveryInput) {
+  if (!input.working || !input.message.turn || !Number.isSafeInteger(input.message.seq) || input.message.seq! < 0)
+    return false
+  const current = input.messages
+    .filter(
+      (message) =>
+        message.sessionID === input.message.sessionID &&
+        Number.isSafeInteger(message.seq) &&
+        message.seq! >= 0 &&
+        message.turn &&
+        (message.role === "assistant" || message.turn === message.id),
+    )
+    .toSorted((a, b) => a.seq! - b.seq!)
+    .at(-1)
+  return (
+    !!current &&
+    current.turn === input.message.turn &&
+    (current.role === "user" || current.time.completed === undefined || current.finish === "tool-calls")
+  )
+}
+
+export function recoveredToolFailures(input: RecoveryInput): ToolPart[] {
+  return (input.parts[input.message.id] ?? []).filter(
+    (part): part is ToolPart =>
+      part.type === "tool" && toolFailureDisposition(input.message, part)?.status === "recovered",
+  )
+}
+
+export function quietToolFailures(input: RecoveryInput): ToolPart[] {
+  return (input.parts[input.message.id] ?? []).filter((part): part is ToolPart => {
+    const status = toolFailureDisposition(input.message, part)?.status
+    return part.type === "tool" && (status === "recovered" || status === "exploratory" || status === "interrupted")
   })
-}
-
-function uncertain(part: ToolPart) {
-  const metadata = "metadata" in part.state ? part.state.metadata : undefined
-  return (
-    (part.state.status === "error" &&
-      /\bOutcome may have occurred\b|\btimeout\b|\btimed out\b|\bpartial|\bpermission denied\b|\baccess denied\b|\bEACCES\b|\bEPERM\b/i.test(
-        part.state.error,
-      )) ||
-    !!metadata?.timeout ||
-    !!metadata?.job_id ||
-    (metadata?.phase === "mutation" && metadata.reason !== "match-failed")
-  )
-}
-
-function verification(part: ToolPart) {
-  const metadata = "metadata" in part.state ? part.state.metadata : undefined
-  return (
-    !!part.state.input.verification ||
-    !!part.state.input.verification_report ||
-    !!metadata?.verification ||
-    !!metadata?.verifications ||
-    metadata?.phase === "verification" ||
-    (part.state.status === "error" && /\bVerification failed\b/i.test(part.state.error))
-  )
-}
-
-function sameOperation(failed: ToolPart, success: ToolPart) {
-  const input = failed.state.input
-  const next = success.state.input
-  if (failed.tool === "edit") {
-    // Corrected whitespace still identifies the same target. A different block
-    // or a write containing the replacement does not prove this edit recovered.
-    return (
-      success.tool === "edit" &&
-      (input.filePath ?? input.path) === (next.filePath ?? next.path) &&
-      typeof input.newString === "string" &&
-      input.newString.length > 0 &&
-      input.newString === next.newString &&
-      (input.replaceAll === true) === (next.replaceAll === true) &&
-      typeof input.oldString === "string" &&
-      typeof next.oldString === "string" &&
-      input.oldString.trim().replace(/\s+/g, " ") === next.oldString.trim().replace(/\s+/g, " ")
-    )
-  }
-  // Require the exact operation for other tools; matching only a tool name would conceal unrelated failures.
-  return (
-    failed.tool === success.tool &&
-    Object.keys(input).length > 0 &&
-    Object.keys(input).length === Object.keys(next).length &&
-    Object.keys(input).every((key) => JSON.stringify(input[key]) === JSON.stringify(next[key]))
-  )
 }

@@ -330,6 +330,9 @@ export type ToolPart = Omit<Types.DeepMutable<Schema.Schema.Type<typeof ToolPart
 const messageBase = {
   id: MessageID,
   sessionID: partBase.sessionID,
+  // Kernel ownership, distinct from the compatibility renderer's parent grouping.
+  turn: optional(MessageID),
+  seq: optional(Schema.Int),
 }
 
 export const User = Schema.Struct({

@@ -10,15 +10,19 @@ import { FileComponentProvider } from "@zaovra-ai/ui/context/file"
 import { dict } from "../../../ui/src/i18n/en"
 
 const user: UserMessage = {
-  id: "user",
-  sessionID: "progress",
+  id: "msg_user",
+  turn: "msg_user",
+  seq: 0,
+  sessionID: "ses_progress",
   role: "user",
   time: { created: 1 },
   agent: "build",
   model: { providerID: "offline", modelID: "offline" },
 }
 const first: AssistantMessage = {
-  id: "first",
+  id: "msg_first",
+  turn: user.id,
+  seq: 1,
   sessionID: user.sessionID,
   parentID: user.id,
   role: "assistant",
@@ -32,7 +36,7 @@ const first: AssistantMessage = {
   cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
 }
-const last: AssistantMessage = { ...first, id: "last", time: { created: 4 } }
+const last: AssistantMessage = { ...first, id: "msg_last", seq: 4, time: { created: 4 } }
 
 function mount(tool: string, error = "Offline operation failed: original detail") {
   const failure: ToolPart = {
@@ -41,6 +45,17 @@ function mount(tool: string, error = "Offline operation failed: original detail"
     messageID: first.id,
     sessionID: user.sessionID,
     type: "tool",
+    settledSeq: 3,
+    failureDisposition: {
+      version: 1,
+      sessionID: user.sessionID,
+      assistantMessageID: first.id,
+      turnID: user.id,
+      callID: "failed-call",
+      basisSeq: 8,
+      status: "unknown",
+      reason: "invalidated",
+    },
     tool,
     state: {
       status: "error",
@@ -69,7 +84,7 @@ function mount(tool: string, error = "Offline operation failed: original detail"
     status: SessionStatus
   }>({
     messages: [user, first, last],
-    parts: { first: [failure], last: [] },
+    parts: { [first.id]: [structuredClone(failure)], [last.id]: [] },
     status: { type: "busy" },
   })
   const feedback: string[] = []
@@ -86,12 +101,12 @@ function mount(tool: string, error = "Offline operation failed: original detail"
               data={{
                 session: [],
                 session_diff: {},
-                session_status: { progress: state.status },
-                message: { progress: state.messages },
+                session_status: { [user.sessionID]: state.status },
+                message: { [user.sessionID]: state.messages },
                 part: state.parts,
               }}
             >
-              <Part message={first} part={failure} />
+              <Part message={first} part={state.parts[first.id][0]} />
             </DataProvider>
           </FileComponentProvider>
         </DialogProvider>
@@ -106,6 +121,25 @@ function mount(tool: string, error = "Offline operation failed: original detail"
     state,
     setState,
     feedback,
+    verdict(status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown") {
+      setState("parts", first.id, 0, "failureDisposition", {
+        version: 1,
+        sessionID: user.sessionID,
+        assistantMessageID: first.id,
+        turnID: user.id,
+        callID: "failed-call",
+        basisSeq: 10,
+        status,
+        reason:
+          status === "recovered"
+            ? "same-operation"
+            : status === "exploratory"
+              ? "exploratory-miss"
+              : status === "interrupted"
+                ? "interrupted"
+                : "unverified",
+      })
+    },
     settle(finish = "stop") {
       setState("messages", [user, first, { ...last, finish, time: { created: 4, completed: 6 } }])
       setState("status", { type: "idle" })
@@ -130,13 +164,15 @@ test.each(["browser", "apply_patch", "question"])(
     const original = JSON.stringify(view.failure)
     try {
       expectLight(view.host)
-      view.setState("parts", "last", [view.success])
+      view.setState("parts", last.id, [view.success])
       expectLight(view.host)
       view.host.querySelector<HTMLButtonElement>("[data-component=tool-recovery-summary] button")!.click()
       await Promise.resolve()
       expect(view.host.textContent).toContain("Offline operation failed: original detail")
       expect(view.host.textContent).toContain("index.html")
       view.settle()
+      expect(view.host.querySelector("[data-kind=tool-error-card]")).not.toBeNull()
+      view.verdict("recovered")
       expect(view.host.querySelector("[data-kind=tool-error-card]")).toBeNull()
       expect(view.feedback).toEqual([])
       expect(JSON.stringify(view.failure)).toBe(original)
@@ -182,7 +218,7 @@ test("same tool succeeding on another target cannot resolve the original failure
   const view = mount("browser")
   try {
     expectLight(view.host)
-    view.setState("parts", "last", [
+    view.setState("parts", last.id, [
       { ...view.success, state: { ...view.success.state, input: { target: "other.html", action: "update" } } },
     ])
     expectLight(view.host)
@@ -196,15 +232,50 @@ test("same tool succeeding on another target cannot resolve the original failure
 test("queued input does not end the active turn, but another running turn cannot quiet its old failure", () => {
   const view = mount("browser")
   try {
-    view.setState("messages", [user, first, last, { ...user, id: "queued", time: { created: 7 } }])
+    view.setState("messages", [
+      user,
+      first,
+      last,
+      { ...user, id: "msg_queued", seq: undefined, turn: undefined, time: { created: 7 } },
+    ])
     expectLight(view.host)
     view.setState("messages", [
       user,
       first,
       { ...last, finish: "stop", time: { created: 4, completed: 6 } },
-      { ...user, id: "next-user", time: { created: 7 } },
-      { ...last, id: "next-assistant", parentID: "next-user", time: { created: 8 } },
+      { ...user, id: "msg_next_user", turn: "msg_next_user", seq: 20, time: { created: 7 } },
+      {
+        ...last,
+        id: "msg_next_assistant",
+        parentID: "msg_next_user",
+        turn: "msg_next_user",
+        seq: 21,
+        time: { created: 8 },
+      },
     ])
+    expect(view.host.querySelector("[data-kind=tool-error-card]")).not.toBeNull()
+  } finally {
+    view.dispose()
+  }
+})
+
+for (const status of ["exploratory", "interrupted", "failed", "unknown"] as const)
+  test("typed DOM verdict " + status, () => {
+    const view = mount("browser")
+    try {
+      view.settle()
+      view.verdict(status)
+      expect(!!view.host.querySelector("[data-kind=tool-error-card]")).toBe(status === "failed" || status === "unknown")
+      expect(!!view.host.querySelector("[data-component=tool-recovery-summary]")).toBe(status === "exploratory")
+      if (status === "interrupted") expect(view.host.textContent).toBe("")
+    } finally {
+      view.dispose()
+    }
+  })
+test("busy old-service failures remain visible without a trusted report", () => {
+  const view = mount("browser")
+  try {
+    view.setState("parts", first.id, 0, "failureDisposition", undefined)
     expect(view.host.querySelector("[data-kind=tool-error-card]")).not.toBeNull()
   } finally {
     view.dispose()

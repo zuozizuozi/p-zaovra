@@ -196,7 +196,7 @@ for (const continuation of ["继续", "continue", "补充要求", "修改要求"
     const recent = [final, failed, current]
     const before = JSON.stringify([original, ...recent])
     const check = (ctx: ReturnType<typeof setup>) => {
-      const message = ctx.store.data.message.ses_child.find((item) => item.id === final.id)
+      const message = ctx.store.data.message.ses_child.find((item) => item.id === failed.id)
       if (message?.role !== "assistant") throw Error("Missing actual adapted assistant")
       return quietToolFailures({
         message,
@@ -223,7 +223,50 @@ for (const continuation of ["继续", "continue", "补充要求", "修改要求"
     expect(reopened.requests.messages.length).toBe(1)
     const fresh = setup({ pages: [{ data: [final, failed, { ...current, text: "做个小游戏" }], cursor: "older" }] })
     await fresh.store.sync("ses_child")
-    expect(check(fresh).map((part) => part.id)).toEqual([`${failed.id}:read`])
+    // Old-service pages cannot make a positive claim from the client's visible request.
+    expect(check(fresh)).toEqual([])
+    const tool = failed.content[0]
+    if (tool.type !== "tool") throw Error("Expected fixture tool")
+    const reported = setup({
+      pages: [
+        {
+          data: [
+            {
+              ...failed,
+              seq: 4,
+              turn: current.id,
+              content: [
+                {
+                  ...tool,
+                  settledSeq: 5,
+                  failureDisposition: {
+                    version: 1,
+                    sessionID: "ses_child",
+                    turnID: current.id,
+                    assistantMessageID: failed.id,
+                    callID: tool.id,
+                    basisSeq: 8,
+                    status: "exploratory",
+                    reason: "exploratory-miss",
+                    evidence: { assistantMessageID: final.id, callID: "write", settledSeq: 7 },
+                  },
+                },
+              ],
+            },
+          ],
+          cursor: "older",
+        },
+      ],
+    })
+    await reported.store.sync("ses_child")
+    // Cold legacy loading follows the cursor once to look for the missing user.
+    // Consuming the persisted verdict must not trigger any additional history reads.
+    expect(reported.requests.messages).toEqual([
+      { sessionID: "ses_child", cursor: undefined },
+      { sessionID: "ses_child", cursor: "older" },
+    ])
+    expect(check(reported).map((part) => part.id)).toEqual([`${failed.id}:read`])
+    expect(reported.requests.messages.length).toBe(2)
     expect(JSON.stringify([original, ...recent])).toBe(before)
   })
 

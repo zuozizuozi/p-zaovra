@@ -1,5 +1,6 @@
-import { describe, expect } from "bun:test"
-import { DateTime, Effect, Exit, Schema } from "effect"
+import { describe, expect, test } from "bun:test"
+import path from "node:path"
+import { DateTime, Effect, Exit, ManagedRuntime, Schema } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -22,6 +23,8 @@ import { SessionToolDisposition } from "@zaovra-ai/schema/session-tool-dispositi
 import { testEffect } from "./lib/effect"
 import { LLMEvent } from "@zaovra-ai/llm"
 import { createLLMEventPublisher } from "@zaovra-ai/core/session/runner/publish-llm-event"
+import { createSessionFeed } from "../../app-ui/src/context/session-feed"
+import { tmpdir } from "./fixture/tmpdir"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionProjector.node])))
 const timestamp = DateTime.makeUnsafe(100)
@@ -158,6 +161,158 @@ function fixture() {
 }
 
 describe("persisted tool failure dispositions", () => {
+  for (const rejectReport of [false, true]) {
+    test("reopens SQLite and rebuilds saved events without deriving new reports: " + rejectReport, async () => {
+      await using temp = await tmpdir()
+      const runtime = (file: string) =>
+        ManagedRuntime.make(
+          AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionProjector.node]), [
+            [Database.node, Database.layerFromPath(path.join(temp.path, file))],
+          ]),
+        )
+      const first = runtime("persisted.db")
+      const saved = await first
+        .runPromise(
+          Effect.gen(function* () {
+            const f = yield* fixture()
+            yield* f.prompt()
+            const assistant = yield* f.start()
+            yield* f.fail(assistant)
+            yield* f.success(assistant)
+            if (rejectReport)
+              yield* f.events.project(SessionEvent.Tool.Disposition, () => Effect.die("report unavailable"))
+            yield* f.end(assistant)
+            expect((yield* f.tool(assistant)).failureDisposition).toMatchObject({
+              status: rejectReport ? "unknown" : "recovered",
+            })
+            return {
+              messages: (yield* f.messages()).map((message) => Schema.encodeSync(SessionMessage.Message)(message)),
+              events: yield* f.database.db
+                .select()
+                .from(EventTable)
+                .orderBy(asc(EventTable.seq))
+                .all()
+                .pipe(Effect.orDie),
+            }
+          }).pipe(Effect.scoped),
+        )
+        .finally(() => first.dispose())
+
+      const reopened = runtime("persisted.db")
+      await reopened
+        .runPromise(
+          Effect.gen(function* () {
+            const database = yield* Database.Service
+            const rows = yield* database.db
+              .select()
+              .from(SessionMessageTable)
+              .orderBy(asc(SessionMessageTable.seq))
+              .all()
+              .pipe(Effect.orDie)
+            expect(
+              rows.map((row) =>
+                Schema.encodeSync(SessionMessage.Message)(
+                  Schema.decodeUnknownSync(SessionMessage.Message)({
+                    ...row.data,
+                    id: row.id,
+                    type: row.type,
+                    seq: row.seq,
+                  }),
+                ),
+              ),
+            ).toEqual(saved.messages)
+            // Opening and reading neither calculates missing verdicts nor writes another event.
+            expect(
+              yield* database.db.select().from(EventTable).orderBy(asc(EventTable.seq)).all().pipe(Effect.orDie),
+            ).toEqual(saved.events)
+          }),
+        )
+        .finally(() => reopened.dispose())
+
+      const rebuilt = runtime("rebuilt.db")
+      await rebuilt
+        .runPromise(
+          Effect.gen(function* () {
+            const f = yield* fixture()
+            yield* f.events.replayAll(
+              saved.events.map((row) => ({
+                id: row.id,
+                type: row.type,
+                seq: row.seq,
+                aggregateID: row.aggregate_id,
+                data: row.data,
+              })),
+              { publish: true },
+            )
+            expect((yield* f.messages()).map((message) => Schema.encodeSync(SessionMessage.Message)(message))).toEqual(
+              saved.messages,
+            )
+            expect(yield* f.database.db.select().from(EventTable).all().pipe(Effect.orDie)).toHaveLength(
+              saved.events.length,
+            )
+            expect(f.reports()).toHaveLength(rejectReport ? 0 : 1)
+          }).pipe(Effect.scoped),
+        )
+        .finally(() => rebuilt.dispose())
+    })
+  }
+
+  it.effect("catches an old failure page up to real Core reports with success outside that page", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture()
+      yield* f.prompt()
+      const first = yield* f.start()
+      yield* f.fail(first)
+      yield* f.end(first, "tool-calls")
+      const second = yield* f.start()
+      const snapshot = (yield* f.messages()).map((message) => Schema.encodeSync(SessionMessage.Message)(message))
+      const watermark = Math.max(...f.transcript.map((event) => event.durable?.seq ?? -1))
+      const feed = createSessionFeed(sessionID)
+      feed.open({ data: snapshot.filter((message) => message.id === second), watermark })
+      yield* f.success(second)
+      yield* f.end(second)
+      const wire = (event: SessionEvent.Event) => {
+        if (!event.durable) throw new Error("Expected durable event")
+        const definition = SessionEvent.Definitions.find((item) => item.type === event.type)
+        if (!definition) throw new Error("Missing definition")
+        return {
+          id: event.id,
+          type: EventV2.versionedType(event.type, event.durable.version),
+          seq: event.durable.seq,
+          data: Schema.encodeUnknownSync(definition.data)(event.data),
+        }
+      }
+      // Actual listener delivery order includes the nested report before the terminal source.
+      const delivery = f.transcript.filter((event) => (event.durable?.seq ?? -1) > watermark).map(wire)
+      expect(delivery.some((event, index) => index > 0 && event.seq < delivery[index - 1].seq)).toBe(true)
+      delivery.forEach((event) => {
+        feed.durable(event)
+        feed.durable(event)
+      })
+      expect(feed.gap).toBe(false)
+      expect(
+        feed.prepend({ data: snapshot.filter((message) => message.id !== second), watermark }, feed.generation),
+      ).toBe("merged")
+      const expected = (yield* f.messages()).map((message) => Schema.encodeSync(SessionMessage.Message)(message))
+      expect(feed.messages()).toEqual(expected)
+      expect(yield* f.tool(first)).toMatchObject({ failureDisposition: { status: "recovered" } })
+      const checkpoint = feed.applied
+      yield* f.events.publish(SessionEvent.RevertEvent.Committed, { ...base, messageID: first })
+      f.transcript
+        .filter((event) => (event.durable?.seq ?? -1) > checkpoint)
+        .map(wire)
+        .forEach(feed.durable)
+      expect(feed.messages()).toEqual(
+        (yield* f.messages()).map((message) => Schema.encodeSync(SessionMessage.Message)(message)),
+      )
+      expect(yield* f.tool(first)).toMatchObject({ failureDisposition: { status: "unknown" } })
+      const reconnected = createSessionFeed(sessionID)
+      reconnected.open({ data: feed.messages(), watermark: feed.applied })
+      delivery.forEach(reconnected.durable)
+      expect(reconnected.messages()).toEqual(feed.messages())
+    }),
+  )
+
   for (const settlement of [undefined, "interrupted"] as const) {
     it.effect("uses host interruption provenance: " + String(settlement), () =>
       Effect.gen(function* () {

@@ -45,6 +45,7 @@ export type Event =
   | EventSessionNextToolProgress
   | EventSessionNextToolSuccess
   | EventSessionNextToolFailed
+  | EventSessionNextToolDisposition
   | EventSessionNextRetried
   | EventSessionNextCompactionStarted
   | EventSessionNextCompactionDelta
@@ -247,6 +248,8 @@ export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 export type UserMessage = {
   id: string
   sessionID: string
+  turn?: string
+  seq?: number
   role: "user"
   time: {
     created: number
@@ -341,6 +344,8 @@ export type ApiError = {
 export type AssistantMessage = {
   id: string
   sessionID: string
+  turn?: string
+  seq?: number
   role: "assistant"
   time: {
     created: number
@@ -547,6 +552,12 @@ export type ToolPart = {
   callID: string
   tool: string
   state: ToolState
+  settledSeq?: number
+  failureDisposition?:
+    | SessionToolDisposition
+    | {
+        [key: string]: unknown
+      }
   metadata?: {
     [key: string]: unknown
   }
@@ -1202,12 +1213,22 @@ export type GlobalEvent = {
           sessionID: string
           assistantMessageID: string
           callID: string
+          settlement?: "interrupted"
           error: SessionErrorUnknown
           result?: unknown
           provider: {
             executed: boolean
             metadata?: LlmProviderMetadata
           }
+        }
+      }
+    | {
+        id: string
+        type: "session.next.tool.disposition"
+        properties: {
+          timestamp: number
+          sessionID: string
+          reports: Array<SessionToolDisposition>
         }
       }
     | {
@@ -2155,6 +2176,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextToolProgress
     | SyncEventSessionNextToolSuccess
     | SyncEventSessionNextToolFailed
+    | SyncEventSessionNextToolDisposition
     | SyncEventSessionNextRetried
     | SyncEventSessionNextCompactionStarted
     | SyncEventSessionNextCompactionEnded
@@ -3073,6 +3095,7 @@ export type SessionDurableEvent =
   | SessionNextToolProgress
   | SessionNextToolSuccess
   | SessionNextToolFailed
+  | SessionNextToolDisposition
   | SessionNextReasoningStarted
   | SessionNextReasoningEnded
   | SessionNextRetried
@@ -3295,6 +3318,7 @@ export type V2Event =
   | SessionNextToolProgress
   | SessionNextToolSuccess
   | SessionNextToolFailed
+  | SessionNextToolDisposition
   | SessionNextRetried
   | SessionNextCompactionStarted
   | SessionNextCompactionDelta
@@ -3485,6 +3509,32 @@ export type SkillV2Source = SkillV2DirectorySource | SkillV2UrlSource | SkillV2E
 
 export type MoveSessionDestination = {
   directory: string
+}
+
+export type SessionToolDisposition = {
+  version: 1
+  sessionID: string
+  turnID: string
+  assistantMessageID: string
+  callID: string
+  basisSeq: number
+  status: "recovered" | "exploratory" | "failed" | "interrupted" | "unknown"
+  reason:
+    | "invalidated"
+    | "incomplete"
+    | "unverified"
+    | "same-operation"
+    | "exploratory-miss"
+    | "no-changes"
+    | "tool-error"
+    | "verification"
+    | "uncertain"
+    | "interrupted"
+  evidence?: {
+    assistantMessageID: string
+    callID: string
+    settledSeq: number
+  }
 }
 
 export type SessionOutcomeBudgetUpdate = {
@@ -4841,12 +4891,29 @@ export type SyncEventSessionNextToolFailed = {
       sessionID: string
       assistantMessageID: string
       callID: string
+      settlement?: "interrupted"
       error: SessionErrorUnknown
       result?: unknown
       provider: {
         executed: boolean
         metadata?: LlmProviderMetadata
       }
+    }
+  }
+}
+
+export type SyncEventSessionNextToolDisposition = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.tool.disposition.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      reports: Array<SessionToolDisposition>
     }
   }
 }
@@ -6013,6 +6080,13 @@ export type SessionMessageAssistantTool = {
     | SessionMessageToolStateRunning
     | SessionMessageToolStateCompleted
     | SessionMessageToolStateError
+  settledSeq?: number
+  settlement?: "interrupted"
+  failureDisposition?:
+    | SessionToolDisposition
+    | {
+        [key: string]: unknown
+      }
   time: {
     created: number
     ran?: number
@@ -6656,12 +6730,32 @@ export type SessionNextToolFailed = {
     sessionID: string
     assistantMessageID: string
     callID: string
+    settlement?: "interrupted"
     error: SessionErrorUnknown
     result?: unknown
     provider: {
       executed: boolean
       metadata?: LlmProviderMetadata
     }
+  }
+}
+
+export type SessionNextToolDisposition = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.tool.disposition"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    reports: Array<SessionToolDisposition>
   }
 }
 
@@ -10307,12 +10401,23 @@ export type EventSessionNextToolFailed = {
     sessionID: string
     assistantMessageID: string
     callID: string
+    settlement?: "interrupted"
     error: SessionErrorUnknown
     result?: unknown
     provider: {
       executed: boolean
       metadata?: LlmProviderMetadata
     }
+  }
+}
+
+export type EventSessionNextToolDisposition = {
+  id: string
+  type: "session.next.tool.disposition"
+  properties: {
+    timestamp: number
+    sessionID: string
+    reports: Array<SessionToolDisposition>
   }
 }
 

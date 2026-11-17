@@ -8,6 +8,7 @@ import type {
   SessionV2Info,
 } from "@zaovra-ai/sdk/v2/client"
 import { toLegacySessionSummary } from "./global-sync/home-session-index"
+import { SessionToolDisposition } from "@zaovra-ai/schema/session-tool-disposition"
 
 export type SessionView = Session & Pick<SessionV2Info, "agent" | "model">
 
@@ -130,8 +131,8 @@ export function adaptSessionMessages(
   for (const item of ordered) {
     if (item.type !== "user" && item.type !== "assistant" && item.type !== "synthetic" && item.type !== "shell")
       continue
-    if (item.type === "assistant" && !state.parentID) continue
-    const parent = item.type === "assistant" ? state.parentID : undefined
+    if (item.type === "assistant" && !state.parentID && !item.turn) continue
+    const parent = item.type === "assistant" ? (state.parentID ?? item.turn) : undefined
     if (item.type !== "assistant") state.parentID = item.id
     // A background command's tool card also shows the state of its job and its completion notice.
     const deps =
@@ -154,6 +155,9 @@ export function adaptSessionMessages(
       continue
     }
     const value = adaptSessionMessage(session, item, parent, shells, completions)
+    // Never promote provider metadata to kernel ownership, including on a partial page.
+    value.message.turn = item.turn
+    value.message.seq = item.seq
     cache?.set(item, { key, deps, value })
     result.push(value)
   }
@@ -387,12 +391,13 @@ export function hasUnfinishedShell(messages: readonly Message[], parts: Readonly
 }
 
 function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAssistantTool): Part {
+  const disposition = SessionToolDisposition.read(tool.failureDisposition)
   const content = tool.state.status === "pending" ? [] : tool.state.content
   const output = content
     .map((item) => (item.type === "text" ? item.text : `[${item.name ?? item.uri}](${item.uri})`))
     .join("\n\n")
   const rawInput = tool.state.status === "pending" ? {} : tool.state.input
-  const rawStructured = tool.state.status === "pending" ? {} : tool.state.structured
+  const rawStructured = withoutDisposition(tool.state.status === "pending" ? {} : tool.state.structured)
   const lsp = rawStructured.lsp
   const diagnostics = lsp && typeof lsp === "object" && "diagnostics" in lsp ? lsp.diagnostics : undefined
   const filePath = rawInput.filePath ?? rawInput.path
@@ -480,7 +485,7 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
         status: "error" as const,
         input,
         error: tool.state.error.message,
-        metadata: { ...tool.state.error.metadata, ...metadata },
+        metadata: { ...withoutDisposition(tool.state.error.metadata ?? {}), ...metadata },
         time: { start: tool.time.ran ?? tool.time.created, end: tool.time.completed ?? tool.time.created },
       }
     return {
@@ -513,6 +518,14 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
     callID: tool.id,
     tool: tool.name,
     state,
-    metadata: tool.provider?.resultMetadata,
+    ...(Number.isSafeInteger(tool.settledSeq) && tool.settledSeq! >= 0 ? { settledSeq: tool.settledSeq } : {}),
+    ...(disposition ? { failureDisposition: disposition } : {}),
+    metadata: tool.provider?.resultMetadata ? withoutDisposition(tool.provider.resultMetadata) : undefined,
   }
+}
+
+function withoutDisposition(metadata: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([key]) => !["failureDisposition", "settledSeq", "settlement"].includes(key)),
+  )
 }

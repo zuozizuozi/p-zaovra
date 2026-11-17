@@ -172,6 +172,28 @@ describe("durable events", () => {
 })
 
 describe("revert", () => {
+  test("refuses an in-flight older page across a retained revert boundary", () => {
+    const log = script()
+    log.prompt("msg_u1")
+    log.step("msg_a1")
+    log.end("msg_a1")
+    log.prompt("msg_u2")
+    log.step("msg_a2")
+    log.end("msg_a2")
+    const old = page(log.events, log.events.length, (ids) => ids.slice(0, 2))
+    const feed = createSessionFeed(sessionID)
+    feed.open(page(log.events, log.events.length, (ids) => ids.slice(-2)))
+    const generation = feed.generation
+    feed.durable(log.revert("msg_u2"))
+    expect(feed.ready).toBe(true)
+    expect(feed.generation).toBe(generation)
+    expect(feed.prepend(old, generation)).toBe("expired")
+    expect(shape(feed).map((message) => message.id)).toEqual(["msg_u2"])
+    // A fresh page may be loaded; rejecting a stale response must not poison the feed.
+    expect(feed.prepend({ ...old, watermark: feed.applied }, generation)).toBe("merged")
+    expect(shape(feed).map((message) => message.id)).toEqual(["msg_u1", "msg_a1", "msg_u2"])
+  })
+
   test("removes everything recorded after the boundary, like the kernel", () => {
     const log = script()
     log.prompt("msg_u1")

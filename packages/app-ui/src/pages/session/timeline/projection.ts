@@ -58,17 +58,10 @@ export function createTimelineProjection(input: {
   const quietParts = createMemo(() => {
     const result = new Set<string>()
     const parts = Object.fromEntries(input.messages().map((message) => [message.id, input.parts(message.id)]))
-    assistantMessagesByTurn().forEach((messages) => {
-      const latest = messages.at(-1)
-      if (
-        !latest ||
-        !messages.some((message) =>
-          parts[message.id].some((part) => part.type === "tool" && part.state.status === "error"),
-        )
-      )
-        return
+    input.messages().forEach((message) => {
+      if (message.role !== "assistant") return
       quietToolFailures({
-        message: latest,
+        message,
         messages: input.messages(),
         parts,
         working: input.status().type !== "idle",

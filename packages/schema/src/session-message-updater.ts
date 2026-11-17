@@ -549,7 +549,9 @@ export function update(source: Adapter, event: SessionEvent.Event) {
         ? yield* source.getTurnOf(event.data.assistantMessageID)
         : event.type === "session.next.shell.ended"
           ? (yield* source.getCurrentShell(event.data.callID))?.turn
-          : yield* source.getTurn()
+          : "messageID" in event.data
+            ? yield* source.getTurnOf(event.data.messageID)
+            : yield* source.getTurn()
     const reverting = event.type.startsWith("session.next.revert.")
     if (!turn && !reverting) return
     const failed = yield* source.getFailedAssistants(reverting ? undefined : turn)

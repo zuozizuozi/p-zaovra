@@ -163,26 +163,24 @@ function TodoView() {
     </Show>
   )
 }
-test.each(["en", "zh"] as const)(
-  "732 %s interruption is one divider in the conversation",
-  async (locale) => {
-    setRoute("locale", locale)
-    seed()
-    const rows = Timeline.constructMessageRows(
-      user,
-      (id) => store.data.part[id] ?? [],
-      [assistant],
-      0,
-      false,
-      "idle",
-      false,
-      false,
-    )
-    expect(rows.filter((row) => row._tag === "TurnDivider").map((row) => row.label)).toEqual(["interrupted"])
-  },
-)
+test.each(["en", "zh"] as const)("732 %s interruption is one divider in the conversation", async (locale) => {
+  setRoute("locale", locale)
+  seed()
+  const rows = Timeline.constructMessageRows(
+    user,
+    (id) => store.data.part[id] ?? [],
+    [assistant],
+    0,
+    false,
+    "idle",
+    false,
+    false,
+  )
+  expect(rows.filter((row) => row._tag === "TurnDivider").map((row) => row.label)).toEqual(["interrupted"])
+})
 test.each([
-  { finish: "interrupted", error: "Tool execution interrupted", visible: false },
+  // A legacy record has no host-settlement verdict: matching text alone cannot hide it.
+  { finish: "interrupted", error: "Tool execution interrupted", visible: true },
   { finish: "stop", error: "Tool execution interrupted", visible: true },
   { finish: "interrupted", error: "Permission denied", visible: true },
 ] as const)(
@@ -196,17 +194,14 @@ test.each([
     if (visible) expect(view.root.textContent).not.toContain("请展开详情查看原因，再告诉我如何继续")
   },
 )
-test.each(["en", "zh"] as const)(
-  "732 %s actual failure keeps its details in the conversation",
-  async (locale) => {
-    setRoute("locale", locale)
-    seed({ ...assistant, finish: "stop", error: { name: "UnknownError", data: { message: "HTTP 503" } } })
-    const view = mount(() => <ExecutionErrorCard detailsOnly mascot={false} detail="HTTP 503" />)
-    await tick()
-    expect(view.root.querySelector('[data-component="execution-error-card"] h3') === null).toBe(true)
-    expect(view.root.querySelector('[data-component="execution-error-card"] pre')?.textContent).toBe("HTTP 503")
-  },
-)
+test.each(["en", "zh"] as const)("732 %s actual failure keeps its details in the conversation", async (locale) => {
+  setRoute("locale", locale)
+  seed({ ...assistant, finish: "stop", error: { name: "UnknownError", data: { message: "HTTP 503" } } })
+  const view = mount(() => <ExecutionErrorCard detailsOnly mascot={false} detail="HTTP 503" />)
+  await tick()
+  expect(view.root.querySelector('[data-component="execution-error-card"] h3') === null).toBe(true)
+  expect(view.root.querySelector('[data-component="execution-error-card"] pre')?.textContent).toBe("HTTP 503")
+})
 test.each(["en", "zh"] as const)(
   "732 %s completed summary hydrates on idle initial open and fresh-store reopen",
   async (locale) => {

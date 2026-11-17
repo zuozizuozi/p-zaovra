@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionInputAdmitted, SessionMessage, SessionV2Info } from "@zaovra-ai/sdk/v2/client"
 import { adaptSessionInput, adaptSessionMessages, hasUnfinishedShell } from "./v2-session-adapter"
+import { toolFailureDisposition } from "@zaovra-ai/session-ui/tool-recovery"
 
 const session: SessionV2Info = {
   id: "ses_test",
@@ -13,6 +14,83 @@ const session: SessionV2Info = {
   title: "test",
   location: { directory: "/repo" },
 }
+
+test("147 reads an off-page persisted verdict only from typed top-level fields", () => {
+  const report = {
+    version: 1 as const,
+    sessionID: session.id,
+    turnID: "msg_request",
+    assistantMessageID: "msg_error",
+    callID: "call",
+    basisSeq: 10,
+    status: "recovered" as const,
+    reason: "same-operation" as const,
+    evidence: { assistantMessageID: "msg_success_off_page", callID: "call", settledSeq: 9 },
+  }
+  const native: Extract<SessionMessage, { type: "assistant" }> = {
+    type: "assistant",
+    id: "msg_error",
+    turn: "msg_request",
+    seq: 2,
+    agent: "build",
+    model: session.model!,
+    time: { created: 1, completed: 2 },
+    finish: "tool-calls",
+    content: [
+      {
+        type: "tool",
+        id: "call",
+        name: "edit",
+        settledSeq: 6,
+        failureDisposition: report,
+        time: { created: 1, ran: 1, completed: 2 },
+        provider: { executed: false, resultMetadata: { failureDisposition: report } },
+        state: {
+          status: "error",
+          input: { path: "a.ts" },
+          content: [],
+          error: { type: "unknown", message: "No match", metadata: { settledSeq: "999" } },
+          structured: {
+            failureDisposition: { ...report, status: "interrupted" },
+            settledSeq: 999,
+            settlement: "interrupted",
+            keep: true,
+          },
+        },
+      },
+    ],
+  }
+  const before = JSON.stringify(native)
+  const [row] = adaptSessionMessages(session, [native])
+  expect(row.message).toMatchObject({ id: "msg_error", parentID: "msg_request", turn: "msg_request", seq: 2 })
+  expect(row.parts[0]).toMatchObject({
+    failureDisposition: report,
+    settledSeq: 6,
+    state: { status: "error", error: "No match", metadata: { keep: true } },
+  })
+  if (row.message.role !== "assistant" || row.parts[0].type !== "tool" || row.parts[0].state.status !== "error")
+    throw Error("fixture")
+  expect(row.parts[0].state.metadata).not.toHaveProperty("failureDisposition")
+  expect(row.parts[0].state.metadata).not.toHaveProperty("settledSeq")
+  expect(row.parts[0].metadata).not.toHaveProperty("failureDisposition")
+  expect(toolFailureDisposition(row.message, row.parts[0])).toMatchObject(report)
+  const tool = native.content[0]
+  if (tool.type !== "tool") throw Error("fixture")
+  for (const failureDisposition of [
+    undefined,
+    { ...report, version: 2 },
+    { ...report, assistantMessageID: "msg_other" },
+  ]) {
+    const [untrusted] = adaptSessionMessages(session, [{ ...native, content: [{ ...tool, failureDisposition }] }])
+    expect(
+      toolFailureDisposition(
+        untrusted.message.role === "assistant" ? untrusted.message : undefined,
+        untrusted.parts[0],
+      ),
+    ).toBeUndefined()
+  }
+  expect(JSON.stringify(native)).toBe(before)
+})
 
 test("701 actual provider model reaches text footers without changing the selected model", () => {
   const rows = adaptSessionMessages(session, [
