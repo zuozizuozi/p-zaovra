@@ -61,6 +61,7 @@ jobs:
           (cd packages/server && bun test src/memory-recovery.test.ts src/memory-tidy.test.ts)
           (cd packages/server && ZAOVRA_SERVER_TEST_DIR="$RUNNER_TEMP/zaovra-memory-routes" bun test src/routes-memory.test.ts)
           (cd packages/server && bun test src/routes-memory-lifetime.test.ts)
+          (cd packages/server && ZAOVRA_SERVER_TEST_DIR="$RUNNER_TEMP/zaovra-message-routes" bun test src/routes-message-page.test.ts)
           # Desktop UI state, composer and timeline logic. These suites guard the main conversation path.
           (cd packages/session-ui && bun run test)
           if (cd packages/app-ui && bun run test:unit); then
