@@ -423,36 +423,38 @@ const layer = Layer.effect(
           })
           .at(0)
         // Renewed budgets need their own receipt; a previous window cannot seal this one.
-        if (
+        const recordedWindow =
           recorded !== null &&
           typeof recorded === "object" &&
           "deadline" in recorded &&
           recorded.deadline === deadline &&
           "closingReserveMs" in recorded &&
           recorded.closingReserveMs === limits.policy?.closingReserveMs
-        )
-          return phase
-        const closingReceipt = {
-          requestID: limits.requestID,
-          sourceMessageID: source,
-          deadline,
-          closingReserveMs: limits.policy?.closingReserveMs,
-          ...(providerAt === undefined ? {} : { providerDeadline: providerAt }),
-          state: "stopped_unverified",
-          cancelled: cancelled.map((job) => job.id),
-          preserved: jobs
-            .filter(
-              (job) => job.status === "running" && job.metadata?.sessionID === session.id && !cancelled.includes(job),
-            )
-            .map((job) => job.id),
-        } as const
-        yield* events.publish(SessionEvent.Synthetic, {
-          sessionID: session.id,
-          timestamp: yield* DateTime.now,
-          messageID: SessionMessage.ID.create(),
-          host: { version: 1, kind: "budget-closing", receipt: closingReceipt },
-          text: prefix + JSON.stringify(closingReceipt),
-        })
+        // A committed receipt can outlive an interrupted settlement. Reuse it,
+        // but still finish the stopped assistant below before returning.
+        if (!recordedWindow) {
+          const closingReceipt = {
+            requestID: limits.requestID,
+            sourceMessageID: source,
+            deadline,
+            closingReserveMs: limits.policy?.closingReserveMs,
+            ...(providerAt === undefined ? {} : { providerDeadline: providerAt }),
+            state: "stopped_unverified",
+            cancelled: cancelled.map((job) => job.id),
+            preserved: jobs
+              .filter(
+                (job) => job.status === "running" && job.metadata?.sessionID === session.id && !cancelled.includes(job),
+              )
+              .map((job) => job.id),
+          } as const
+          yield* events.publish(SessionEvent.Synthetic, {
+            sessionID: session.id,
+            timestamp: yield* DateTime.now,
+            messageID: SessionMessage.ID.create(),
+            host: { version: 1, kind: "budget-closing", receipt: closingReceipt },
+            text: prefix + JSON.stringify(closingReceipt),
+          })
+        }
       }
       const message =
         closing && providerAt !== undefined

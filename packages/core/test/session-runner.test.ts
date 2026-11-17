@@ -11997,6 +11997,54 @@ it.effect("490 explicit closing reserve cancels only same-source tasks and retai
   }),
 )
 
+it.effect("490 resumes a persisted closing receipt whose stopped assistant was never committed", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const events = yield* EventV2.Service
+    const database = yield* Database.Service
+    const now = yield* Clock.currentTimeMillis
+    const request = yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Retain the stopped request after interrupted settlement",
+        runPolicy: { mode: "unattended", deadline: now + 1000, closingReserveMs: 1500 },
+      }),
+      resume: false,
+    })
+    yield* SessionInput.promoteSteers(database.db, events, sessionID, Number.MAX_SAFE_INTEGER)
+    const receipt = {
+      requestID: request.id,
+      sourceMessageID: request.id,
+      deadline: now + 1000,
+      closingReserveMs: 1500,
+      state: "stopped_unverified" as const,
+      cancelled: [],
+      preserved: [],
+    }
+    // The durable prefix left by cancellation/crash, before any stopped assistant.
+    yield* events.publish(SessionEvent.Synthetic, {
+      sessionID,
+      timestamp: yield* DateTime.now,
+      messageID: SessionMessage.ID.create(),
+      host: { version: 1, kind: "budget-closing", receipt },
+      text: `[host.run.closing] ${request.id}:${request.id} ${JSON.stringify(receipt)}`,
+    })
+    expect((yield* session.context(sessionID)).some((message) => message.type === "assistant")).toBe(false)
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(0)
+    expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+    expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+    const completed = yield* session.context(sessionID)
+    expect(completed.filter((message) => message.type === "assistant")).toHaveLength(1)
+    expect(completed.filter((message) => message.type === "synthetic")).toHaveLength(1)
+    yield* session.resume(sessionID)
+    expect(yield* session.context(sessionID)).toEqual(completed)
+    expect(requests).toHaveLength(0)
+  }),
+)
+
 it.effect("490 closing reserve interrupts a blocked provider before hard D without declaring success", () =>
   Effect.gen(function* () {
     yield* setup
@@ -12398,6 +12446,14 @@ it.effect("683 Session retries share the original absolute P", () =>
       }),
     })
     const gate = yield* Deferred.make<void>()
+    const backoff = yield* Deferred.make<void>()
+    const events = yield* EventV2.Service
+    const unsubscribe = yield* events.listen((event) =>
+      Schema.is(SessionEvent.Retried)(event) && event.data.sessionID === sessionID
+        ? Deferred.succeed(backoff, undefined).pipe(Effect.asVoid)
+        : Effect.void,
+    )
+    yield* Effect.addFinalizer(() => unsubscribe)
     streamStarted = yield* Deferred.make<void>()
     responseStream = Stream.fail(
       new LLMError({
@@ -12413,6 +12469,9 @@ it.effect("683 Session retries share the original absolute P", () =>
       ),
     )
     const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    // Database/listener work can suspend outside TestClock. Advance only once
+    // the real retry has been admitted, rather than racing its preparation.
+    yield* Deferred.await(backoff)
     yield* adjust(5001)
     yield* Deferred.await(streamStarted)
     expect(requests).toHaveLength(2)

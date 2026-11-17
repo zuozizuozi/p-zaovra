@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import path from "node:path"
-import { DateTime, Effect, Exit, ManagedRuntime, Schema } from "effect"
+import { DateTime, Deferred, Effect, Exit, Fiber, ManagedRuntime, Schema } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -161,6 +161,87 @@ function fixture() {
 }
 
 describe("persisted tool failure dispositions", () => {
+  for (const scenario of ["related", "duplicate-terminal", "unrelated"] as const) {
+    it.live("holds an actually computed report across a concurrent " + scenario + " event", () =>
+      Effect.gen(function* () {
+        const f = yield* fixture()
+        yield* f.prompt()
+        const assistant = yield* f.start()
+        yield* f.fail(assistant)
+        yield* f.success(assistant)
+        const computed = yield* Deferred.make<(typeof SessionEvent.Tool.Disposition.Type)["data"]>()
+        const release = yield* Deferred.make<void>()
+        const publish = f.events.publish
+        let held = false
+        // This is a scheduling barrier at the actual producer's publish boundary.
+        // Delegate every event unchanged to the real EventV2/SQLite implementation.
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            Object.defineProperty(f.events, "publish", {
+              configurable: true,
+              value: (...args: Parameters<typeof publish>) => {
+                if (args[0] !== SessionEvent.Tool.Disposition || held) return publish(...args)
+                held = true
+                return Effect.gen(function* () {
+                  yield* Deferred.succeed(computed, args[1] as (typeof SessionEvent.Tool.Disposition.Type)["data"])
+                  yield* Deferred.await(release)
+                  return yield* publish(...args)
+                })
+              },
+            }),
+          ),
+          () =>
+            Effect.sync(() => {
+              Object.defineProperty(f.events, "publish", { configurable: true, value: publish })
+            }),
+        )
+        const pending = yield* f.end(assistant).pipe(Effect.forkScoped)
+        const report = yield* Deferred.await(computed).pipe(Effect.timeout("5 seconds"))
+        expect(report.reports).toHaveLength(1)
+        expect(report.reports[0]).toMatchObject({ assistantMessageID: assistant, status: "recovered" })
+        if (scenario === "related") {
+          const next = yield* f.start()
+          const late = yield* f.events.publish(SessionEvent.Tool.Input.Started, {
+            ...base,
+            assistantMessageID: next,
+            callID: "pending",
+            name: "edit",
+          })
+          expect((yield* f.tool(assistant)).failureDisposition).toMatchObject({
+            status: "unknown",
+            basisSeq: late.durable?.seq,
+          })
+        }
+        if (scenario === "duplicate-terminal") {
+          const late = yield* f.events.publish(SessionEvent.Tool.Failed, {
+            ...base,
+            assistantMessageID: assistant,
+            callID: "success",
+            provider,
+            error: { type: "unknown", message: "Verification failed", metadata: { phase: "verification" } },
+          })
+          // Terminal tool states are immutable: a second terminal event cannot
+          // replace the committed success, but still invalidates the old basis.
+          expect((yield* f.tool(assistant, "success")).state.status).toBe("completed")
+          expect((yield* f.tool(assistant)).failureDisposition).toMatchObject({
+            status: "recovered",
+            basisSeq: late.durable?.seq,
+          })
+        }
+        if (scenario === "unrelated") {
+          yield* f.prompt("A different turn while the old report is pending")
+          const next = yield* f.start()
+          yield* f.fail(next)
+        }
+        const before = yield* f.tool(assistant)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(pending).pipe(Effect.timeout("5 seconds"))
+        if (scenario !== "unrelated") expect(yield* f.tool(assistant)).toEqual(before)
+        if (scenario === "unrelated") expect((yield* f.tool(assistant)).failureDisposition).toEqual(report.reports[0])
+      }),
+    )
+  }
+
   for (const rejectReport of [false, true]) {
     test("reopens SQLite and rebuilds saved events without deriving new reports: " + rejectReport, async () => {
       await using temp = await tmpdir()
