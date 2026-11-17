@@ -2,6 +2,12 @@ import { expect, test } from "bun:test"
 import { Effect } from "effect"
 import { SessionExecutionStatus } from "../src/session/execution-status"
 import { SessionSchema } from "../src/session/schema"
+import { Changed, Version } from "@zaovra-ai/schema/session-execution-status"
+
+test("execution status uses the canonical public wire contract", () => {
+  expect(SessionExecutionStatus.Changed).toBe(Changed)
+  expect(SessionExecutionStatus.Version).toBe(Version)
+})
 
 test("execution readers require one scoped authority and cannot mutate its active set", async () => {
   await Effect.runPromise(

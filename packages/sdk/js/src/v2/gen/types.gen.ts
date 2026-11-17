@@ -93,6 +93,7 @@ export type Event =
   | EventWorkTaskHandoffRecorded
   | EventWorkTaskHandoffRouted
   | EventWorkProjectMemoryResolved
+  | EventSessionExecutionStatus
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
@@ -1732,6 +1733,16 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.execution.status"
+        properties: {
+          sessionID: string
+          active: boolean
+          epoch: number
+          revision: number
+        }
+      }
+    | {
+        id: string
         type: "message.part.delta"
         properties: {
           sessionID: string
@@ -3259,6 +3270,26 @@ export type OutputFormat1 =
       retryCount?: number
     }
 
+export type SessionExecutionStatus2 = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.execution.status"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    active: boolean
+    epoch: number
+    revision: number
+  }
+}
+
 export type SessionStatus2 = {
   id: string
   metadata?: {
@@ -3366,6 +3397,7 @@ export type V2Event =
   | WorkTaskHandoffRecorded
   | WorkTaskHandoffRouted
   | WorkProjectMemoryResolved
+  | SessionExecutionStatus2
   | MessagePartDelta
   | SessionDiff
   | SessionError
@@ -10964,6 +10996,17 @@ export type EventWorkProjectMemoryResolved = {
     goalID: string
     timestamp: number
     info: WorkMemoryResolutionInfo
+  }
+}
+
+export type EventSessionExecutionStatus = {
+  id: string
+  type: "session.execution.status"
+  properties: {
+    sessionID: string
+    active: boolean
+    epoch: number
+    revision: number
   }
 }
 

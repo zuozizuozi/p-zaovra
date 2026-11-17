@@ -1,15 +1,25 @@
-import { expect, test } from "bun:test"
+import { afterAll, beforeAll, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Flag } from "@zaovra-ai/core/flag/flag"
 import { Deferred, Effect, Latch, Option, Schema, Stream } from "effect"
 import type { ZaovraEvent } from "../src"
+// Database.node captures the configured path when the host is first imported.
+// Keep that database alive for every host in this suite, while each test owns
+// a separate Location directory and Session IDs.
+const database = Flag.ZAOVRA_DB
+const directory = await mkdtemp(join(tmpdir(), "zaovra-embedded-suite-"))
+beforeAll(() => {
+  Flag.ZAOVRA_DB = join(directory, "zaovra.sqlite")
+})
+afterAll(async () => {
+  Flag.ZAOVRA_DB = database
+  await rm(directory, { recursive: true, force: true })
+})
 
 test("embedded client uses the real router and handlers", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zaovra-embedded-"))
-  const database = Flag.ZAOVRA_DB
-  Flag.ZAOVRA_DB = join(directory, "zaovra.sqlite")
   const { AbsolutePath, Agent, Location, Model, Zaovra, Prompt, Provider, Session, Tool } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
   const model = Model.Ref.make({ id: Model.ID.make("embedded"), providerID: Provider.ID.make("test") })
@@ -52,9 +62,7 @@ test("embedded client uses the real router and handlers", async () => {
         Effect.map(Option.getOrThrow),
       )
       const wakeContext = yield* zaovra.sessions.context({ sessionID })
-      const event = yield* zaovra.sessions
-        .events({ sessionID })
-        .pipe(Stream.take(1), Stream.runHead, Effect.map(Option.getOrUndefined))
+      const events = yield* zaovra.sessions.events({ sessionID }).pipe(Stream.take(2), Stream.runCollect)
       const modelMessage = Option.fromNullishOr(context.find((message) => message.type === "model-switched")).pipe(
         Option.getOrThrow,
       )
@@ -88,7 +96,10 @@ test("embedded client uses the real router and handlers", async () => {
       expect(prompted.type).toBe("session.next.prompted")
       expect(wakeContext).toContainEqual(expect.objectContaining({ id: wake.id, type: "user" }))
       expect(context.some((message) => message.type === "model-switched")).toBe(true)
-      expect(event).toMatchObject({ type: "session.next.model.switched", durable: { seq: 1 } })
+      expect(events).toMatchObject([
+        { type: "session.next.created", durable: { aggregateID: sessionID, seq: 0 } },
+        { type: "session.next.model.switched", durable: { aggregateID: sessionID, seq: 1 } },
+      ])
       expect(message).toEqual(modelMessage)
       expect(missing.map((error) => error._tag)).toEqual([
         "SessionNotFoundError",
@@ -99,15 +110,12 @@ test("embedded client uses the real router and handlers", async () => {
     })
     await Effect.runPromise(Effect.scoped(program))
   } finally {
-    Flag.ZAOVRA_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 })
 
 test("Location-owned runner events reach the ready global client", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zaovra-embedded-events-"))
-  const database = Flag.ZAOVRA_DB
-  Flag.ZAOVRA_DB = join(directory, "zaovra.sqlite")
   const { AbsolutePath, Location, Zaovra, Prompt, Session } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
 
@@ -116,7 +124,13 @@ test("Location-owned runner events reach the ready global client", async () => {
       const zaovra = yield* Zaovra.create()
       const connected = yield* Latch.make(false)
       const prompted = yield* Deferred.make<ZaovraEvent>()
+      const received: string[] = []
       yield* zaovra.events.subscribe().pipe(
+        Stream.tap((event) =>
+          Effect.sync(() => {
+            received.push(event.type)
+          }),
+        ),
         Stream.runForEach((event) =>
           event.type === "server.connected"
             ? connected.open
@@ -134,19 +148,17 @@ test("Location-owned runner events reach the ready global client", async () => {
       yield* zaovra.sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Observe this input" }) })
 
       const event = yield* Deferred.await(prompted).pipe(Effect.timeout("4 seconds"))
+      expect(received).toContain("session.execution.status")
       expect(event.durable).toEqual(expect.objectContaining({ aggregateID: sessionID, seq: expect.any(Number) }))
     })
     await Effect.runPromise(Effect.scoped(program))
   } finally {
-    Flag.ZAOVRA_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 }, 10_000)
 
 test("independent embedded hosts do not share live notifications", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zaovra-embedded-hosts-"))
-  const database = Flag.ZAOVRA_DB
-  Flag.ZAOVRA_DB = join(directory, "zaovra.sqlite")
   const { AbsolutePath, Agent, Location, Zaovra, Session } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
 
@@ -181,15 +193,12 @@ test("independent embedded hosts do not share live notifications", async () => {
     })
     await Effect.runPromise(Effect.scoped(program))
   } finally {
-    Flag.ZAOVRA_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 }, 10_000)
 
 test("embedded client is available as a Layer service", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zaovra-embedded-layer-"))
-  const database = Flag.ZAOVRA_DB
-  Flag.ZAOVRA_DB = join(directory, "zaovra.sqlite")
   const { AbsolutePath, Location, Zaovra, Session } = await import("../src")
   const sessionID = Session.ID.make(`ses_embedded_${crypto.randomUUID()}`)
 
@@ -206,7 +215,6 @@ test("embedded client is available as a Layer service", async () => {
 
     expect(created.id).toBe(sessionID)
   } finally {
-    Flag.ZAOVRA_DB = database
     await rm(directory, { recursive: true, force: true })
   }
 })

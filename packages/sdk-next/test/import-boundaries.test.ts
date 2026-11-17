@@ -29,6 +29,9 @@ async function bundleInputs() {
         "--target=bun",
         "--format=esm",
         "--packages=bundle",
+        // Browser drivers ship with their own assets and optional modules,
+        // matching the application's production build boundary.
+        "--external=playwright-core",
         `--metafile=${metafile}`,
         `--outdir=${join(temporary, "out")}`,
       ],

@@ -1,5 +1,6 @@
 import { EventV2 } from "@zaovra-ai/core/event"
 import { ZaovraEvent } from "@zaovra-ai/protocol/groups/event"
+import { EventManifest } from "@zaovra-ai/schema/event-manifest"
 import { Effect, Option, Schema, Stream } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -7,6 +8,7 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import { Api } from "../api"
 
 const subscriberCapacity = 256
+const publicTypes = new Set<string>(EventManifest.ServerDefinitions.map((definition) => definition.type))
 
 export function eventData(data: unknown): Sse.Event {
   const encoded = Schema.encodeUnknownSync(ZaovraEvent)(data)
@@ -41,6 +43,9 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
             return Stream.make(connected).pipe(
               Stream.concat(replay.complete ? Stream.fromIterable(replay.events).pipe(Stream.concat(live)) : live),
               Stream.filter((event) => {
+                // Core also emits private durable diagnostics and advisory wakes.
+                // Both live delivery and reconnect replay must honor this API's wire contract.
+                if (event.type !== "server.connected" && !publicTypes.has(event.type)) return false
                 if (seen.has(event.id)) return false
                 seen.add(event.id)
                 return true

@@ -3,14 +3,15 @@ import { FileSystem, Integration, Permission, Project, Reference, Session, Work,
 import { EventManifest } from "../src/event-manifest"
 import { IdeEvent } from "../src/ide-event"
 import { SessionEvent } from "../src/session-event"
+import { SessionExecutionStatus } from "../src/session-execution-status"
 import { SessionTodo } from "../src/session-todo"
 import { SessionV1 } from "../src/session-v1"
 import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(102)
-    expect(EventManifest.Definitions.length).toBe(132)
+    expect(EventManifest.ServerDefinitions.length).toBe(104)
+    expect(EventManifest.Definitions.length).toBe(134)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,8 +24,8 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(132)
-    expect(EventManifest.Durable.size).toBe(80)
+    expect(EventManifest.Latest.size).toBe(134)
+    expect(EventManifest.Durable.size).toBe(81)
   })
 
   test("uses canonical definitions for current public events", () => {
@@ -33,6 +34,11 @@ describe("public event manifest", () => {
     expect(Workspace.Event).toBe(WorkspaceEvent)
     expect(Workspace.Event.Definitions).toBe(WorkspaceEvent.Definitions)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
+    expect(EventManifest.Latest.get("session.next.tool.disposition")).toBe(SessionEvent.Tool.Disposition)
+    expect(EventManifest.Latest.get("session.execution.status")).toBe(SessionExecutionStatus.Changed)
+    expect(EventManifest.ServerDefinitions).toContain(SessionExecutionStatus.Changed)
+    expect(SessionExecutionStatus.Changed.durable).toBeUndefined()
+    expect(EventManifest.Durable.get("session.next.tool.disposition.1")).toBe(SessionEvent.Tool.Disposition)
     expect(EventManifest.Latest.get("session.next.created")).toBe(SessionEvent.Created)
     expect(EventManifest.Latest.get("session.next.prompt.cancelled")).toBe(SessionEvent.PromptCancelled)
     expect(EventManifest.Latest.get("session.next.compaction.failed")).toBe(SessionEvent.Compaction.Failed)
@@ -53,7 +59,7 @@ describe("public event manifest", () => {
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(IdeEvent.Definitions).toEqual([IdeEvent.Installed])
-    expect(EventManifest.Definitions.slice(87, 90)).toEqual([
+    expect(EventManifest.Definitions.slice(89, 92)).toEqual([
       SessionV1.Event.PartDelta,
       SessionV1.Event.Diff,
       SessionV1.Event.Error,

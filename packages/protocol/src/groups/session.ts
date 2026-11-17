@@ -22,6 +22,7 @@ import { Model } from "@zaovra-ai/schema/model"
 import { Location } from "@zaovra-ai/schema/location"
 import { Revert } from "@zaovra-ai/schema/revert"
 import { SessionEvent } from "@zaovra-ai/schema/session-event"
+import { SessionExecutionStatus } from "@zaovra-ai/schema/session-execution-status"
 import { SessionTodo } from "@zaovra-ai/schema/session-todo"
 import { Event } from "@zaovra-ai/schema/event"
 import { SessionUsage } from "@zaovra-ai/schema/session-usage"
@@ -179,8 +180,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
       HttpApiEndpoint.get("session.execution", "/api/session/execution", {
         success: Schema.Struct({
           data: Schema.Struct({
-            epoch: Schema.Finite,
-            revision: Schema.Int,
+            ...SessionExecutionStatus.Version.fields,
             active: Schema.Array(Session.ID),
           }).annotate({ identifier: "SessionExecutionStatus" }),
         }),
