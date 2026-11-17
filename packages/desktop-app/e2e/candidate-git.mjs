@@ -192,7 +192,7 @@ try {
       } finally {
         database.close()
       }
-      await page.screenshot({ path: join(root, phase + "-changes.png") })
+      await capture(desktop, phase + "-changes.png")
       item.gitStatus = git("status", "--porcelain")
       assert(item.gitStatus.includes(" M proof.txt") && item.gitStatus.includes("?? new-proof.txt"))
       if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click()
@@ -206,7 +206,7 @@ try {
             .innerText()
             .catch(() => ""),
         )
-        await page.screenshot({ path: join(root, phase + "-final.png") }).catch(() => {})
+        await capture(desktop, phase + "-final.png").catch(() => {})
       }
       if (desktop) {
         item.processes = await desktop
@@ -247,4 +247,14 @@ async function until(check, label, timeout = 30000) {
     assert(Date.now() - started < timeout, label)
     await new Promise((done) => setTimeout(done, 100))
   }
+}
+
+async function capture(desktop, name) {
+  const png = await desktop.evaluate(async ({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed())
+    if (!window) throw new Error("Test window missing")
+    return (await window.webContents.capturePage()).toPNG().toString("base64")
+  })
+  assert(png.length > 100, "nonempty native screenshot")
+  await writeFile(join(root, name), Buffer.from(png, "base64"))
 }

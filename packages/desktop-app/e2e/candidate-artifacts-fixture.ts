@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { createHash, randomUUID } from "node:crypto"
 import path from "node:path"
 import { startEvaluationRelay } from "../../../script/evaluation/memory/relay"
+import { readBetaPackage } from "../scripts/beta-signing"
 
 const root = path.resolve(process.argv[2])
 if (!root.startsWith(path.resolve("F:/Zaovra-研发记录/逐次记录") + path.sep))
@@ -10,6 +11,10 @@ const name = process.argv[3]
 const direct = process.argv[4] === "direct"
 const commands = Number(process.argv[5] ?? 0)
 if (![0, 300].includes(commands) || (commands && !direct)) throw new Error("unsupported-history-fixture")
+const manifestPath = process.argv[6] && path.resolve(process.argv[6])
+if (manifestPath && !manifestPath.startsWith(path.resolve("F:/Zaovra-研发记录/逐次记录") + path.sep))
+  throw new Error("isolated-manifest-required")
+const manifest = manifestPath ? JSON.parse(readFileSync(manifestPath, "utf8")) : undefined
 if (!name || !/^[a-z0-9-]+$/.test(name)) throw new Error("fresh-fixture-name-required")
 const source = path.resolve(import.meta.dir, "../../..")
 const output = path.join(root, name)
@@ -17,8 +22,21 @@ const executable = path.join(source, "packages/desktop-app/dist/win-unpacked/Zao
 const asarSHA256 = createHash("sha256")
   .update(readFileSync(path.join(source, "packages/desktop-app/dist/win-unpacked/resources/app.asar")))
   .digest("hex")
-if (asarSHA256 !== "3e4e80dd7ec7b6275864e260b3da7cf71cbeb1dcd6b68a2e2d86d3fb417b62ba")
-  throw new Error("candidate-changed")
+const expected = manifest
+  ? manifest.files.find((file: { path: string }) =>
+      file.path.replaceAll("\\", "/").endsWith("/win-unpacked/resources/app.asar"),
+    )?.sha256
+  : "3e4e80dd7ec7b6275864e260b3da7cf71cbeb1dcd6b68a2e2d86d3fb417b62ba"
+if (asarSHA256 !== expected) throw new Error("candidate-changed")
+const pkg = (await readBetaPackage(path.join(source, "packages/desktop-app/dist/win-unpacked/resources/app.asar"))) as {
+  zaovraSourceSHA?: string
+  version?: string
+}
+if (
+  pkg.zaovraSourceSHA !== (manifest?.sourceSHA ?? "b1c4f1e8f96127bec5cae427763e90574159bb6e") ||
+  pkg.version !== "0.2.4-beta.1"
+)
+  throw new Error("candidate-source-changed")
 const observations: object[] = []
 const key = commands ? randomUUID() : "fixture-only"
 const upstream = Bun.serve({
@@ -167,7 +185,7 @@ try {
       asarSHA256,
       direct,
       commands,
-      sourceSHA: "b1c4f1e8f96127bec5cae427763e90574159bb6e",
+      sourceSHA: pkg.zaovraSourceSHA,
       version: "0.2.4-beta.1",
       model: "fixture",
       protocol: "openai-chat",
