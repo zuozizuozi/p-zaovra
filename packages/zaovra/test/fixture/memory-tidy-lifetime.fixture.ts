@@ -44,6 +44,7 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
       JSON.stringify({
         formatter: false,
         lsp: false,
+        memory: { enabled: true },
         experimental: { verification: false, delivery_contract: false },
         provider: {
           fixture: {
