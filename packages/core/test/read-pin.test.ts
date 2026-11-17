@@ -20,6 +20,15 @@ async function fixture(body: (directory: string) => Promise<void>) {
   }
 }
 
+windows("native pin retains missing-file and missing-parent codes", () =>
+  fixture(async (directory) => {
+    await expect(ReadPinNative.open(path.join(directory, "missing.txt"))).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(ReadPinNative.open(path.join(directory, "absent", "missing.txt"))).rejects.toMatchObject({
+      code: "ENOENT",
+    })
+  }),
+)
+
 windows("native pin reads original object after replacement and deletion", () =>
   fixture(async (directory) => {
     const file = path.join(directory, "original.txt")

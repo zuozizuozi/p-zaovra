@@ -427,7 +427,8 @@ const layer = Layer.effect(
     return Service.of({
       pin: (path) =>
         ReadPin.acquire(path).pipe(
-          Effect.mapError((cause) => new FSUtil.FileSystemError({ method: "pinRead", cause })),
+          // tryPromise wraps the native rejection; retain its structured OS code.
+          Effect.mapError((error) => new FSUtil.FileSystemError({ method: "pinRead", cause: error.cause })),
         ),
       inspect: (path) => inspect(fs, path),
       read: (path, resource, page, pin, complete) =>

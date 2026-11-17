@@ -651,6 +651,28 @@ describe("ReadTool", () => {
       }),
     )
 
+  for (const [code, reason] of [
+    ["ENOENT", "not_found"],
+    ["EACCES", "permission"],
+    ["EBUSY", "unknown"],
+  ] as const)
+    it.effect(`keeps native read ${code} metadata separate from model text`, () =>
+      Effect.gen(function* () {
+        readFailure = new FSUtil.FileSystemError({
+          method: "pinRead",
+          cause: Object.assign(new Error("native open failed"), { code }),
+        })
+        const registry = yield* ToolRegistry.Service
+        const result = yield* settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-read-native", name: "read", input: { path: "missing.html" } },
+        })
+        expect(result.result).toEqual({ type: "error", value: "Unable to read missing.html" })
+        expect(result.errorMetadata).toEqual({ readFailure: reason })
+      }),
+    )
+
   it.effect("preserves unexpected filesystem defects", () =>
     Effect.gen(function* () {
       resolveFailure = new Error("unexpected")

@@ -33,6 +33,7 @@ async function openTarget(canonical: string, stable: boolean): Promise<ReadPin.P
   const native = (() => {
     try {
       return dlopen("ntdll.dll", {
+        RtlNtStatusToDosError: { args: [FFIType.i32], returns: FFIType.u32 },
         NtCreateFile: {
           args: [
             FFIType.ptr,
@@ -65,8 +66,10 @@ async function openTarget(canonical: string, stable: boolean): Promise<ReadPin.P
     kernel.close()
     if (failures.length) throw new Error("Read pin could not close all owned handles")
   }
-  const fail = (operation: string): never => {
-    throw new Error(`${operation}: Win32 ${kernel.symbols.GetLastError()}`)
+  const fail = (operation: string, code = kernel.symbols.GetLastError()): never => {
+    throw Object.assign(new Error(`${operation}: Win32 ${code}`), {
+      ...(code === 2 || code === 3 ? { code: "ENOENT" } : code === 5 ? { code: "EACCES" } : {}),
+    })
   }
   const attributes = (handle: bigint) => {
     const buffer = Buffer.alloc(8)
@@ -115,7 +118,11 @@ async function openTarget(canonical: string, stable: boolean): Promise<ReadPin.P
         null,
         0,
       )
-      if (status < 0) throw new Error(`Read pin relative open: NTSTATUS ${(status >>> 0).toString(16)}`)
+      if (status < 0)
+        fail(
+          `Read pin relative open: NTSTATUS ${(status >>> 0).toString(16)}`,
+          native.symbols.RtlNtStatusToDosError(status),
+        )
       const value = result.readBigUInt64LE()
       if (value === 0n) throw new Error("Read pin returned a null handle")
       handles.push(value)
