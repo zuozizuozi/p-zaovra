@@ -41,3 +41,28 @@ test("490 initialization cancellation disposes the pending handshake before its 
     await created
   }
 })
+
+test("initialization with a closed stdin rejects without an unhandled transport write", async () => {
+  await using tmp = await tmpdir()
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume();setInterval(()=>{},1000)"], {
+    stdio: "pipe",
+    windowsHide: true,
+  })
+  const stopped = new Promise<void>((resolve) => child.once("exit", () => resolve()))
+  await new Promise<void>((resolve) => child.once("spawn", () => resolve()))
+  child.stdin.destroy()
+  try {
+    await expect(
+      LSPClient.create({
+        serverID: "closed-pipe",
+        server: { process: child },
+        root: tmp.path,
+        directory: tmp.path,
+        runtime: { normalizePath: (file) => file, readText: async () => "", stop: async () => {} },
+      }),
+    ).rejects.toMatchObject({ _tag: "LSPInitializeError", serverID: "closed-pipe" })
+  } finally {
+    child.kill()
+    await stopped
+  }
+})

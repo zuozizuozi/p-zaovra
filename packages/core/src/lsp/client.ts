@@ -131,10 +131,21 @@ export async function create(input: {
     return runtime.normalizePath(fileURLToPath(uri))
   }
 
-  const connection = createMessageConnection(
-    new StreamMessageReader(input.server.process.stdout),
-    new StreamMessageWriter(input.server.process.stdin),
-  )
+  const writer = new StreamMessageWriter(input.server.process.stdin)
+  const transport: { failure?: unknown } = {}
+  const connection = createMessageConnection(new StreamMessageReader(input.server.process.stdout), {
+    onError: writer.onError,
+    onClose: writer.onClose,
+    end: () => writer.end(),
+    dispose: () => writer.dispose(),
+    // vscode-jsonrpc rethrows failed writes inside an async Promise executor.
+    // Dispose to reject pending requests once, without leaking that second rejection.
+    write: (message) =>
+      writer.write(message).catch((error) => {
+        transport.failure = error
+        connection.dispose()
+      }),
+  })
   // Effect cancellation must dispose the handshake before its scoped OS owner
   // closes stdin. Otherwise the detached initialize continuation can still write.
   const interrupted = () => connection.dispose()
@@ -270,7 +281,7 @@ export async function create(input: {
     INITIALIZE_TIMEOUT_MS,
   ).catch((err) => {
     connection.dispose()
-    throw new InitializeError({ serverID: input.serverID, cause: err })
+    throw new InitializeError({ serverID: input.serverID, cause: transport.failure ?? err })
   })
 
   const syncKind = getSyncKind(initialized.capabilities)
