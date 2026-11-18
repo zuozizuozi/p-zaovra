@@ -120,12 +120,42 @@ try {
     assert(rows()[index].promoted_seq !== null)
     assert.equal(rows()[index].cancelled_seq, null)
     assert.equal(completed().length, index)
+    const mascotSelector = `[data-timeline-row="AssistantHeading"][data-message-id="${
+      messages()
+        .filter((message) => message.type === "user")
+        .at(-1).id
+    }"] [data-component="task-mascot"]`
+    const mascot = process.argv.includes("--assert-mascot") ? run.page.locator(mascotSelector) : undefined
+    if (mascot) await expect(mascot).toBeVisible()
+    const originalMascot = mascot ? await mascot.elementHandle() : undefined
+    const inspectMascot = async (phase, pose) => {
+      if (!mascot) return
+      await expect(mascot).toBeVisible()
+      await expect(mascot).toHaveAttribute("data-pose", pose)
+      await expect(run.page.locator('[data-component="task-mascot"]')).toHaveCount(1)
+      const state = await originalMascot.evaluate(
+        (element, selector) => ({
+          connected: element.isConnected,
+          sameNode: document.querySelector(selector) === element,
+          state: element.getAttribute("data-state"),
+          pose: element.getAttribute("data-pose"),
+          owner: element.closest('[data-timeline-row="AssistantHeading"]')?.getAttribute("data-message-id"),
+          width: element.getBoundingClientRect().width,
+          height: element.getBoundingClientRect().height,
+        }),
+        mascotSelector,
+      )
+      assert(state.connected && state.sameNode && state.width > 0 && state.height > 0)
+      result.checkpoints.push({ phase, turn: index + 1, mascot: state })
+    }
+    await inspectMascot("mascot-thinking", "thinking")
     result.checkpoints.push({ phase: "admitted-before-text", turn: index + 1, rows: rows(), url, timeOrigin })
     await run.capture(`turn-${index + 1}-admitted`)
     const firstAt = performance.now()
     turn.start.resolve()
     await run.page.getByText(turn.first, { exact: true }).waitFor({ timeout: 10000 })
     const firstMs = performance.now() - firstAt
+    await inspectMascot("mascot-first-output", "speaking")
     assert.equal(completed().length, index, "first text appears before completion")
     assert.equal(run.page.url(), url)
     assert.equal(await run.page.evaluate(() => performance.timeOrigin), timeOrigin)
@@ -135,6 +165,7 @@ try {
     turn.next.resolve()
     await run.page.getByText(turn.first + turn.tail, { exact: true }).waitFor({ timeout: 10000 })
     const nextMs = performance.now() - nextAt
+    await inspectMascot("mascot-second-output", "speaking")
     assert.equal(completed().length, index, "second text appears while provider remains open")
     assert.equal(run.page.url(), url)
     assert.equal(await run.page.evaluate(() => performance.timeOrigin), timeOrigin)
@@ -144,6 +175,11 @@ try {
     await expect(
       run.page.locator('[data-component="desktop-sidebar-v2"] [data-slot="session-running-ring"]'),
     ).toHaveCount(0)
+    if (mascot) {
+      await expect(run.page.locator('[data-component="task-mascot"]')).toHaveCount(0)
+      result.checkpoints.push({ phase: "mascot-idle-hidden", turn: index + 1 })
+      await originalMascot.dispose()
+    }
     assert.equal(completed()[index].value.finish, "stop")
     assert.equal(
       completed()
