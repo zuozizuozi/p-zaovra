@@ -21,11 +21,13 @@ const settle = async () => {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
 
-async function setup(parentID?: string) {
+async function setup(parentID?: string, requestedScope?: ServerScope) {
   const id = "ses_recovery"
-  const scope = ServerScope.fromServerKey(
-    ("http://notification-test/" + sequence++) as Parameters<typeof ServerScope.fromServerKey>[0],
-  )
+  const scope =
+    requestedScope ??
+    ServerScope.fromServerKey(
+      ("http://notification-test/" + sequence++) as Parameters<typeof ServerScope.fromServerKey>[0],
+    )
   const session: SessionV2Info = {
     id,
     parentID,
@@ -218,6 +220,62 @@ test("237 normal multi-step completion remains one notification and viewed state
   expect(ctx.notices).toHaveLength(1)
 })
 
+for (const local of [false, true])
+  test(
+    "237 same session and completion IDs stay isolated across server scopes" + (local ? " including local" : ""),
+    async () => {
+      const first = await setup(undefined, local ? ServerScope.local : undefined)
+      const second = await setup()
+      expect(first.id).toBe(second.id)
+      expect(first.session.location).toEqual(second.session.location)
+      first.status("busy")
+      second.status("busy")
+      await settle()
+      first.event("session.next.step.ended")
+      await first.complete()
+      first.status("idle")
+      await settle()
+      expect(first.state.session.unseenCount(first.id)).toBe(1)
+      expect(second.state.session.unseenCount(second.id)).toBe(0)
+      expect(first.notices).toHaveLength(1)
+      expect(second.notices).toHaveLength(0)
+
+      first.mounted.dispose()
+      second.mounted.dispose()
+      const restoredFirst = first.mount()
+      const restoredSecond = second.mount()
+      await settle()
+      expect(restoredFirst.session.unseenCount(first.id)).toBe(1)
+      expect(restoredSecond.session.unseenCount(second.id)).toBe(0)
+      await second.complete()
+      second.status("idle")
+      await settle()
+      expect(first.pages.messages.at(-1)?.id).toBe(second.pages.messages.at(-1)?.id)
+      expect(restoredFirst.session.unseenCount(first.id)).toBe(1)
+      expect(restoredSecond.session.unseenCount(second.id)).toBe(1)
+      expect(first.notices).toHaveLength(1)
+      expect(second.notices).toHaveLength(1)
+
+      restoredFirst.session.markViewed(first.id)
+      await settle()
+      expect(restoredFirst.session.unseenCount(first.id)).toBe(0)
+      expect(restoredSecond.session.unseenCount(second.id)).toBe(1)
+      first.mounted.dispose()
+      second.mounted.dispose()
+      const reopenedFirst = first.mount()
+      const reopenedSecond = second.mount()
+      await settle()
+      expect(reopenedFirst.session.unseenCount(first.id)).toBe(0)
+      expect(reopenedSecond.session.unseenCount(second.id)).toBe(1)
+      reopenedSecond.session.markViewed(second.id)
+      await settle()
+      expect(reopenedFirst.session.unseenCount(first.id)).toBe(0)
+      expect(reopenedSecond.session.unseenCount(second.id)).toBe(0)
+      expect(first.notices).toHaveLength(1)
+      expect(second.notices).toHaveLength(1)
+    },
+  )
+
 test("237 does not turn pre-existing idle history into a new unread notification", async () => {
   const ctx = await setup()
   await ctx.complete()
@@ -389,6 +447,11 @@ for (const rebuild of [false, true])
       }
       const resync = ctx.store.resync(ctx.id)
       await started.promise
+      await settle()
+      // Resync waits for history before changing status. Exercise the separate
+      // idle event arriving first, while only A is still projected locally.
+      expect(ctx.store.data.session_status[ctx.id]?.type).toBe("busy")
+      ctx.status("idle")
       await settle()
       expect(ctx.store.data.session_status[ctx.id]?.type).toBe("idle")
       expect(ctx.store.data.message[ctx.id]?.at(-1)?.id).toBe("msg_2")
