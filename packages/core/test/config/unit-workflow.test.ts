@@ -5,7 +5,15 @@ import { tmpdir } from "../fixture/tmpdir"
 
 // Run the actual workflow shell, substituting only package commands. This tests orchestration,
 // not another execution of the package suites or the browser/backend fixture.
-for (const scenario of ["success", "unit-failure", "existing-root", "core-failure", "page-failure", "browser-failure"])
+for (const scenario of [
+  "success",
+  "unit-failure",
+  "existing-root",
+  "core-failure",
+  "page-failure",
+  "browser-failure",
+  "notification-failure",
+])
   test(`unit workflow preserves roots and original failure: ${scenario}`, async () => {
     await using tmp = await tmpdir()
     const workflow = Bun.YAML.parse(
@@ -51,6 +59,7 @@ bun() {
   fi
   if [ "$*" = 'run test:unit' ] && [ "$SCENARIO" = unit-failure ]; then return 37; fi
   if [ "$*" = 'test src/routes-message-page.test.ts' ] && [ "$SCENARIO" = page-failure ]; then return 41; fi
+  if [ "$*" = 'run test:notification' ] && [ "$SCENARIO" = notification-failure ]; then return 43; fi
   if [ "$*" = 'run test:browser' ]; then
     mkdir -p "$ZAOVRA_766_TEST_ROOT"
     printf browser > "$ZAOVRA_766_TEST_ROOT/browser-evidence"
@@ -99,11 +108,18 @@ source ./workflow.sh
                 ? 41
                 : scenario === "browser-failure"
                   ? 31
-                  : 0,
+                  : scenario === "notification-failure"
+                    ? 43
+                    : 0,
       )
       expect(await Bun.file(path.join(tmp.path, "profile-core/core-evidence")).text()).toBe("retained")
       expect(trace.split("\n")[0]).toMatch(/core\trun test\t.*\/profile-core$/)
-      expect(trace.includes("app-ui\trun test:browser\t")).toBe(["success", "browser-failure"].includes(scenario))
+      expect(trace.includes("app-ui\trun test:browser\t")).toBe(
+        ["success", "browser-failure", "notification-failure"].includes(scenario),
+      )
+      expect(trace.includes("app-ui\trun test:notification\t")).toBe(
+        ["success", "notification-failure"].includes(scenario),
+      )
       expect(trace.includes("app-ui\trun test:replay\t")).toBe(scenario === "success")
       expect(trace.includes("sdk-next\trun test\t")).toBe(scenario !== "core-failure")
       if (scenario === "core-failure") {
@@ -128,7 +144,20 @@ source ./workflow.sh
       expect(stdout).toContain(`customization766-fresh-root exit=${scenario === "existing-root" ? 1 : 0}`)
       if (scenario === "existing-root")
         expect(await Bun.file(path.join(tmp.path, "profile/existing")).text()).toBe("retained")
-      if (scenario === "success") expect(trace.trim().split("\n")).toHaveLength(16)
+      if (scenario === "success") {
+        expect(trace.trim().split("\n")).toHaveLength(17)
+        expect(
+          trace
+            .trim()
+            .split("\n")
+            .slice(-3)
+            .map((line) => line.split("\t").slice(0, 2)),
+        ).toEqual([
+          ["app-ui", "run test:browser"],
+          ["app-ui", "run test:notification"],
+          ["app-ui", "run test:replay"],
+        ])
+      }
     } finally {
       if (child.exitCode === null) child.kill()
       await child.exited
