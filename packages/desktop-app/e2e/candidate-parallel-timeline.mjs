@@ -283,6 +283,66 @@ try {
         if (style) await style.evaluate((element) => element.remove())
       }
     }
+    const continuity = process.argv.includes("--assert-continuity")
+      ? await group.evaluateHandle((element) => {
+          const original = [...element.querySelectorAll('[data-component="tool-part-wrapper"]')]
+          const ids = original.map((row) => row.getAttribute("data-timeline-part-id"))
+          const start = performance.now()
+          const samples = []
+          const removals = []
+          let frames = 0
+          let previous = ""
+          let frame = 0
+          const sample = (source) => {
+            const current = [...document.querySelectorAll('[data-component="tool-part-wrapper"]')].filter((row) =>
+              ids.includes(row.getAttribute("data-timeline-part-id")),
+            )
+            const state = {
+              groupConnected: element.isConnected,
+              groupOpen: element.hasAttribute("open"),
+              visible: original.map((row) => row.getBoundingClientRect().height > 0),
+              connected: original.map((row) => row.isConnected),
+              sameNode: original.map((row, index) => current[index] === row),
+              ids: current.map((row) => row.getAttribute("data-timeline-part-id")),
+              states: original.map((row) => row.querySelector('[data-slot="background-command-state"]')?.textContent),
+              tops: original.map((row) => row.getBoundingClientRect().top),
+            }
+            const key = JSON.stringify(state)
+            if (key !== previous) {
+              samples.push({ at: performance.now() - start, source, ...state })
+              previous = key
+            }
+          }
+          const observer = new MutationObserver((records) => {
+            for (const record of records)
+              for (const removed of record.removedNodes) {
+                const affected = original.filter((row) => removed === row || removed.contains(row))
+                if (affected.length)
+                  removals.push({
+                    at: performance.now() - start,
+                    ids: affected.map((row) => row.getAttribute("data-timeline-part-id")),
+                  })
+              }
+            sample("mutation")
+          })
+          observer.observe(document.body, { subtree: true, childList: true, attributes: true })
+          const tick = () => {
+            frames++
+            sample("frame")
+            frame = requestAnimationFrame(tick)
+          }
+          sample("start")
+          frame = requestAnimationFrame(tick)
+          return {
+            finish() {
+              observer.disconnect()
+              cancelAnimationFrame(frame)
+              sample("end")
+              return { ids, frames, samples, removals, elapsed: performance.now() - start }
+            },
+          }
+        })
+      : undefined
     for (const slot of order) {
       await writeFile(join(project, `parallel-${round}-${slot}.release`), "release")
       await expect.poll(() => shells()[slot]?.data.time.completed !== undefined, { timeout: 30000 }).toBe(true)
@@ -290,7 +350,35 @@ try {
         shells()[slot].data.output.includes(`PARALLEL_OUTPUT_${round}_${slot}`),
         "real command result matches its slot",
       )
+      if (continuity)
+        await expect
+          .poll(() => group.locator('[data-slot="background-command-state"]').allTextContents())
+          .toEqual(
+            [0, 1, 2].map((index) =>
+              order.slice(0, order.indexOf(slot) + 1).includes(index) ? "后台已结束" : "后台运行中",
+            ),
+          )
       await snapshot(`completed-${slot}`)
+    }
+    if (continuity) {
+      evidence.continuity = await continuity.evaluate((audit) => audit.finish())
+      await continuity.dispose()
+      await writeFile(join(record, "parallel-progress.json"), JSON.stringify(result, null, 2))
+      assert(evidence.continuity.frames > 0, "continuity observes real rendered frames")
+      assert.equal(
+        evidence.continuity.removals.length,
+        0,
+        "completion never removes a running tool row or its ancestor",
+      )
+      for (const sample of evidence.continuity.samples) {
+        assert(sample.groupConnected && sample.groupOpen, "completion keeps the original expanded group connected")
+        assert(
+          sample.connected.every(Boolean) && sample.sameNode.every(Boolean),
+          "completion retains actual DOM instances",
+        )
+        assert(sample.visible.every(Boolean), "completion does not transiently hide the running rows")
+        assert.deepEqual(sample.ids, evidence.continuity.ids, "completion keeps original rendered row order")
+      }
     }
     released[round].resolve()
     await expect(run.page.getByText(`PARALLEL_DONE_${round}`, { exact: true })).toBeVisible()
