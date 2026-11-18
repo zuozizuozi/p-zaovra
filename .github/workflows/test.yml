@@ -16,7 +16,8 @@ permissions:
 jobs:
   unit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Cold browser installation can take 9 minutes; the suite itself takes about 21.
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -43,6 +44,7 @@ jobs:
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
       - name: Run package unit tests
+        timeout-minutes: 25
         env:
           ZAOVRA_TEST_REPORT_DIR: ${{ runner.temp }}/zaovra-test-reports
           ZAOVRA_SERVER_TEST_DIR: ${{ runner.temp }}/zaovra-server-routes
