@@ -363,6 +363,9 @@ async function runTurn(page, database, runtime, item) {
                 )
                 .allTextContents()
             ).join("")
+      item.stopObservation ??= { samples: 0, maxStreamingCharacters: 0 }
+      item.stopObservation.samples++
+      item.stopObservation.maxStreamingCharacters = Math.max(item.stopObservation.maxStreamingCharacters, text.length)
       if (text.length > 20 && current.length > 0 && !current.at(-1)?.data.finish && (await stop.isVisible())) {
         item.stopRequested = {
           afterMs: Date.now() - started,
@@ -467,7 +470,8 @@ async function runTurn(page, database, runtime, item) {
       item.successfulTerminal = current.at(-1).id
       break
     }
-    await new Promise((done) => setTimeout(done, 200))
+    // A short real response can finish between ordinary tool or file polls. Match the renderer cadence for Stop.
+    await new Promise((done) => setTimeout(done, item.mode === "stop" && !item.stopRequested ? 16 : 200))
   }
   const bytes = await readFile(artifact)
   assert.equal(bytes.toString().replace(/\r?\n$/, ""), item.value, "actual file matches this turn's expected value")
