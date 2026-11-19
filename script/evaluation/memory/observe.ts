@@ -156,7 +156,22 @@ export async function observe(input: {
         )
       )
         return result("incomplete", "assistant-or-tool-unsettled", attempt)
-      if (current.some((message) => message.error !== undefined || message.termination !== undefined))
+      // A settled transient provider failure can precede a successful retry of the same admission.
+      const latest = current.reduce((a, b) => a.seq! > b.seq! ? a : b)
+      if (
+        current.some((message) => {
+          if (message.error === undefined && message.termination === undefined) return false
+          return !(
+            message.termination?.category === "overload" &&
+            message.finish === "error" &&
+            message.content.length === 0 &&
+            message.seq! < latest.seq! &&
+            latest.finish === "stop" &&
+            latest.termination === undefined &&
+            latest.error === undefined
+          )
+        })
+      )
         return result("incomplete", "own-assistant-terminated", attempt)
       if (
         !outcome ||

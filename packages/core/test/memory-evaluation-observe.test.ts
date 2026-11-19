@@ -447,3 +447,17 @@ test("opt-in does not bypass stable sampling or admission completion and invalid
     expect((await observe({ client: invalid.client, admission, capture: bounds })).attempts).toBe(0)
   expect(invalid.requests).toHaveLength(0)
 })
+
+test("a completed retry supersedes only an earlier empty overload on the same turn", async () => {
+  const failed = { ...assistant, finish: "error", termination: { category: "overload", message: "HTTP 502" } } satisfies Message
+  const retry = { ...assistant, id: "retried", seq: 8, finish: "stop" } satisfies Message
+  for (const [previous, latest, ready] of [
+    [failed, retry, true],
+    [failed, { ...retry, finish: "tool-calls" }, false],
+    [{ ...failed, termination: { category: "budget", message: "limit" } }, retry, false],
+    [failed, { ...retry, seq: 5 }, false],
+  ] satisfies Array<[Message, Message, boolean]>) {
+    await using f = await fixture({ messages: [user, previous, latest] })
+    expect((await observe({ client: f.client, admission, confirmBackground: quiet })).artifactReady).toBe(ready)
+  }
+})
