@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import { Cause, DateTime, Effect, Exit, Layer, Stream } from "effect"
 import { GenerationOptions, HttpOptions, LLMRequest, Message, SystemPart, ToolDefinition } from "@zaovra-ai/llm"
-import { LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
+import { Auth, LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
 import { OpenAIResponses } from "@zaovra-ai/llm/protocols/openai-responses"
 import { OpenAIChat } from "@zaovra-ai/llm/protocols/openai-chat"
 import { Config } from "../src/config"
@@ -62,6 +62,7 @@ for (const scenario of [
   "daily-budget",
   "count-missing",
   "automatic-count-lost",
+  "automatic-credential-during-count",
   "count-invalid",
   "count-redirect",
   "generation-redirect",
@@ -280,6 +281,10 @@ for (const scenario of [
               current.model = current.model.route
                 .with({ endpoint: { baseURL: "https://changed.invalid" } })
                 .model({ id: "api-model", provider: selected.providerID })
+            if (scenario === "automatic-credential-during-count")
+              current.model = current.model.route
+                .with({ auth: Auth.bearer("rotated-fixture") })
+                .model({ id: "api-model", provider: selected.providerID })
             if (scenario === "defaults-during-count")
               current.model = current.model.route
                 .with({ generation: { maxTokens: 8 } })
@@ -405,6 +410,12 @@ for (const scenario of [
           )
           if (Exit.isFailure(outcome) && (scenario === "count-missing" || scenario === "automatic-count-lost"))
             expect(Cause.pretty(outcome.cause)).toContain("HTTP 404")
+          if (scenario === "automatic-credential-during-count") {
+            expect(Exit.isFailure(outcome) && Cause.pretty(outcome.cause)).toContain("凭据或请求头已经改变")
+            const { db } = yield* Database.Service
+            const binding = (yield* MemoryTidyCount.binding(selected, current.model))!
+            expect(yield* MemoryTidyCount.verified(db, run!.directory, binding)).toBe(false)
+          }
           if (scenario === "automatic-count-lost") {
             const { db } = yield* Database.Service
             const binding = (yield* MemoryTidyCount.binding(selected, current.model))!
