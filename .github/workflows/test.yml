@@ -30,7 +30,7 @@ jobs:
           git config --global user.email "test@zaovra.local"
           git config --global user.name "Zaovra tests"
       - name: Install browser test runtime
-        run: bun x --no-install playwright-core install --with-deps --only-shell chromium
+        run: bash .github/scripts/install-browser-runtime.sh
       - name: Allow the test Chromium sandbox on Ubuntu
         # Ubuntu's AppArmor policy blocks downloaded Chromium's user namespaces.
         # Scope the exception to Playwright's headless binary on this ephemeral runner.
@@ -124,7 +124,7 @@ jobs:
         with:
           install-flags: --frozen-lockfile
       - name: Install browser test runtime
-        run: bun x --no-install playwright-core install --with-deps --only-shell chromium
+        run: bash .github/scripts/install-browser-runtime.sh
       - name: Allow the test Chromium sandbox on Ubuntu
         run: |
           cat <<EOF | sudo tee /etc/apparmor.d/zaovra-test-chromium
