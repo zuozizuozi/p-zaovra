@@ -569,6 +569,37 @@ test("Responses selects a single final assistant message after commentary and re
   }
 })
 
+test("lookup-first is a distinct prompt condition and preserves a model's immediate abstention", async () => {
+  await using temporary = await tmpdir()
+  const material = await fixture(temporary.path)
+  const drafts = path.join(temporary.path, "drafts.json")
+  await fixtureDrafts(material.input, drafts)
+  const prompts: string[] = []
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const wire = (await request.json()) as Native
+      prompts.push((wire.input ?? wire.messages)![0].content)
+      return succeed(wire.input ? "responses" : "chat", { action: "abstain" }, { input: 5, output: 2 }, wire.model)
+    },
+  })
+  try {
+    const host = setup(path.join(temporary.path, "campaign"), upstream.port!, 6)
+    const inputs = { ...material, drafts }
+    const result = await answerHistoryLive(host, inputs, "lookup-first", 2)
+    expect(result.retrieval).toBe("lookup-first")
+    expect(result.counts).toEqual({ search: 2, pages: 2, both: 2 })
+    expect(prompts).toHaveLength(6)
+    expect(prompts.every((prompt) => prompt.includes("Use at least one permitted retrieval tool"))).toBe(true)
+    await expect(answerHistoryLive(host, inputs, "autonomous", 2)).rejects.toThrow("evaluation-input-or-route-plan-changed")
+    await expect(answerHistoryLive(host, inputs)).rejects.toThrow("evaluation-input-or-route-plan-changed")
+    expect(prompts).toHaveLength(6)
+  } finally {
+    await upstream.stop(true)
+  }
+})
+
 test("a transport outage pauses the campaign after two unanswered physical sends", async () => {
   await using temporary = await tmpdir()
   const material = await fixture(temporary.path)

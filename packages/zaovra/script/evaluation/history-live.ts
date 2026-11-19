@@ -35,7 +35,14 @@ const toolInstructions: Record<Tool, string> = {
   list: '{"action":"list","query":"keywords"} finds knowledge pages; an empty query lists pages.',
   read: '{"action":"read","ref":"p1","offset":0} opens a listed page. Use nextOffset to continue.',
 }
-const systemFor = (arm: Arm) => [qaSystem, ...tools[arm].map((tool) => toolInstructions[tool])].join(" ")
+const systemFor = (arm: Arm, retrieval: "autonomous" | "lookup-first") =>
+  [
+    qaSystem,
+    ...(retrieval === "lookup-first"
+      ? ["Use at least one permitted retrieval tool before answering or abstaining. If the results are inadequate, abstain."]
+      : []),
+    ...tools[arm].map((tool) => toolInstructions[tool]),
+  ].join(" ")
 
 const Draft = Schema.Struct({ title: Schema.String, summary: Schema.String, body: Schema.String })
 const pageFromModel = Schema.decodeUnknownSync(Draft)
@@ -143,10 +150,15 @@ export async function generateHistoryLive(host: HistoryLiveHost, generationInput
 export async function answerHistoryLive(
   host: HistoryLiveHost,
   material: { corpus: string; drafts: string; questions: string },
+  retrieval: "autonomous" | "lookup-first" = "autonomous",
+  questionLimit = 25,
 ) {
+  if (retrieval !== "autonomous" && retrieval !== "lookup-first") throw new Error("invalid-retrieval-condition")
+  if (!Number.isInteger(questionLimit) || questionLimit < 1 || questionLimit > 25)
+    throw new Error("invalid-question-limit")
   const corpus = await loadCorpus(material.corpus)
   const drafts = await loadDrafts(material.drafts, corpus)
-  const questions = await loadQuestions(material.questions)
+  const questions = (await loadQuestions(material.questions)).slice(0, questionLimit)
   return withJournal(host.root, host.cap, async (journal, directory) => {
     const arms = ["search", "pages", "both"] as const
     const slots = new Map<string, ModelRequest>()
@@ -161,7 +173,7 @@ export async function answerHistoryLive(
       sha256(
         JSON.stringify([
           qaVersion,
-          arms.map(systemFor),
+          arms.map((arm) => systemFor(arm, retrieval)),
           limits,
           fingerprint(corpus.documents),
           drafts,
@@ -184,7 +196,7 @@ export async function answerHistoryLive(
             {
               slot,
               step: step++,
-              system: systemFor(arm),
+              system: systemFor(arm, retrieval),
               data: { question: turn.question, tools: turn.tools, transcript: turn.transcript },
               signal: turn.signal,
             },
@@ -195,6 +207,6 @@ export async function answerHistoryLive(
       },
       { nonce: journal.nonce, signal: host.signal, material: { corpus, drafts }, questions },
     )
-    return report(journal, output, { phase: "qa", ...result })
+    return report(journal, output, { phase: "qa", retrieval, questionLimit, ...result })
   })
 }
