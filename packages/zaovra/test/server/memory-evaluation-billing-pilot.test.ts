@@ -143,6 +143,11 @@ test.skipIf(process.platform !== "win32")(
           })
         }
         if (treatment === "A") expect(result.stageUsage).toBeUndefined()
+        for (const entry of requests) {
+          const body = JSON.parse(entry.body) as { tools?: Array<{ function: { name: string } }> }
+          const names = (body.tools ?? []).map((tool) => tool.function.name)
+          expect(names.filter((name) => name.startsWith("memory_"))).toEqual([])
+        }
         const fourth = requests.find((entry) => entry.stage === 4)!.body
         expect(fourth.includes(chain.poisonedNote)).toBe(treatment === "B")
         expect(fourth).not.toContain("artificial-poison")

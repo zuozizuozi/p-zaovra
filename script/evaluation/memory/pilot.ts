@@ -135,7 +135,15 @@ export async function runEvaluationChain(
     lsp: false,
     memory: { enabled: input.treatment !== "A", taskSearch: input.treatment === "C", index: { enabled: true } },
     agent: { build: { steps: 8 } },
-    permission: { "*": "allow", external_directory: "deny", task: "deny", webfetch: "deny", websearch: "deny" },
+    permission: {
+      "*": "allow",
+      external_directory: "deny",
+      task: "deny",
+      webfetch: "deny",
+      websearch: "deny",
+      // A and B compare the recorder and startup index alone. C adds model-facing memory tools.
+      ...(input.treatment === "A" || input.treatment === "B" ? { "memory_*": "deny" } : {}),
+    },
     provider: {
       [providerID]: {
         npm: input.family === "gpt" ? "@ai-sdk/openai" : "@ai-sdk/openai-compatible",
