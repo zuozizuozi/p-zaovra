@@ -379,8 +379,17 @@ async function runTurn(page, database, runtime, item) {
       if (!item.approvals.some((entry) => entry.id === id && entry.approved)) {
         const permission = await dock.locator('[data-slot="permission-details"] > code').textContent()
         const patterns = await dock.locator('[data-slot="permission-patterns"] code').allTextContents()
-        const tool = tools.findLast((part) => part.name === "bash" && part.state.status === "running")
-        assert(tool, "permission without attributable running bash requires review")
+        // Parallel bash calls can wait together; attribute the visible permission by its exact command.
+        const matches = tools.filter(
+          (part) =>
+            part.name === "bash" &&
+            part.state.status === "running" &&
+            permission === "bash" &&
+            patterns.length === 1 &&
+            part.state.input.command === patterns[0],
+        )
+        assert.equal(matches.length, 1, "permission requires exactly one matching running bash")
+        const tool = matches[0]
         const command = tool.state.input.command
         const workdir = resolve(project, tool.state.input.workdir ?? ".")
         const scoped =
