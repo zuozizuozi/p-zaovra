@@ -574,10 +574,17 @@ test("a transport outage pauses the campaign after two unanswered physical sends
   const material = await fixture(temporary.path)
   const drafts = path.join(temporary.path, "drafts.json")
   await fixtureDrafts(material.input, drafts)
+  const seen: string[] = []
   const upstream = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: () => Response.redirect("http://127.0.0.1/unsupported"),
+    async fetch(request) {
+      const wire = (await request.json()) as Native
+      const input = (wire.input ?? wire.messages)![1].content
+      seen.push(wire.model + "/" + JSON.parse(input).question)
+      if (seen.length <= 2) return Response.redirect("http://127.0.0.1/unsupported")
+      return succeed(wire.input ? "responses" : "chat", { action: "abstain" }, { input: 5, output: 2 }, wire.model)
+    },
   })
   try {
     const result = await answerHistoryLive(setup(path.join(temporary.path, "campaign"), upstream.port!, 4), {
@@ -586,6 +593,15 @@ test("a transport outage pauses the campaign after two unanswered physical sends
     })
     expect(result.pause).toBe("transport-outage")
     expect(result.usage).toMatchObject({ sends: 2, unknown: 2, unknownReserve: 260 })
+    const recovered = await answerHistoryLive(setup(path.join(temporary.path, "campaign"), upstream.port!, 75), {
+      ...material,
+      drafts,
+    })
+    expect(recovered.pause).toBeUndefined()
+    expect(recovered.counts).toEqual({ search: 25, pages: 25, both: 25 })
+    expect(recovered.usage).toMatchObject({ sends: 75, known: 73, unknown: 2, unknownReserve: 260 })
+    expect(seen.length).toBe(75)
+    expect(new Set(seen).size).toBe(75)
   } finally {
     await upstream.stop(true)
   }
