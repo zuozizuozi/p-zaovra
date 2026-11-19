@@ -7,6 +7,7 @@ import { evaluationTidyRelay, startEvaluationRelay } from "../../../../script/ev
 import { tmpdir } from "../fixture/fixture"
 
 const model = "fixture-model"
+const tidyModel = "fixture-tidy-model"
 const numeric = { input_tokens: 20, output_tokens: 5, total_tokens: 25 }
 const finish = {
   type: "response.completed",
@@ -92,16 +93,19 @@ for (const scenario of ["http-404", "valid-count"] as const) {
         port: 0,
         async fetch(request) {
           const route = new URL(request.url).pathname
-          const body = (await request.json()) as { input: unknown }
+          const body = (await request.json()) as { input: unknown; model: string }
           if (route === "/v1/responses/input_tokens") {
+            if (body.model !== tidyModel) return new Response(null, { status: 400 })
             calls.push("tidy-count")
             return scenario === "http-404"
               ? new Response(null, { status: 404 })
               : Response.json({ object: "response.input_tokens", input_tokens: 20 })
           }
           const tidy = JSON.stringify(body.input).includes("整理当前项目记忆")
+          if (body.model !== (tidy ? tidyModel : model)) return new Response(null, { status: 400 })
           calls.push(tidy ? "tidy-generation" : "user-generation")
-          if (!tidy || ++tidyTurns > 1) return sse(text, finish)
+          const terminal = { ...finish, response: { ...finish.response, model: body.model } }
+          if (!tidy || ++tidyTurns > 1) return sse(text, terminal)
           const fixture = await Bun.file(path.join(root, "stage-4", "fixture.json")).json()
           const item = { type: "function_call", id: "fc_tidy", call_id: "call_tidy", name: "memory_review" }
           const args = JSON.stringify({
@@ -122,7 +126,7 @@ for (const scenario of ["http-404", "valid-count"] as const) {
               output_index: 0,
               item: { ...item, arguments: args, status: "completed" },
             },
-            finish,
+            terminal,
           )
         },
       })
@@ -138,6 +142,7 @@ for (const scenario of ["http-404", "valid-count"] as const) {
       const relay = startEvaluationRelay({ ...relayOptions, journal: path.join(tmp.path, "ordinary.jsonl") })
       const tidy = startEvaluationRelay({
         ...relayOptions,
+        model: tidyModel,
         maxRequests: 8,
         maxCountRequests: 8,
         journal: path.join(tmp.path, "tidy.jsonl"),
@@ -204,6 +209,7 @@ for (const scenario of ["http-404", "valid-count"] as const) {
           )
         expect(evidence, JSON.stringify(result.stages)).toBeDefined()
         expect(evidence.beforeUserAdmission).toBe(true)
+        expect(evidence.prepared?.model).toEqual({ id: tidyModel, providerID: "evaluation-tidy" })
         expect(evidence.before.notes.some((note: { id: string }) => note.id === evidence.poisonID)).toBe(true)
         expect(evidence.before.userEvidence.length).toBeGreaterThan(0)
         if (scenario === "http-404") {

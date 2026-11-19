@@ -89,10 +89,7 @@ export async function runEvaluationChain(
     (!input.relay ||
       input.relay === tidy.relay ||
       !tidyRelay?.available ||
-      input.family !== "gpt" ||
       tidyBinding?.protocol !== "openai-responses" ||
-      tidyBinding.model !== input.modelID ||
-      tidyBinding.endpointHash !== evaluationRelayBinding(input.relay).endpointHash ||
       !Number.isSafeInteger(tidy.tokens) ||
       !Number.isSafeInteger(tidy.dailyTokens) ||
       tidy.tokens < 1 ||
@@ -148,7 +145,7 @@ export async function runEvaluationChain(
   await mkdir(path.join(profile, "config", "zaovra"), { recursive: true })
   await writeFile(path.join(profile, ".evaluation-profile"), "zaovra-memory-evaluation-v1\n", { flag: "wx" })
   const providerID = `evaluation-${input.family}`
-  const tidyModel = { id: input.modelID, providerID: "evaluation-tidy" }
+  const tidyModel = { id: tidyBinding?.model ?? input.modelID, providerID: "evaluation-tidy" }
   const config = {
     model: `${providerID}/${input.modelID}`,
     shell: "powershell",
