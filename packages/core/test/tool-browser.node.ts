@@ -11,7 +11,7 @@ const expect = (value: unknown) => ({
   toContain: (other: string) => assert.ok(String(value).includes(other), String(value)),
   not: { toContain: (other: string) => assert.ok(!String(value).includes(other), String(value)) },
 })
-import { DateTime, Effect, Fiber, Layer } from "effect"
+import { DateTime, Effect, Fiber, Layer, Option } from "effect"
 import { LLM } from "@zaovra-ai/llm"
 import { OpenAIChat, OpenAIResponses } from "@zaovra-ai/llm/protocols"
 import { Auth, LLMClient } from "@zaovra-ai/llm/route"
@@ -531,22 +531,29 @@ test(
           yield* Effect.sleep("600 millis")
           expect(JSON.stringify(yield* call({ action: "snapshot" }, "ses_browser_b"))).toContain("no active browser")
           yield* call({ action: "open", url: new URL("behaviors", url).href })
+          const expectNotice = (action: unknown, notice: string) =>
+            Effect.gen(function* () {
+              const initial = JSON.stringify(action)
+              let latest = initial
+              // A notice can arrive in the click result or in a later console observation.
+              const observed = yield* Effect.gen(function* () {
+                while (!latest.includes(notice)) {
+                  yield* Effect.sleep("50 millis")
+                  latest = JSON.stringify(yield* call({ action: "console" }))
+                }
+              }).pipe(Effect.timeoutOption("3 seconds"))
+              assert.ok(
+                Option.isSome(observed),
+                `Missing "${notice}" after 3 seconds. Action: ${initial}; console: ${latest}`,
+              )
+            })
           const popped = yield* call({ action: "click", target: { role: "button", name: "Popup" } })
-          yield* Effect.sleep("100 millis")
-          const popup = yield* call({ action: "console" })
-          expect(JSON.stringify(popped) + JSON.stringify(popup)).toContain("Popup blocked")
-          // Events can arrive in the action observation or the following console read.
+          yield* expectNotice(popped, "Popup blocked")
           expect(outsideHits).toBe(0)
           const download = yield* call({ action: "click", target: { role: "link", name: "Download" } })
-          yield* Effect.sleep("100 millis")
-          expect(JSON.stringify(download) + JSON.stringify(yield* call({ action: "console" }))).toContain(
-            "Download blocked",
-          )
+          yield* expectNotice(download, "Download blocked")
           const socket = yield* call({ action: "click", target: { role: "button", name: "Socket" } })
-          yield* Effect.sleep("100 millis")
-          expect(JSON.stringify(socket) + JSON.stringify(yield* call({ action: "console" }))).toContain(
-            "Blocked WebSocket origin",
-          )
+          yield* expectNotice(socket, "Blocked WebSocket origin")
           expect(webSocketHits).toBe(0)
           const flood = yield* call({ action: "click", target: { role: "button", name: "Flood" } })
           expect(JSON.stringify(flood)).toContain("Observation truncated")
