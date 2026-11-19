@@ -109,7 +109,10 @@ test.skipIf(process.platform !== "win32")(
           relayKey: relay.apiKey,
           ...(treatment === "B" ? { relay } : {}),
         })
-        if (!result.pass) console.error({ stages: result.stages, rounds, relay: await Bun.file(journal).text() })
+        if (!result.pass) {
+          const last = JSON.parse(requests.at(-1)!.body) as { messages: Array<{ role: string; content: unknown }> }
+          console.error({ treatment, stages: result.stages, rounds, tools: last.messages.filter((message) => message.role === "tool") })
+        }
         expect(result.pass).toBe(true)
         expect(result.counts).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
         expect(rounds).toEqual([3, 1, 3, 3, 3])
