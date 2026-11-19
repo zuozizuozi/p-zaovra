@@ -222,7 +222,16 @@ try {
             item.users = users.length
             item.pass = true
             await writeFile(join(root, `turn-${step.index}-messages.json`), JSON.stringify(rows, null, 2))
-            await page.screenshot({ path: join(root, `turn-${step.index}.png`) })
+            const screenshot = { path: join(root, `turn-${step.index}.png`) }
+            try {
+              await page.screenshot(screenshot)
+            } catch (error) {
+              if (error.name !== "TimeoutError" || page.isClosed()) throw error
+              item.screenshotTimeout = { message: error.message, at: Date.now() }
+              await writeFile(join(root, "result-in-progress.json"), JSON.stringify(result, null, 2))
+              // Retry only the capture on this page. Never resubmit a completed turn.
+              await page.screenshot(screenshot)
+            }
             await writeFile(join(root, "result-in-progress.json"), JSON.stringify(result, null, 2))
           }
         } finally {
