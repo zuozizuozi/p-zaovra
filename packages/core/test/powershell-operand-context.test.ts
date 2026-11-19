@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { analyzeShellCommand } from "../src/tool/bash-preflight"
+import { analyzeCommand, analyzeShellCommand } from "../src/tool/bash-preflight"
 
 const displayBytes =
   "$p = Join-Path (Get-Location) 'beta-proof.txt'; $b = [System.IO.File]::ReadAllBytes($p); \"Length=$($b.Length)\"; \"Hex=\" + (($b | ForEach-Object { $_.ToString('X2') }) -join ' '); \"Text=\" + [System.Text.Encoding]::ASCII.GetString($b).Replace(\"`r\",'\\r').Replace(\"`n\",'\\n')"
@@ -55,5 +55,19 @@ test("formatted replacement text can be displayed without treating its escape st
     display.replace("Write-Output", "Write-Output -OutVariable result"),
   ]) {
     expect((await analyzeShellCommand(use, "powershell")).paths, use).toContain("\\r")
+  }
+})
+
+test("bracketed file contents use newline escapes only as standalone display text", async () => {
+  const command =
+    '$p = Join-Path $PWD \'beta-proof.txt\'; [System.IO.File]::WriteAllText($p, "RECOVERY_1A`n", (New-Object System.Text.UTF8Encoding($false))); $b = [System.IO.File]::ReadAllBytes($p); "LEN=$($b.Length)"; "HEX=" + (($b | ForEach-Object { $_.ToString(\'x2\') }) -join \' \'); "TEXT=[" + [System.IO.File]::ReadAllText($p).Replace("`n",\'\\n\') + "]"'
+  const scan = await analyzeShellCommand(command, "powershell")
+  expect(scan.paths).toContain("beta-proof.txt")
+  expect(scan.paths).not.toContain("\\n")
+  expect(scan.externalRisk).toBe(analyzeCommand(command, "powershell").externalRisk)
+
+  const display = command.slice(command.lastIndexOf('"TEXT=['))
+  for (const command of ["$text = " + display, display + " > log.txt", display + "; Get-Item -LiteralPath '\\n'"]) {
+    expect((await analyzeShellCommand(command, "powershell")).paths, command).toContain("\\n")
   }
 })

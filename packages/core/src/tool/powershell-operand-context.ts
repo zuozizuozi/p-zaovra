@@ -74,15 +74,25 @@ function isNonPathFragment(node: Node) {
       result = outer
       continue
     }
-    if (
-      (outer.namedChildCount === 1 && outer.text === result.text) ||
-      (outer.type === "additive_expression" &&
-        outer.lastNamedChild?.id === result.id &&
-        outer.children.some((child) => child?.text === "+") &&
-        /^"[^"$`]*"$/.test(outer.firstNamedChild?.text ?? ""))
-    ) {
+    if (outer.namedChildCount === 1 && outer.text === result.text) {
       result = outer
       continue
+    }
+    if (
+      outer.type === "additive_expression" &&
+      outer.namedChildCount === 2 &&
+      outer.children.some((child) => child?.text === "+")
+    ) {
+      const affix =
+        outer.lastNamedChild?.id === result.id
+          ? outer.firstNamedChild
+          : outer.firstNamedChild?.id === result.id
+            ? outer.lastNamedChild
+            : undefined
+      if (affix && /^"[^"$`]*"$/.test(affix.text)) {
+        result = outer
+        continue
+      }
     }
     return false
   }
@@ -93,10 +103,11 @@ function stringReplace(call: Node): boolean {
   if (call.namedChild(1)?.text.toLowerCase() !== "replace") return false
   const receiver = call.firstNamedChild
   if (!receiver || receiver.type !== "invokation_expression") return false
+  const member = receiver.firstNamedChild?.text + "." + receiver.namedChild(1)?.text
   return (
-    /^\[System\.Text\.Encoding\]::(?:ASCII|UTF8|Unicode)\.GetString$/i.test(
-      receiver.firstNamedChild?.text + "." + receiver.namedChild(1)?.text,
-    ) || stringReplace(receiver)
+    /^\[System\.Text\.Encoding\]::(?:ASCII|UTF8|Unicode)\.GetString$/i.test(member) ||
+    (/^\[System\.IO\.File\]\.ReadAllText$/i.test(member) && receiver.children.some((child) => child?.text === "::")) ||
+    stringReplace(receiver)
   )
 }
 
