@@ -1,3 +1,4 @@
+/// <reference path="./wasm.d.ts" />
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { Language, Parser, type Node } from "web-tree-sitter"
