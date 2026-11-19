@@ -87,6 +87,16 @@ function result(messages = history()) {
   return ToolDisposition.classify(sessionID, messages).find((report) => report.assistantMessageID === first.id)
 }
 
+test("a failed search needs a successful retry for the same query and scope", () => {
+  const query = { path: "src", pattern: "BUILD_ID" }
+  const search = { ...failure, name: "grep", state: { ...failed, input: query, error: { ...failed.error, message: "no such file" } } }
+  const classify = (name: string, input: Record<string, string>) =>
+    result([{ ...user, text: "在 src 中查找 BUILD_ID" }, ...history(search, { ...success, name, state: { ...completed, input } }).slice(1)])
+  expect(classify("read", { filePath: "README.md" })?.status).toBe("failed")
+  expect(classify("grep", { ...query, path: "docs" })?.status).toBe("failed")
+  expect(classify("grep", query)).toMatchObject({ status: "recovered", reason: "same-operation" })
+})
+
 test("native exact edit recovery preserves the source error and requires a settled authoritative turn", () => {
   expect(result()).toMatchObject({ status: "recovered", reason: "same-operation" })
   expect(failure.state).toEqual(failed)

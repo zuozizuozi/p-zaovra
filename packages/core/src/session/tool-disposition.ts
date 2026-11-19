@@ -270,6 +270,7 @@ export function classify(sessionID: string, history: readonly SessionMessage.Mes
         !/^(?:补充要求|追加要求|修改要求)\s*[。.!！]*$/u.test(scope[0]!.text.trim())
       if (!complete) return result("unknown", "unverified")
       if (same && part.name === "read") return result("recovered", "same-operation", same)
+      if (part.name !== "read") return result("failed", "tool-error")
       const target = input(part).path ?? input(part).filePath
       const filename = typeof target === "string" ? target.split(/[\\/]/).at(-1)?.trim().toLowerCase() : undefined
       const sources = new Set(requested.entries.map((item) => item.sourceMessageID))
@@ -286,11 +287,10 @@ export function classify(sessionID: string, history: readonly SessionMessage.Mes
           )
       const alternative = later.find(
         (item) =>
-          part.name !== "read" ||
-          ((item.part.name === "read" || (item.part.name === "write" && unrequested)) &&
+          (item.part.name === "read" || (item.part.name === "write" && unrequested)) &&
             typeof target === "string" &&
             target &&
-            target === (input(item.part).path ?? input(item.part).filePath)),
+            target === (input(item.part).path ?? input(item.part).filePath),
       )
       return alternative ? result("exploratory", "exploratory-miss", alternative) : result("failed", "tool-error")
     })
