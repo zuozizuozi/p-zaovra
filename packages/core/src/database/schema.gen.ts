@@ -207,6 +207,7 @@ export default {
           \`origin\` text NOT NULL,
           \`status\` text NOT NULL,
           \`verification\` text,
+          \`extracted_digest\` text,
           \`session_id\` text,
           \`seq\` integer,
           \`file_revision\` integer DEFAULT 0 NOT NULL,
@@ -690,6 +691,9 @@ export default {
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`memory_note_scope_key_idx\` ON \`memory_note\` (\`scope\`,\`key\`);`)
+      yield* tx.run(
+        `CREATE INDEX \`memory_note_scope_extracted_digest_idx\` ON \`memory_note\` (\`scope\`,\`extracted_digest\`);`,
+      )
       yield* tx.run(
         `CREATE INDEX \`memory_note_scope_time_updated_idx\` ON \`memory_note\` (\`scope\`,\`time_updated\`);`,
       )

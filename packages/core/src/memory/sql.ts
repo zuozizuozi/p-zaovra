@@ -18,6 +18,7 @@ export const MemoryNoteTable = sqliteTable(
     origin: text().$type<Memory.Origin>().notNull(),
     status: text().$type<Memory.Status>().notNull(),
     verification: text(),
+    extracted_digest: text(),
     session_id: text().$type<SessionSchema.ID>(),
     seq: integer(),
     file_revision: integer().notNull().default(0),
@@ -29,6 +30,7 @@ export const MemoryNoteTable = sqliteTable(
   },
   (table) => [
     uniqueIndex("memory_note_scope_key_idx").on(table.scope, table.key),
+    index("memory_note_scope_extracted_digest_idx").on(table.scope, table.extracted_digest),
     index("memory_note_scope_time_updated_idx").on(table.scope, table.time_updated),
   ],
 )

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "af9e00eb-a724-42cc-89cc-87da4e9dfd89",
+  "id": "49dabb06-7b14-4d49-ba5c-813631e7e414",
   "prevIds": [
-    "b40d2dcd-57f5-49af-95c4-fbab1312870a"
+    "af9e00eb-a724-42cc-89cc-87da4e9dfd89"
   ],
   "ddl": [
     {
@@ -1445,6 +1445,16 @@
       "default": null,
       "generated": null,
       "name": "verification",
+      "entityType": "columns",
+      "table": "memory_note"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "extracted_digest",
       "entityType": "columns",
       "table": "memory_note"
     },
@@ -5737,6 +5747,24 @@
       "where": null,
       "origin": "manual",
       "name": "memory_note_scope_key_idx",
+      "entityType": "indexes",
+      "table": "memory_note"
+    },
+    {
+      "columns": [
+        {
+          "value": "scope",
+          "isExpression": false
+        },
+        {
+          "value": "extracted_digest",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_note_scope_extracted_digest_idx",
       "entityType": "indexes",
       "table": "memory_note"
     },

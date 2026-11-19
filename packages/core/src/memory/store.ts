@@ -39,6 +39,7 @@ export interface WriteInput {
   readonly seq?: number
   /** Host-validated historical source. One extracted note per message, independent of model wording. */
   readonly extractedMessageID?: SessionMessage.ID
+  readonly extractedDigest?: string
   /** Host-validated prior Read evidence, inserted atomically with a new model note. */
   readonly readFiles?: ReadonlyArray<Memory.FileBinding>
 }
@@ -808,6 +809,23 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               const key = input.extractedMessageID
                 ? `extracted:${Hash.sha256(JSON.stringify([input.sessionID, input.extractedMessageID, input.seq]))}`
                 : `text:${textHash(text)}`
+              if (input.extractedDigest !== undefined) {
+                if (!input.extractedMessageID || !/^[a-f0-9]{64}$/.test(input.extractedDigest)) return undefined
+                const link = yield* binding(input.scope)
+                const deleted = yield* db
+                  .select({ id: MemoryNoteTable.id })
+                  .from(MemoryNoteTable)
+                  .where(
+                    and(
+                      inArray(MemoryNoteTable.scope, link ? [input.scope, link.legacy_scope] : [input.scope]),
+                      eq(MemoryNoteTable.extracted_digest, input.extractedDigest),
+                      sql`${MemoryNoteTable.time_deleted} IS NOT NULL`,
+                    ),
+                  )
+                  .get()
+                  .pipe(Effect.orDie)
+                if (deleted) return undefined
+              }
               if (yield* suppressed(input.scope, text, key)) return undefined
               if (!text) return undefined
               if (yield* find(input.scope, deletedTextPrefix + textHash(text))) return undefined
@@ -843,6 +861,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                 seq: input.seq,
                 time_observed: Date.now(),
                 ...(files ? { files, file_revision: 1 } : {}),
+                extracted_digest: input.extractedDigest,
               })
             }),
           )
@@ -924,9 +943,30 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                         .onConflictDoNothing()
                         .run()
                         .pipe(Effect.orDie)
+                    // For pre-migration extractions, recover only from the exact bound message.
+                    let digest = row.extracted_digest
+                    if (!digest && row.key.startsWith("extracted:") && row.session_id && row.seq !== null) {
+                      const source = yield* tx
+                        .select()
+                        .from(SessionMessageTable)
+                        .where(
+                          and(eq(SessionMessageTable.session_id, row.session_id), eq(SessionMessageTable.seq, row.seq)),
+                        )
+                        .get()
+                        .pipe(Effect.orDie)
+                      if (
+                        source &&
+                        row.key === "extracted:" + Hash.sha256(JSON.stringify([row.session_id, source.id, row.seq]))
+                      )
+                        digest = Hash.sha256(spoken(source.type, source.data))
+                    }
                     yield* tx
                       .update(MemoryNoteTable)
-                      .set({ ...tombstone(), file_revision: sql`${MemoryNoteTable.file_revision} + 1` })
+                      .set({
+                        ...tombstone(),
+                        extracted_digest: digest,
+                        file_revision: sql`${MemoryNoteTable.file_revision} + 1`,
+                      })
                       .where(eq(MemoryNoteTable.id, row.id))
                       .run()
                       .pipe(Effect.orDie)

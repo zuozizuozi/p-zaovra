@@ -13,6 +13,7 @@ import { EventV2 } from "../src/event"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { LocationServiceMap } from "../src/location-service-map"
+import { MemoryNoteTable } from "../src/memory/sql"
 import { MemoryExtractTool } from "../src/memory/extract-tool"
 import { MemoryStore } from "../src/memory/store"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
@@ -176,6 +177,46 @@ test("confirmed tidy extracts a source-bound unchecked note; retries, user edits
       expect(yield* h.store.list(h.project)).toEqual([])
     }),
   ))
+
+for (const legacy of [false, true])
+  test(`deleting an extracted note blocks a rewritten note from a copied historical passage (legacy: ${legacy})`, () =>
+    withExtraction((h) =>
+      Effect.gen(function* () {
+        const sources = yield* Effect.forEach(
+          ["Use a local fixture for tests.", "Use a local fixture for tests.", "Use a separate account for billing."],
+          (text) =>
+            Effect.gen(function* () {
+              const session = yield* h.create()
+              yield* h.turn(session.id, text)
+              return session.id
+            }),
+        )
+        const run = yield* h.grant()
+        const save = (index: number, text: string) =>
+          Effect.gen(function* () {
+            const passage = (yield* h.read(run.session_id, sources[index]!)).find((m) => m.role === "assistant")!
+            return (yield* h.call(run.session_id, {
+              action: "save",
+              kind: "decision",
+              text,
+              source: passage.source,
+              quote: passage.text,
+            })).output!.structured as Output
+          })
+        const first = yield* save(0, "Run tests locally.")
+        if (legacy)
+          yield* h.database.db
+            .update(MemoryNoteTable)
+            .set({ extracted_digest: null })
+            .where(eq(MemoryNoteTable.id, first.note!.id))
+            .run()
+        yield* h.store.edit(first.note!.id, { text: "Keep the fixture local." })
+        yield* h.store.remove(first.note!.id)
+        expect((yield* save(1, "The test suite uses an isolated local setup.")).kept).toBe(false)
+        expect((yield* save(2, "Billing uses a dedicated account.")).kept).toBe(true)
+        expect(yield* h.store.list(h.project)).toHaveLength(1)
+      }),
+    ))
 
 test("ordinary, cancelled, switched-model and wrong-layer invocations cannot read or save history", () =>
   withExtraction((h, state) =>
