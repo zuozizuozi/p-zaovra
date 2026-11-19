@@ -988,7 +988,7 @@ const layer = Layer.effect(
       const toolMaterialization =
         isLastStep || textOnlyRecovery || deliveryReport
           ? undefined
-          : yield* tools.materialize(agent.info?.permissions, excludedMemory)
+          : yield* tools.materialize(agent.info?.permissions, excludedMemory, !tidyAllowed)
       const memoryNoteAllowed = yield* memoryWriting.allowed(session.id)
       const deliveryTools = ToolProfile.select(
         (toolMaterialization?.definitions ?? []).filter(

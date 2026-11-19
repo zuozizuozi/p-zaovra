@@ -22,6 +22,7 @@ export interface Interface {
   readonly materialize: (
     permissions?: PermissionV2.Ruleset,
     excluded?: ReadonlySet<string>,
+    conversation?: boolean,
   ) => Effect.Effect<Materialization>
   /** Internal registration capability exposed publicly only through Tools.Service. */
   readonly register: (tools: Readonly<Record<string, AnyTool>>) => Effect.Effect<void, RegistrationError, Scope.Scope>
@@ -192,7 +193,7 @@ const registryLayer = Layer.effect(
           }),
         )
       }),
-      materialize: Effect.fn("ToolRegistry.materialize")(function* (permissions = [], excluded?: ReadonlySet<string>) {
+      materialize: Effect.fn("ToolRegistry.materialize")(function* (permissions = [], excluded?: ReadonlySet<string>, conversation?: boolean) {
         const registrations = new Map(applications.entries())
         const disabled = new Set<string>()
         for (const [name, entries] of local) {
@@ -222,7 +223,7 @@ const registryLayer = Layer.effect(
             const registration = registrations.get(call.name)
             return registration !== undefined && Tool.observation(registration.tool, call.input)
           },
-          definitions: Array.from(registrations, ([name, registration]) => definition(name, registration.tool)).sort(
+          definitions: Array.from(registrations, ([name, registration]) => definition(name, registration.tool, conversation)).sort(
             (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
           ),
           settle: (input) => {

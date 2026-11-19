@@ -51,6 +51,7 @@ type Config<
   /** Trusted execution boundary; returned remote failures still require reconciliation. */
   readonly effectLocation?: "local" | "remote"
   readonly input: Input
+  readonly conversation?: { readonly description: string; readonly input: Schema.Top }
   /** External producers such as MCP may override only the model-facing schema. Runtime input still crosses this Tool's canonical input codec. */
   readonly inputJsonSchema?: ToolDefinition["inputSchema"]
   readonly output: Output
@@ -73,7 +74,7 @@ type Runtime = {
   readonly permission?: string
   readonly effectLocation?: "local" | "remote"
   readonly observation: (input: unknown) => boolean
-  readonly definition: (name: string) => ToolDefinition
+  readonly definition: (name: string, conversation?: boolean) => ToolDefinition
   readonly settle: (call: ToolCall, context: Context) => Effect.Effect<ToolOutput, ToolFailure>
 }
 
@@ -93,16 +94,18 @@ export function make<
       const decoded = Schema.decodeUnknownOption(config.input)(input)
       return Option.isSome(decoded) && config.observation(decoded.value)
     },
-    definition: (name) => {
-      const cached = definitions.get(name)
+    definition: (name, conversation) => {
+      const view = conversation ? config.conversation : undefined
+      const key = view ? name + "/conversation" : name
+      const cached = definitions.get(key)
       if (cached) return cached
       const definition = new ToolDefinition({
         name,
-        description: config.description,
-        inputSchema: config.inputJsonSchema ?? toJsonSchema(config.input),
+        description: view?.description ?? config.description,
+        inputSchema: view ? toJsonSchema(view.input) : (config.inputJsonSchema ?? toJsonSchema(config.input)),
         outputSchema: toJsonSchema(config.structured ?? config.output),
       })
-      definitions.set(name, definition)
+      definitions.set(key, definition)
       return definition
     },
     settle: (call, context) =>
@@ -166,7 +169,7 @@ export const withPermission = <Input extends SchemaType<any>, Output extends Sch
 }
 
 export const permission = (tool: AnyTool, name: string) => runtimeOf(tool).permission ?? name
-export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
+export const definition = (name: string, tool: AnyTool, conversation?: boolean) => runtimeOf(tool).definition(name, conversation)
 export const observation = (tool: AnyTool, input: unknown) => runtimeOf(tool).observation(input)
 export const effectLocation = (tool: AnyTool, name: string) =>
   runtimeOf(tool).effectLocation ?? (name === "browser" ? "remote" : "local")

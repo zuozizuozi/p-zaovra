@@ -65,8 +65,25 @@ const setup = Effect.gen(function* () {
       ...toolIdentity,
       call: { type: "tool-call", id: randomUUID(), name: "memory_page", input },
     })
-  return { sessions, store, tidy, captured, project, create, grant, review, page, pages }
+  return { sessions, store, tidy, registry, captured, project, create, grant, review, page, pages }
 })
+
+test("ordinary page discovery offers only lookup fields and keeps the full tidy schema available", () =>
+  withMemory((h) =>
+    Effect.gen(function* () {
+      const ordinary = yield* h.registry.materialize([], undefined, true)
+      const lookup = ordinary.definitions.find((tool) => tool.name === "memory_page")!
+      const full = h.captured.definitions.find((tool) => tool.name === "memory_page")!
+      expect(Object.keys(lookup.inputSchema.properties ?? {}).sort()).toEqual(["action", "id", "layer", "query"])
+      expect(JSON.stringify(lookup.inputSchema)).toContain('"list"')
+      expect(JSON.stringify(lookup.inputSchema)).toContain('"read"')
+      expect(JSON.stringify(lookup)).not.toContain('"publish"')
+      expect(JSON.stringify(full.inputSchema)).toContain('"publish"')
+      expect(JSON.stringify(full.inputSchema)).toContain('"expected"')
+      expect((yield* h.registry.materialize()).definitions.find((tool) => tool.name === "memory_page")).toBe(full)
+    }),
+  ),
+)
 
 test("ordinary sessions cannot list or modify notes through memory_review or a forged basis", () =>
   withMemory((h) =>

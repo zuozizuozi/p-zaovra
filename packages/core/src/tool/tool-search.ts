@@ -100,7 +100,7 @@ const layer = Layer.effectDiscard(
               const excluded = MemoryTidyTools.excludedFromConversation(
                 Config.latest(yield* config.entries(), "memory")?.modelTools,
               )
-              const catalog = (yield* registry.materialize(agent?.permissions, excluded)).definitions.filter(
+              const catalog = (yield* registry.materialize(agent?.permissions, excluded, true)).definitions.filter(
                 (tool) => tool.name !== name && (tool.name !== "memory_note" || memoryNoteAllowed),
               )
               if (input.names?.some((requested) => !catalog.some((tool) => tool.name === requested)))
