@@ -1,5 +1,7 @@
 export * as ToolSearch from "./tool-search"
 import { Effect, Layer, Schema } from "effect"
+import { Config } from "../config"
+import { MemoryTidyTools } from "../memory/tidy-tools"
 import { AgentV2 } from "../agent"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
@@ -64,6 +66,7 @@ const layer = Layer.effectDiscard(
     const registry = yield* ToolRegistry.Service
     const agents = yield* AgentV2.Service
     const permissions = yield* PermissionV2.Service
+    const config = yield* Config.Service
     const memoryWriting = yield* MemoryWritePolicy.Service
     yield* tools
       .register({
@@ -94,7 +97,11 @@ const layer = Layer.effectDiscard(
                 .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
               const agent = yield* agents.get(context.agent)
               const memoryNoteAllowed = yield* memoryWriting.allowed(context.sessionID)
-              const catalog = (yield* registry.materialize(agent?.permissions)).definitions.filter(
+              const excluded =
+                Config.latest(yield* config.entries(), "memory")?.modelTools === false
+                  ? MemoryTidyTools.conversationTools
+                  : undefined
+              const catalog = (yield* registry.materialize(agent?.permissions, excluded)).definitions.filter(
                 (tool) => tool.name !== name && (tool.name !== "memory_note" || memoryNoteAllowed),
               )
               if (input.names?.some((requested) => !catalog.some((tool) => tool.name === requested)))
@@ -146,5 +153,12 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/search",
   layer,
-  deps: [ToolRegistry.node, ToolRegistry.toolsNode, AgentV2.node, PermissionV2.node, MemoryWritePolicy.node],
+  deps: [
+    Config.node,
+    ToolRegistry.node,
+    ToolRegistry.toolsNode,
+    AgentV2.node,
+    PermissionV2.node,
+    MemoryWritePolicy.node,
+  ],
 })

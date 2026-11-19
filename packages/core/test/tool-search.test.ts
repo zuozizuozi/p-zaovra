@@ -12,30 +12,52 @@ import { SessionMessage } from "../src/session/message"
 import { ToolOutputStore } from "../src/tool-output-store"
 import { Tool } from "../src/tool/tool"
 import { ToolRegistry } from "../src/tool/registry"
+import { Config } from "../src/config"
 import { ToolSearch } from "../src/tool/tool-search"
 import { MemoryWritePolicy } from "../src/memory/write-policy"
 import { testEffect } from "./lib/effect"
-const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([ToolSearch.node, ToolRegistry.node, AgentV2.node, ApplicationTools.node]), [
-    [
-      MemoryWritePolicy.node,
-      Layer.succeed(MemoryWritePolicy.Service, MemoryWritePolicy.Service.of({ allowed: () => Effect.succeed(false) })),
-    ],
-    [PermissionV2.node, Layer.mock(PermissionV2.Service, { assert: () => Effect.void })],
-    [
-      ToolOutputStore.node,
-      Layer.mock(ToolOutputStore.Service, {
-        capture: () => ({
-          append: () => Effect.void,
-          paths: () => [],
-          snapshot: () => ({ output: "", cursor: 0, truncated: false }),
+const suite = (modelTools: boolean) =>
+  testEffect(
+    AppNodeBuilder.build(LayerNode.group([ToolSearch.node, ToolRegistry.node, AgentV2.node, ApplicationTools.node]), [
+      [
+        MemoryWritePolicy.node,
+        Layer.succeed(
+          MemoryWritePolicy.Service,
+          MemoryWritePolicy.Service.of({ allowed: () => Effect.succeed(false) }),
+        ),
+      ],
+      [
+        Config.node,
+        Layer.succeed(
+          Config.Service,
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed([
+                new Config.Document({
+                  type: "document",
+                  info: new Config.Info({ memory: { enabled: true, modelTools } }),
+                }),
+              ]),
+          }),
+        ),
+      ],
+      [PermissionV2.node, Layer.mock(PermissionV2.Service, { assert: () => Effect.void })],
+      [
+        ToolOutputStore.node,
+        Layer.mock(ToolOutputStore.Service, {
+          capture: () => ({
+            append: () => Effect.void,
+            paths: () => [],
+            snapshot: () => ({ output: "", cursor: 0, truncated: false }),
+          }),
+          bound: (input) => Effect.succeed({ output: input.output, outputPaths: [] }),
         }),
-        bound: (input) => Effect.succeed({ output: input.output, outputPaths: [] }),
-      }),
-    ],
-    [Evidence.node, Layer.mock(Evidence.Service, { retain: () => Effect.succeed([]) })],
-  ]),
-)
+      ],
+      [Evidence.node, Layer.mock(Evidence.Service, { retain: () => Effect.succeed([]) })],
+    ]),
+  )
+const it = suite(true)
+const indexOnly = suite(false)
 const context = {
   sessionID: SessionV2.ID.make("ses_discovery"),
   agent: AgentV2.ID.make("build"),
@@ -50,6 +72,25 @@ const query = (registry: ToolRegistry.Interface, input: Record<string, unknown>)
       ),
     )
 describe("canonical tool discovery", () => {
+  indexOnly.effect("keeps memory tools out of index-only discovery while leaving file reads available", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      for (const name of ["memory_check", "read"])
+        yield* registry.register({
+          [name]: Tool.make({
+            description: name,
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () => Effect.die("must not execute"),
+          }),
+        })
+      expect((yield* query(registry, {})).output?.structured).toEqual({
+        activated: [],
+        available: [{ name: "read", description: "read" }],
+      })
+      expect((yield* query(registry, { names: ["memory_check"] })).result).toMatchObject({ type: "error" })
+    }),
+  )
   it.effect("does not list or activate memory_note for an unknown session model", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
