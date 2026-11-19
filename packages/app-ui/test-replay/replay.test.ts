@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync } from "node:fs"
 import { dropped, pageThrough, repeated, replay, swapped } from "./driver"
-import type { Fixture } from "./kernel"
+import { wire, type Fixture } from "./kernel"
 
 const directory = new URL("./fixtures/", import.meta.url)
 const fixtures = readdirSync(directory)
@@ -10,6 +10,25 @@ const fixtures = readdirSync(directory)
 // Disturbed delivery multiplies run time; two sessions with failures and retries cover it.
 const disturbed = new Set(["deepseek-error-turns.json", "timeline-crash-session.json"])
 const ownership = (rule: string) => rule.startsWith("I3 owner") || rule.startsWith("I6")
+
+test("30 tool calls in one recorded turn require zero message-page reloads", async () => {
+  const fixture: Fixture = await Bun.file(new URL("gpt-stop-resume.json", directory)).json()
+  const start = fixture.events.findIndex((event) => event.id === "evt_1cdebce77001TI2s0vqDzXpXHC")
+  const end = fixture.events.findIndex((event) => event.id === "evt_1cdf16fb4001m91VNAh7IKguqn")
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const turn = fixture.events.slice(start, end + 1)
+  expect(turn.filter((event) => event.type.startsWith("session.next.prompted."))).toHaveLength(1)
+  expect(turn.filter((event) => event.type.startsWith("session.next.tool.called."))).toHaveLength(30)
+  expect(turn.filter((event) => /\.tool\.(success|failed)\./.test(event.type))).toHaveLength(30)
+  const cut = { ...fixture, events: fixture.events.slice(0, end + 1) }
+  const result = await replay(cut, { openAt: wire(cut).findIndex((event) => event.id === turn[0]!.id) })
+  expect(result.checks).toBeGreaterThan(0)
+  // The recording stops mid-turn, so its final execution state can still be busy.
+  expect(Object.keys(result.violations).filter((rule) => rule !== "I5 not idle")).toEqual([])
+  expect(result.requests.messages).toBe(0)
+  expect(result.requests.history).toBe(0)
+}, 300_000)
 
 for (const name of fixtures) {
   describe(`replay ${name}`, () => {
