@@ -224,7 +224,8 @@ export async function runEvaluationChain(
     budget: { reserved: input.reserveTokens, status: "unknown", release: false },
     memoryNoteProfile: authority ? "experimental-host-bound" : "unknown",
     ...(authority ? { upstreamEndpointHash: authority.endpointHash } : {}),
-    taskSearch: advanced,
+    memory: config.memory,
+    taskSearch: config.memory.taskSearch,
     tidy: Boolean(tidy),
     ...(tidy && tidyRelay
       ? {

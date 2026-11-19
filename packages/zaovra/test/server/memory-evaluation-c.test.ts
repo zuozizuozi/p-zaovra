@@ -139,6 +139,7 @@ test.skipIf(process.platform !== "win32")(
       const manifest = await Bun.file(path.join(root, "manifest.json")).json()
       expect(manifest).toMatchObject({
         treatment: "C",
+        memory: { enabled: true, modelTools: true, taskSearch: true, index: { enabled: true } },
         taskSearch: true,
         memoryNoteProfile: "experimental-host-bound",
         tidy: false,
