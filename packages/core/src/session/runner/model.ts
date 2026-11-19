@@ -292,7 +292,11 @@ export const fromCatalogModel = (
   )
 }
 
-export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, credential?: Credential.Value) =>
+export const resolve = (
+  session: Pick<SessionSchema.Info, "model">,
+  model: ModelV2.Info,
+  credential?: Credential.Value,
+) =>
   withVariant(model, session.model?.variant).pipe(
     Effect.flatMap((configured) =>
       fromCatalogModel(configured, credential).pipe(

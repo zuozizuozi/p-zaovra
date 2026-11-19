@@ -33,6 +33,7 @@ export interface Interface {
   readonly confirm: (
     place: Place,
     input: Confirmation,
+    modelAvailable?: boolean,
   ) => Effect.Effect<{ preference: Preference; revokedRun?: string }, MemoryTidyStore.Rejected>
   readonly disable: (
     directory: string,
@@ -82,7 +83,7 @@ const layer = Layer.effect(
         .where(eq(MemoryAutomaticTable.enabled, true))
         .all()
         .pipe(Effect.orDie),
-      confirm: (place, input) =>
+      confirm: (place, input, modelAvailable = true) =>
         db
           .transaction(() =>
             Effect.gen(function* () {
@@ -115,6 +116,7 @@ const layer = Layer.effect(
                 return { preference: old }
               }
               if (old?.generation !== input.expected) return yield* conflict()
+              if (!modelAvailable) return yield* new MemoryTidyStore.Rejected({ reason: "invalid" })
               const preference = yield* db
                 .insert(MemoryAutomaticTable)
                 .values({

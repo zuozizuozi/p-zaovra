@@ -47,6 +47,11 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
         memory: { enabled: true },
         experimental: { verification: false, delivery_contract: false },
         provider: {
+          chat: {
+            npm: "@ai-sdk/openai-compatible",
+            options: { baseURL: provider.url.href + "v1", apiKey: "offline" },
+            models: { fixture: { limit: { context: 32000, output: 32 } } },
+          },
           fixture: {
             npm: "@ai-sdk/openai",
             options: { baseURL: provider.url.href + "v1", apiKey: "offline" },
@@ -74,6 +79,42 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
   }
   let reopened: Awaited<ReturnType<typeof listen>> | undefined
   try {
+    const automatic = new URL("/api/memory/automatic", first.url)
+    automatic.searchParams.set("location[directory]", a)
+    for (const providerID of ["chat", "missing-provider"]) {
+      const denied = { ...confirmation, model: { providerID, id: "fixture" } }
+      const manual = await call(first.url, a, "", denied)
+      expect(manual.status, await manual.clone().text()).toBe(409)
+      expect((await manual.json()).reason).toBe("invalid")
+      const consent = await fetch(automatic, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(denied),
+      })
+      expect(consent.status, await consent.clone().text()).toBe(409)
+      expect((await consent.json()).reason).toBe("invalid")
+    }
+    expect(await (await fetch(automatic)).json()).toEqual({ data: null })
+    expect((await (await call(first.url, a)).json()).data).toEqual([])
+    const consent = await fetch(automatic, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(confirmation),
+    })
+    expect(consent.status, await consent.clone().text()).toBe(200)
+    const replacement = await fetch(automatic, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...confirmation,
+        expected: confirmation.requestID,
+        requestID: "replace",
+        model: { providerID: "chat", id: "fixture" },
+      }),
+    })
+    expect(replacement.status).toBe(409)
+    expect((await (await fetch(automatic)).json()).data.generation).toBe(confirmation.requestID)
+    expect([counts, sends]).toEqual([0, 0])
     const prepared = await call(first.url, a, "", confirmation)
     expect(prepared.status, await prepared.clone().text()).toBe(200)
     const task = (await prepared.json()).data

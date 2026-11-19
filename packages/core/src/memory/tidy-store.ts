@@ -35,7 +35,7 @@ export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Re
 export interface Interface {
   readonly create: (
     input: Request,
-    createSession: (id: SessionSchema.ID) => Effect.Effect<NonNullable<Run["input"]>>,
+    createSession: (id: SessionSchema.ID) => Effect.Effect<NonNullable<Run["input"]>, Rejected>,
   ) => Effect.Effect<Run, Rejected>
   readonly get: (id: string) => Effect.Effect<Run | undefined>
   readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<Run | undefined>

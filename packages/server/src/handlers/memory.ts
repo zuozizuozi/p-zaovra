@@ -1,3 +1,4 @@
+import { MemoryTidyExecution } from "@zaovra-ai/core/memory/tidy-execution"
 import { Location } from "@zaovra-ai/core/location"
 import { Database } from "@zaovra-ai/core/database/database"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
@@ -83,7 +84,13 @@ export const MemoryHandler = HttpApiBuilder.group(Api, "server.memory", (handler
         "memory.prepareTidy",
         Effect.fn(function* (ctx) {
           const tidy = yield* MemoryTidy.Service
-          return { data: taskView(yield* tidy.prepare(ctx.payload).pipe(Effect.mapError(tidyError))) }
+          return {
+            data: taskView(
+              yield* tidy
+                .prepare(ctx.payload, yield* MemoryTidyExecution.supportsSelection(ctx.payload.model))
+                .pipe(Effect.mapError(tidyError)),
+            ),
+          }
         }, Effect.provide(tidyLayer)),
       )
       .handle(

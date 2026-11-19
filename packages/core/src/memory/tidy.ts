@@ -25,7 +25,7 @@ export type Request = {
 }
 export interface Interface {
   /** Admit once, without starting provider work. The budgeted host owns the later wake. */
-  readonly prepare: (input: Request) => Effect.Effect<View, MemoryTidyStore.Rejected>
+  readonly prepare: (input: Request, modelAvailable?: boolean) => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly start: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly get: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly list: (layer?: "project" | "user") => Effect.Effect<View[]>
@@ -115,7 +115,7 @@ export const layer = Layer.effect(
         const old = allowed.legacyScope ? yield* store.list(allowed.legacyScope) : []
         return yield* Effect.forEach([...current, ...old.filter((run) => run.directory === location.directory)], view)
       }),
-      prepare: Effect.fn("MemoryTidy.prepare")(function* (input) {
+      prepare: Effect.fn("MemoryTidy.prepare")(function* (input, modelAvailable = true) {
         if (Config.latest(yield* config.entries(), "memory")?.enabled !== true)
           return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
         const allowed = yield* scopes(input.layer)
@@ -132,6 +132,7 @@ export const layer = Layer.effect(
           },
           (id) =>
             Effect.gen(function* () {
+              if (!modelAvailable) return yield* new MemoryTidyStore.Rejected({ reason: "invalid" })
               yield* sessions.create({
                 id,
                 model: input.model,

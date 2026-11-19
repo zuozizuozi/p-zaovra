@@ -1,12 +1,15 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { Effect, Layer, ManagedRuntime, Option } from "effect"
+import { Effect, Layer, ManagedRuntime, Option, Scope } from "effect"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { MemoryGroup } from "@zaovra-ai/protocol/groups/memory"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
+import { Catalog } from "@zaovra-ai/core/catalog"
+import { ModelV2 } from "@zaovra-ai/core/model"
+import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { MemoryTidy } from "@zaovra-ai/core/memory/tidy"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
@@ -35,6 +38,7 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
   const runtime = ManagedRuntime.make(
     AppNodeBuilder.build(
       LayerNode.group([
+        Catalog.node,
         MemoryTidy.node,
         MemoryTidyTasks.node,
         Config.node,
@@ -106,8 +110,26 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
       ],
     ),
   )
+  const registered = await runtime.runPromise(
+    Catalog.Service.use((catalog) =>
+      catalog.transform((draft) => {
+        const provider = ProviderV2.ID.make("fixture")
+        draft.provider.update(provider, () => {})
+        draft.model.update(provider, ModelV2.ID.make("fixture"), (model) => {
+          model.api = {
+            id: model.id,
+            type: "aisdk",
+            package: "@ai-sdk/openai",
+            url: "http://localhost/v1",
+            settings: {},
+          }
+        })
+      }),
+    ).pipe(Effect.provideService(Scope.Scope, runtime.scope)),
+  )
   const context = await runtime.runPromise(
     Effect.context<
+      | Catalog.Service
       | MemoryTidy.Service
       | MemoryTidyStore.Service
       | MemoryTidyTasks.Service
@@ -155,6 +177,7 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
     expect((await client.v2.memory.listTidy({}, { throwOnError: true })).data.data).toHaveLength(0)
     const prepared = (await client.v2.memory.prepareTidy({ memoryTidyRequest: request }, { throwOnError: true })).data
       .data
+    await runtime.runPromise(registered.dispose)
     expect(prepared.executing).toBe(false)
     expect(prepared.tokens).toBe(1000)
     expect(state.starts).toBe(0)

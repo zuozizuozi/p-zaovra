@@ -21,6 +21,7 @@ export interface Interface {
   readonly confirm: (
     directory: AbsolutePath,
     input: MemoryAutomaticStore.Confirmation,
+    modelAvailable?: boolean,
   ) => Effect.Effect<MemoryAutomaticStore.Preference, MemoryTidyStore.Rejected>
   readonly disable: (
     directory: string,
@@ -158,10 +159,10 @@ export const layer = Layer.effect(
     })
     return Service.of({
       get: automatic.get,
-      confirm: (directory, input) =>
+      confirm: (directory, input, modelAvailable = true) =>
         Effect.gen(function* () {
           const target = yield* place
-          const result = yield* automatic.confirm(target, input)
+          const result = yield* automatic.confirm(target, input, modelAvailable)
           yield* cancel(result.revokedRun)
           quiet.since = undefined
           return result.preference

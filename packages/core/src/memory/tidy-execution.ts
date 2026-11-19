@@ -13,6 +13,8 @@ import {
 import { RequestExecutor } from "@zaovra-ai/llm/route"
 import { OpenAIResponses } from "@zaovra-ai/llm/protocols/openai-responses"
 import { Memory } from "@zaovra-ai/schema/memory"
+import { Catalog } from "../catalog"
+import type { ModelV2 } from "../model"
 import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { LayerNodePlatform } from "../effect/app-node-platform"
@@ -36,6 +38,28 @@ export interface Interface {
     stream: Stream.Stream<LLMEvent, LLMError>,
   ) => Stream.Stream<LLMEvent, LLMError>
 }
+
+function supportsInputCount(model: LLMRequest["model"]) {
+  return (
+    model.route.protocol === "openai-responses" &&
+    model.route.transport === OpenAIResponses.httpTransport &&
+    model.route.body === OpenAIResponses.route.body &&
+    model.route.endpoint.path === OpenAIResponses.PATH
+  )
+}
+
+// Catalog admission checks the configured route. The real endpoint's count is checked at execution.
+export const supportsSelection = Effect.fn("MemoryTidy.supportsSelection")(function* (ref: ModelV2.Ref) {
+  const catalog = yield* Catalog.Service
+  const model = (yield* catalog.model.available()).find(
+    (item) => item.providerID === ref.providerID && item.id === ref.id,
+  )
+  if (!model) return false
+  return yield* SessionRunnerModel.resolve({ model: ref }, model).pipe(
+    Effect.map(supportsInputCount),
+    Effect.orElseSucceed(() => false),
+  )
+})
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/MemoryTidyExecution") {}
 
@@ -121,12 +145,7 @@ const layer = Layer.effect(
             yield* authority(run, request)
             // A transport without an executor admission hook cannot participate
             // in the budget contract. Do not fall back to an unmetered stream.
-            if (
-              request.model.route.protocol !== "openai-responses" ||
-              request.model.route.transport !== OpenAIResponses.httpTransport ||
-              request.model.route.body !== OpenAIResponses.route.body ||
-              request.model.route.endpoint.path !== OpenAIResponses.PATH
-            )
+            if (!supportsInputCount(request.model))
               return yield* denied("这条整理模型线路尚不支持完整输入精确计数，未发送生成请求。")
             const previousAdmission = yield* RequestExecutor.RequestAdmission
             const previousCompletion = yield* RequestExecutor.RequestCompletion
