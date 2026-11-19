@@ -493,6 +493,60 @@ test("executed mutable JS does not prove no dependency installation inside it", 
   expect(hostVerdict(input).checks.map((check) => check.status)).toEqual(["verified", "unknown"])
 })
 
+test("a workspace listing and literal PowerShell retirement retain trace provenance", () => {
+  const input = fixture("publish", 4)
+  input.requirements = ["published-renamed-to-retired-published", "validate-succeeded-after-retirement"]
+  const move = bash(input, "Move-Item -LiteralPath 'published.txt' -Destination 'retired-published.txt'", 1)
+  bash(input, "node scripts/validate.cjs", 2)
+  const query = { path: "." }
+  const output = { entries: [{ path: "scripts/", type: "directory" }], truncated: false }
+  const listing = {
+    ...move,
+    name: "read",
+    partID: "list-root",
+    state: {
+      status: "completed",
+      input: query,
+      content: [],
+      structured: output,
+    },
+  } as Evidence["tools"][number]
+  evidence(input).tools.unshift(listing)
+  expect(hostVerdict(input).status).toBe("verified")
+  expect(knownReadOnly(listing, input.directory)).toBe(true)
+  query.path = ".."
+  expect(knownReadOnly(listing, input.directory)).toBe(false)
+  query.path = "."
+  output.entries = [{ path: "../outside", type: "file" }]
+  expect(knownReadOnly(listing, input.directory)).toBe(false)
+  output.entries = [{ path: "x", type: "not-an-entry" }]
+  expect(knownReadOnly(listing, input.directory)).toBe(false)
+})
+
+test("a classified local read miss is an observation, while an unclassified error leaves the trace unknown", () => {
+  const input = fixture("publish", 4)
+  input.requirements = ["validate-succeeded-after-retirement"]
+  const move = bash(input, "Rename-Item -LiteralPath published.txt -NewName retired-published.txt", 1)
+  bash(input, "node scripts/validate.cjs", 2)
+  const metadata = { readFailure: "not_found" }
+  evidence(input).tools.push({
+    ...move,
+    name: "read",
+    partID: "missing-local-file",
+    state: {
+      status: "error",
+      input: { path: "history.json" },
+      content: [],
+      structured: {},
+      error: { type: "unknown", message: "Unable to read history.json", metadata },
+      result: { type: "error", value: "Unable to read history.json" },
+    },
+  } as Evidence["tools"][number])
+  expect(hostVerdict(input).status).toBe("verified")
+  metadata.readFailure = "other"
+  expect(hostVerdict(input).status).toBe("unknown")
+})
+
 test("retirement must be a rename before validate, and scripts cannot be edited then restored", () => {
   const input = fixture("publish", 4)
   input.requirements = [

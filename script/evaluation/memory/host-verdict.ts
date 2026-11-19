@@ -460,8 +460,16 @@ function inspectTool(
 } {
   const unknown = { tool, kind: "unknown" as const }
   const input = object(tool.state.input)
-  if (tool.state.status !== "completed" || tool.time.completed === undefined || tool.time.pruned !== undefined)
-    return unknown
+  if (tool.time.completed === undefined || tool.time.pruned !== undefined) return unknown
+  // A local missing-file receipt accounts for the observation without proving a successful Read.
+  if (
+    tool.name === "read" &&
+    tool.state.status === "error" &&
+    object(object(tool.state.error).metadata).readFailure === "not_found" &&
+    localFile(directory, input.path)
+  )
+    return { tool, kind: "read-only" }
+  if (tool.state.status !== "completed") return unknown
   const output = object(tool.state.structured)
   if (tool.name === "tool_search") return { tool, kind: "discovery" }
   if (knownReadOnly(tool, directory)) return { tool, kind: "read-only" }
@@ -566,6 +574,8 @@ function fixedCommand(command: string, shell?: "powershell" | "posix", chain?: H
       "Move-Item -LiteralPath published.txt -Destination retired-published.txt",
     ].includes(command)
   )
+    return "rename-published"
+  if (shell === "powershell" && command === "Move-Item -LiteralPath 'published.txt' -Destination 'retired-published.txt'")
     return "rename-published"
   if (command === "node scripts/validate.cjs && node scripts/release.cjs") return "validate-release"
 }

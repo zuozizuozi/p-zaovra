@@ -9,6 +9,7 @@ import type { TurnEvidence } from "./observe"
 
 type Tool = Extract<TurnEvidence, { status: "complete" }>["tools"][number]
 const searchFields = { truncated: Schema.Boolean, partial: Schema.Boolean, skippedRecords: Schema.Number }
+const listing = Schema.Struct({ entries: Schema.Array(Entry), truncated: Schema.Boolean })
 const glob = Schema.Struct({ entries: Schema.Array(Entry), ...searchFields })
 const grep = Schema.Struct({ matches: Schema.Array(Match), ...searchFields })
 const receipt = Schema.Struct({
@@ -42,6 +43,12 @@ export function knownReadOnly(tool: Tool, directory: string) {
   if (tool.state.status !== "completed") return false
   const input = tool.state.input
   const output = tool.state.structured
+  if (tool.name === "read" && fixturePath(directory, input.path, true) === "") {
+    const parsed = Schema.decodeUnknownOption(listing)(output)
+    return (
+      Option.isSome(parsed) && parsed.value.entries.every((entry) => fixturePath(directory, entry.path) !== undefined)
+    )
+  }
   if (tool.name === "memory_search")
     return (
       typeof input.query === "string" &&
