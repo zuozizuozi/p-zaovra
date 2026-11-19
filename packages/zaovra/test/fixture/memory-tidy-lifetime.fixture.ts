@@ -155,7 +155,38 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
     }
     expect(sends).toBe(1)
     expect(counts).toBe(2)
-    const consent = await confirm()
+    // Exercise consent retries only after the manual run established this route's count capability.
+    const prior = { ...confirmation, requestID: "previous-grant" }
+    expect((await (await confirm(prior)).json()).data).toMatchObject({
+      enabled: true,
+      countVerified: true,
+      generation: prior.requestID,
+      currentRun: null,
+      tokens: prior.tokens,
+    })
+    expect((await (await confirm(prior)).json()).data.generation).toBe(prior.requestID)
+    expect((await confirm({ ...prior, tokens: prior.tokens + 1 })).status).toBe(409)
+    expect(
+      (await confirm({ ...prior, requestID: "invalid", expected: prior.requestID, tokens: prior.dailyTokens + 1 }))
+        .status,
+    ).toBe(409)
+    const other = new URL(automatic)
+    other.searchParams.set("location[directory]", b)
+    expect((await (await fetch(other)).json()).data).toBeNull()
+    const disable = (expected: string) => {
+      const url = new URL(automatic)
+      url.pathname += "/disable"
+      return fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expected }),
+      })
+    }
+    expect((await disable("stale")).status).toBe(409)
+    expect((await (await disable(prior.requestID)).json()).data.enabled).toBe(false)
+    expect((await (await confirm(prior)).json()).data.enabled).toBe(false)
+    expect((await confirm(confirmation)).status).toBe(409)
+    const consent = await confirm({ ...confirmation, expected: prior.requestID })
     expect(consent.status, await consent.clone().text()).toBe(200)
     expect((await consent.json()).data.countVerified).toBe(true)
     const replacement = await confirm({
