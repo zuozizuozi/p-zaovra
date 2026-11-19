@@ -183,7 +183,7 @@ try {
           { timeout: 90000 },
         )
         await input.fill(prompts[phase])
-        await input.press("Enter")
+        await page.locator('[data-action="prompt-submit"]').click()
         const answer = page
           .locator('[data-slot="session-turn-assistant-content"]')
           .getByText(phase === 0 ? "文件已写入" : "续接已完成", { exact: false })
