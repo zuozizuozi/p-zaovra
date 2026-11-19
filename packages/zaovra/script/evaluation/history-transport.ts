@@ -263,6 +263,7 @@ export async function sendModel<A>(
     } catch {
       journal.finish(physical, { outcome: "uncertain" })
       if (host.signal?.aborted) throw new HistoryPaused("host-stopped")
+      if (journal.consecutiveUncertain()) throw new HistoryPaused("transport-outage")
       throw new Error("send-outcome-uncertain")
     }
     const raw = await boundedJson(response).catch(() => undefined)

@@ -128,6 +128,13 @@ export class Journal {
       .all(slot, step)
   }
 
+  consecutiveUncertain() {
+    const recent = this.db
+      .query<{ outcome: string }, []>("SELECT outcome FROM sends ORDER BY rowid DESC LIMIT 2")
+      .all()
+    return recent.length === 2 && recent.every((row) => row.outcome === "uncertain")
+  }
+
   start(
     input: Pick<PhysicalSend, "slot" | "step" | "attempt" | "requestHash" | "model" | "route" | "reserve">,
     slotLimit: number,

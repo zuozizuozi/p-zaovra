@@ -568,3 +568,25 @@ test("Responses selects a single final assistant message after commentary and re
     await upstream.stop(true)
   }
 })
+
+test("a transport outage pauses the campaign after two unanswered physical sends", async () => {
+  await using temporary = await tmpdir()
+  const material = await fixture(temporary.path)
+  const drafts = path.join(temporary.path, "drafts.json")
+  await fixtureDrafts(material.input, drafts)
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => Response.redirect("http://127.0.0.1/unsupported"),
+  })
+  try {
+    const result = await answerHistoryLive(setup(path.join(temporary.path, "campaign"), upstream.port!, 4), {
+      ...material,
+      drafts,
+    })
+    expect(result.pause).toBe("transport-outage")
+    expect(result.usage).toMatchObject({ sends: 2, unknown: 2, unknownReserve: 260 })
+  } finally {
+    await upstream.stop(true)
+  }
+})
