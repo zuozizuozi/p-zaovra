@@ -1,6 +1,9 @@
-import type { JsonSchema, ModelToolSchemaCompatibility } from "../../schema"
+import { Effect } from "effect"
+import type { JsonSchema, ModelToolSchemaCompatibility, ToolDefinition } from "../../schema"
 import { isRecord } from "../../utils/record"
+import { ProviderShared } from "../shared"
 import { GeminiToolSchema } from "./gemini-tool-schema"
+import { referenceAnnotations, resolveLocalReference, UnsupportedToolSchema } from "./tool-schema-reference"
 
 const removeNullSchemas = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(removeNullSchemas)
@@ -45,11 +48,74 @@ const moonshot = (schema: JsonSchema): JsonSchema => {
   return isRecord(projected) ? projected : {}
 }
 
+const rootUnionFields = new Set([
+  "type",
+  "anyOf",
+  "$defs",
+  "definitions",
+  "$id",
+  "$schema",
+  "$comment",
+  "description",
+  "title",
+])
+const objectBranchFields = new Set([
+  "type",
+  "properties",
+  "required",
+  "additionalProperties",
+  "description",
+  "title",
+  "$comment",
+])
+
 // Every supported tool protocol requires a top-level object schema (Anthropic
 // `input_schema.type`, OpenAI/Bedrock `parameters`/`inputSchema`, Gemini OBJECT),
 // while Effect emits root unions such as `anyOf` for `Schema.Union` or `{}` inputs.
-const objectRoot = (schema: JsonSchema): JsonSchema => {
-  const variants = Array.isArray(schema.anyOf) ? schema.anyOf.filter(isRecord) : []
+const objectRoot = (input: JsonSchema): JsonSchema => {
+  const resolve = (schema: JsonSchema, active: ReadonlySet<string> = new Set()): JsonSchema => {
+    if (typeof schema.$ref !== "string") return schema
+    const resolved = resolveLocalReference(input, schema.$ref, active)
+    const branch = resolve(resolved.target, resolved.active)
+    if (branch.type !== "object" || branch.anyOf || branch.oneOf || branch.allOf)
+      throw new UnsupportedToolSchema(
+        "a root reference must resolve to an object schema without another union or intersection",
+      )
+    return { ...branch, ...referenceAnnotations(schema, branch) }
+  }
+  // Resolve referenced branches before collecting properties. Keep the root
+  // definition containers for references inside those properties.
+  const schema =
+    typeof input.$ref === "string"
+      ? {
+          ...resolve(input),
+          ...(input.$defs === undefined ? {} : { $defs: input.$defs }),
+          ...(input.definitions === undefined ? {} : { definitions: input.definitions }),
+          ...(input.$schema === undefined ? {} : { $schema: input.$schema }),
+          ...(input.$id === undefined ? {} : { $id: input.$id }),
+        }
+      : input
+  const sourceVariants = Array.isArray(schema.anyOf) ? schema.anyOf : []
+  const variants = sourceVariants.filter(isRecord).map((branch) => resolve(branch))
+  if (sourceVariants.some((branch) => isRecord(branch) && typeof branch.$ref === "string")) {
+    // The existing object-root projection advertises the available properties;
+    // branch-specific requirements remain enforced by the original host schema.
+    if (
+      (schema.type !== undefined && schema.type !== "object") ||
+      Object.keys(schema).some((key) => !rootUnionFields.has(key))
+    )
+      throw new UnsupportedToolSchema("constraints beside a referenced root union cannot be projected")
+    if (
+      variants.length !== sourceVariants.length ||
+      variants.some(
+        (branch) =>
+          branch.type !== "object" ||
+          Object.keys(branch).some((key) => !objectBranchFields.has(key)) ||
+          ("additionalProperties" in branch && typeof branch.additionalProperties !== "boolean"),
+      )
+    )
+      throw new UnsupportedToolSchema("constraints in a referenced root union branch cannot be projected")
+  }
   const flattened =
     variants.length === 0
       ? { ...schema, type: "object" }
@@ -134,7 +200,25 @@ const modelCompatibility = (
   }
 }
 
+// Only explicit projection limits become request errors. An unrelated defect
+// should still surface as a defect instead of masquerading as bad tool input.
+const lower = <A>(
+  tool: ToolDefinition,
+  compatibility: ModelToolSchemaCompatibility | undefined,
+  encode: (tool: ToolDefinition, schema: JsonSchema) => A,
+) =>
+  Effect.sync(() => encode(tool, modelCompatibility(tool.inputSchema, compatibility))).pipe(
+    Effect.catchDefect((cause) =>
+      cause instanceof UnsupportedToolSchema
+        ? Effect.fail(
+            ProviderShared.invalidRequest(`Tool "${tool.name}" parameters cannot be represented: ${cause.message}`),
+          )
+        : Effect.die(cause),
+    ),
+  )
+
 export const ToolSchemaProjection = {
+  lower,
   gemini,
   modelCompatibility,
   moonshot,

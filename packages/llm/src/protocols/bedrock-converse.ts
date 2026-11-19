@@ -216,19 +216,19 @@ const lowerToolSpec = (tool: ToolDefinition, inputSchema: JsonSchema): BedrockTo
   },
 })
 
-const lowerTools = (
+const lowerTools = Effect.fn("BedrockConverse.lowerTools")(function* (
   compatibility: ModelToolSchemaCompatibility | undefined,
   breakpoints: BedrockCache.Breakpoints,
   tools: ReadonlyArray<ToolDefinition>,
-): BedrockTool[] => {
+) {
   const result: BedrockTool[] = []
   for (const tool of tools) {
-    result.push(lowerToolSpec(tool, ToolSchemaProjection.modelCompatibility(tool.inputSchema, compatibility)))
+    result.push(yield* ToolSchemaProjection.lower(tool, compatibility, lowerToolSpec))
     const cachePoint = BedrockCache.block(breakpoints, tool.cache)
     if (cachePoint) result.push(cachePoint)
   }
   return result
-}
+})
 
 const textWithCache = (
   breakpoints: BedrockCache.Breakpoints,
@@ -407,7 +407,7 @@ const fromRequest = Effect.fn("BedrockConverse.fromRequest")(function* (request:
   const breakpoints = BedrockCache.breakpoints()
   const toolConfig =
     request.tools.length > 0 && request.toolChoice?.type !== "none"
-      ? { tools: lowerTools(request.model.compatibility?.toolSchema, breakpoints, request.tools), toolChoice }
+      ? { tools: yield* lowerTools(request.model.compatibility?.toolSchema, breakpoints, request.tools), toolChoice }
       : undefined
   const system = request.system.length === 0 ? undefined : lowerSystem(breakpoints, request.system)
   const messages = yield* lowerMessages(request, breakpoints)

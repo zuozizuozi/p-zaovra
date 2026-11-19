@@ -25,7 +25,46 @@ import { ProviderV2 } from "../src/provider"
 import { SessionRunnerModel } from "../src/session/runner/model"
 import { tempLocationLayer } from "./fixture/location"
 import { testEffect } from "./lib/effect"
+import { executeTool, toolIdentity } from "./lib/tool"
 import openAIWire545 from "./fixture/provider-wire545.json"
+
+const mcpSchemas = {
+  union: {
+    type: "object",
+    anyOf: [{ $ref: "#/$defs/by~1name" }, { $ref: "#/$defs/by~0id" }],
+    $defs: {
+      "by/name": {
+        type: "object",
+        properties: { kind: { const: "name" }, name: { type: "string", description: "Display name" } },
+        required: ["kind", "name"],
+        additionalProperties: false,
+      },
+      "by~id": {
+        type: "object",
+        properties: { kind: { const: "id" }, id: { type: "integer", description: "Numeric identifier" } },
+        required: ["kind", "id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  intersection: {
+    type: "object",
+    properties: {
+      options: {
+        type: "object",
+        properties: { note: { type: "string" } },
+        allOf: [
+          { $ref: "#/$defs/First" },
+          { properties: { first: { minLength: 1 }, second: { type: "integer", minimum: 1 } }, required: ["second"] },
+        ],
+      },
+    },
+    required: ["options"],
+    $defs: {
+      First: { properties: { first: { type: "string", description: "First value" } }, required: ["first"] },
+    },
+  },
+} as const
 
 // Real shipped registry (built-ins, Task, disconnected MCP) lowered by every
 // catalog route through a local fixed HTTP server. No network, no real keys.
@@ -47,6 +86,17 @@ const it = testEffect(
                   info: new Config.Info({
                     mcp: new ConfigMCP.Info({
                       servers: {
+                        ...Object.fromEntries(
+                          Object.entries(mcpSchemas).map(([name, inputSchema]) => [
+                            name,
+                            new ConfigMCP.Local({
+                              type: "local",
+                              disabled: true,
+                              command: [process.execPath, import.meta.dir + "/fixture/mcp-canonical-stdio.ts"],
+                              environment: { MCP_TEST_SCHEMA: JSON.stringify(inputSchema), MCP_TEST_APPROVAL: "1" },
+                            }),
+                          ]),
+                        ),
                         offline: new ConfigMCP.Remote({
                           type: "remote",
                           url: "https://offline.invalid",
@@ -158,6 +208,92 @@ describe("provider tool wire compatibility", () => {
           expect(byName.todowrite?.properties?.todos?.items?.properties).toHaveProperty("content")
       }),
     )
+
+  it.live("registered MCP root references keep branch parameters on every object-root route", () =>
+    Effect.gen(function* () {
+      const mcp = yield* MCP.Service
+      const registry = yield* ToolRegistry.Service
+      yield* mcp.reconnect("union")
+      const definition = (yield* registry.materialize()).definitions.find((tool) => tool.name === "mcp_union_echo")!
+      expect(definition.inputSchema).toEqual(mcpSchemas.union)
+      for (const route of routes) {
+        const actual = loweredTools(route.pkg, yield* captureBody(route.pkg, route.provider, [definition]))[0]?.schema
+        expect(actual?.properties).toMatchObject({
+          kind: { enum: ["name", "id"] },
+          name: { type: "string", description: "Display name" },
+          id: { type: "integer", description: "Numeric identifier" },
+        })
+        expect(actual?.required).toContain("kind")
+      }
+      const bedrock = yield* LLMClient.prepare<{ toolConfig: { tools: { toolSpec: BedrockSpec }[] } }>(
+        LLM.request({
+          model: AmazonBedrock.configure({ baseURL: "https://bedrock-runtime.test", apiKey: "fixture" }).model(
+            "anthropic.claude-haiku-5-5",
+          ),
+          prompt: "hello",
+          tools: [definition],
+        }),
+      )
+      expect(bedrock.body.toolConfig.tools[0]?.toolSpec.inputSchema.json.properties).toHaveProperty("id")
+      const call = (input: Record<string, unknown>) =>
+        executeTool(registry, {
+          sessionID: SessionV2.ID.make("ses_schema"),
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-schema", name: definition.name, input },
+        })
+      expect(yield* call({ kind: "id", name: "wrong branch" })).toMatchObject({
+        type: "error",
+        value: expect.stringContaining("Invalid MCP tool input"),
+      })
+      const named = { kind: "name", name: "sample" }
+      const numeric = { kind: "id", id: 42 }
+      expect(yield* call(named)).toEqual({ type: "text", value: JSON.stringify({ arguments: named, calls: 1 }) })
+      expect(yield* call(numeric)).toEqual({ type: "text", value: JSON.stringify({ arguments: numeric, calls: 2 }) })
+    }),
+  )
+
+  it.live("Gemini preserves sibling and intersected MCP object parameters with original host validation", () =>
+    Effect.gen(function* () {
+      const mcp = yield* MCP.Service
+      const registry = yield* ToolRegistry.Service
+      yield* mcp.reconnect("intersection")
+      const definition = (yield* registry.materialize()).definitions.find(
+        (tool) => tool.name === "mcp_intersection_echo",
+      )!
+      expect(definition.inputSchema).toEqual(mcpSchemas.intersection)
+      const body = yield* captureBody("@ai-sdk/google", "google", [definition])
+      const actual = loweredTools("@ai-sdk/google", body)[0]?.schema?.properties?.options
+      expect(actual).toEqual({
+        type: "object",
+        properties: {
+          note: { type: "string" },
+          first: { type: "string", description: "First value", minLength: 1 },
+          second: { type: "integer", minimum: 1 },
+        },
+        required: ["first", "second"],
+      })
+      const call = (input: Record<string, unknown>) =>
+        executeTool(registry, {
+          sessionID: SessionV2.ID.make("ses_schema"),
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-schema", name: definition.name, input },
+        })
+      expect(yield* call({ options: { first: "only" } })).toMatchObject({
+        type: "error",
+        value: expect.stringContaining("Invalid MCP tool input"),
+      })
+      expect(yield* call({ options: { first: "valid", second: 0 } })).toMatchObject({
+        type: "error",
+        value: expect.stringContaining("Invalid MCP tool input"),
+      })
+      expect(yield* call({ options: { first: "", second: 1 } })).toMatchObject({
+        type: "error",
+        value: expect.stringContaining("Invalid MCP tool input"),
+      })
+      const input = { options: { note: "optional", first: "valid", second: 1 } }
+      expect(yield* call(input)).toEqual({ type: "text", value: JSON.stringify({ arguments: input, calls: 1 }) })
+    }),
+  )
 
   it.live("bedrock converse sends object input schemas for every shipped tool", () =>
     Effect.gen(function* () {

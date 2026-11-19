@@ -233,6 +233,75 @@ describe("tool schema projections", () => {
     }),
   )
 
+  it.effect("rejects a root branch reference before transport when its target cannot be projected", () =>
+    Effect.gen(function* () {
+      const model = AnthropicMessages.route
+        .with({ endpoint: { baseURL: "https://anthropic.test/v1/" }, auth: Auth.header("x-api-key", "test") })
+        .model({ id: "claude-haiku-5-5" })
+      for (const [$ref, expected] of [
+        ["https://outside.invalid/schema", "only local JSON Pointer"],
+        ["#/$defs/Missing", "unresolved local schema reference"],
+        ["#/$defs/Loop", "recursive schema reference"],
+      ] as const) {
+        const error = yield* LLMClient.prepare(
+          LLM.request({
+            model,
+            prompt: "Use the tool.",
+            tools: [
+              {
+                name: "resolve_fixture",
+                description: "Resolve the fixture.",
+                inputSchema: {
+                  type: "object",
+                  anyOf: [{ $ref }],
+                  $defs: { Loop: { $ref: "#/$defs/Loop" } },
+                },
+              },
+            ],
+          }),
+        ).pipe(Effect.flip)
+        expect(error.reason._tag).toBe("InvalidRequest")
+        expect(error.reason.message).toContain('Tool "resolve_fixture" parameters cannot be represented')
+        expect(error.reason.message).toContain(expected)
+      }
+    }),
+  )
+
+  it.effect("rejects an unrepresentable Gemini object intersection instead of overwriting a field", () =>
+    Effect.gen(function* () {
+      const model = Gemini.route
+        .with({ endpoint: { baseURL: "https://gemini.test/v1beta/" }, auth: Auth.header("x-goog-api-key", "test") })
+        .model({ id: "gemini-3-flash" })
+      const error = yield* LLMClient.prepare(
+        LLM.request({
+          model,
+          prompt: "Use the tool.",
+          tools: [
+            {
+              name: "intersect_fixture",
+              description: "Intersect settings.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  config: {
+                    type: "object",
+                    allOf: [
+                      { properties: { value: { type: "string" } }, required: ["value"] },
+                      { properties: { value: { type: "integer" } }, required: ["value"] },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        }),
+      ).pipe(Effect.flip)
+      expect(error.reason._tag).toBe("InvalidRequest")
+      expect(error.reason.message).toContain('Tool "intersect_fixture" parameters cannot be represented')
+      expect(error.reason.message).toContain("different constraints on the same property")
+    }),
+  )
+
   it.effect("gemini inlines $defs, folds allOf and keeps object root parameters", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare<Gemini.GeminiBody>(

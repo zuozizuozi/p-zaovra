@@ -328,8 +328,8 @@ const fromRequest = Effect.fn("Gemini.fromRequest")(function* (request: LLMReque
     tools: toolsEnabled
       ? [
           {
-            functionDeclarations: request.tools.map((tool) =>
-              lowerTool(tool, ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility)),
+            functionDeclarations: yield* Effect.forEach(request.tools, (tool) =>
+              ToolSchemaProjection.lower(tool, toolSchemaCompatibility, lowerTool),
             ),
           },
         ]

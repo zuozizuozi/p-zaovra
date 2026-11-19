@@ -624,11 +624,9 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
   // over-mark we keep their tool hints and shed the message-tail ones first.
   const breakpoints = Cache.newBreakpoints(ANTHROPIC_BREAKPOINT_CAP)
   const tools = request.tools.length
-    ? request.tools.map((tool) =>
-        lowerTool(
-          breakpoints,
-          tool,
-          ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
+    ? yield* Effect.forEach(request.tools, (tool) =>
+        ToolSchemaProjection.lower(tool, toolSchemaCompatibility, (definition, schema) =>
+          lowerTool(breakpoints, definition, schema),
         ),
       )
     : historyTools.length
