@@ -23,7 +23,7 @@ export const name = "apply_patch"
 const format = [
   "Use this custom patch format, not a unified diff. Send the patch itself as patchText, without Markdown fences.",
   "Start with *** Begin Patch and finish with *** End Patch. Between them use *** Add File: path, *** Update File: path, or *** Delete File: path.",
-  "For Add, prefix each content line with +. Delete has no content lines.",
+  "For Add, prefix each content line with +. Delete has no content lines. For a rename, use a filesystem rename to preserve the original bytes.",
   "For Update, start each chunk with @@ on its own line, or @@ followed by literal existing context text (not unified-diff line numbers). Prefix each content line with + to insert, - to remove, or one space to keep unchanged context. Prefix blank lines too. Use the current file's text for removed/context lines.",
 ].join("\n")
 
