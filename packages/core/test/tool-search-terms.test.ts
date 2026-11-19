@@ -68,12 +68,13 @@ for (const input of [{}, { query: "" }, { query: "   " }, { query: "!!!，。" }
     withSearch([], (sessionID) =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
-        const registered = (yield* registry.materialize()).definitions
-        expect(registered.some((tool) => tool.name === "memory_note")).toBe(true)
-        const catalog = registered.filter((tool) => tool.name !== "tool_search" && tool.name !== "memory_note")
+        const lookup = (yield* registry.materialize([], undefined, true)).definitions
+        const unavailable = ["memory_note", "memory_extract", "memory_review"]
+        expect(lookup.map((tool) => tool.name)).toEqual(expect.arrayContaining(unavailable))
+        const catalog = lookup.filter((tool) => tool.name !== "tool_search" && !unavailable.includes(tool.name))
         const output = (yield* search(registry, sessionID, input)).output?.structured as SearchOutput
         expect(output.activated).toEqual([])
-        expect(output.available.some((tool) => tool.name === "memory_note")).toBe(false)
+        for (const name of unavailable) expect(output.available.map((tool) => tool.name)).not.toContain(name)
         expect(output.available).toEqual(
           catalog.map((tool) => ({ name: tool.name, description: tool.description.split("\n")[0]!.slice(0, 200) })),
         )

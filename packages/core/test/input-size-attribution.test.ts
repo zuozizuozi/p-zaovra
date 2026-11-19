@@ -91,12 +91,22 @@ it.live("664 a non-GPT runner advertises compact schemas without changing canoni
     const sizes = SessionCache.inputSizes(request)
     const registry = yield* ToolRegistry.Service
     const full = (yield* registry.materialize()).definitions
-    // The synthetic model has no trusted memory-write profile. Registration is
-    // unchanged, but its per-turn advertisement must exclude memory_note.
-    expect(full.some((tool) => tool.name === "memory_note")).toBe(true)
-    expect(request.tools.some((tool) => tool.name === "memory_note")).toBe(false)
+    const unavailable = ["memory_note", "memory_extract", "memory_review"]
+    expect(full.map((tool) => tool.name)).toEqual(expect.arrayContaining(unavailable))
+    for (const name of unavailable) expect(request.tools.map((tool) => tool.name)).not.toContain(name)
+
+    const fullPage = full.find((tool) => tool.name === "memory_page")!
+    expect(fullPage.inputSchema).toMatchObject({
+      properties: { action: { enum: ["list", "read", "sources", "publish"] } },
+    })
+    const lookup = (yield* registry.materialize([], undefined, true)).definitions
+    const page = lookup.find((tool) => tool.name === "memory_page")!
+    expect(page.inputSchema).toMatchObject({ properties: { action: { enum: ["list", "read"] } } })
+    expect(Object.keys(page.inputSchema.properties ?? {}).sort()).toEqual(["action", "id", "layer", "query"])
     const compact = ToolProfile.select(
-      full.filter((tool) => tool.name !== "memory_note"),
+      full
+        .filter((tool) => !unavailable.includes(tool.name))
+        .map((tool) => (tool.name === "memory_page" ? page : tool)),
       { model: model.id, history: [] },
     )
     const fullBytes = Buffer.byteLength(JSON.stringify(full))
