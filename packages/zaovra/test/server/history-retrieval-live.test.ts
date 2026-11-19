@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test"
+import { Database } from "bun:sqlite"
 import path from "node:path"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "../fixture/fixture"
 import { generateHistoryLive, answerHistoryLive, type HistoryLiveHost } from "../../script/evaluation/history-live"
-import { prepare, sha256 } from "../../script/evaluation/history-library"
+import { fixtureDrafts, prepare, sha256 } from "../../script/evaluation/history-library"
 import { withJournal } from "../../script/evaluation/history-journal"
+import { resolveRequest, sendModel } from "../../script/evaluation/history-transport"
 
 const TEST_KEY = "local-fixed-fixture"
 type Native = {
@@ -45,10 +47,16 @@ async function fixture(dir: string, docs = 3) {
   return { input: path.join(material, "generation-input.json"), corpus: path.join(material, "corpus.json"), questions }
 }
 
-function succeed(protocol: "chat" | "responses", value: unknown, counts?: { input: number; output: number }) {
+function succeed(
+  protocol: "chat" | "responses",
+  value: unknown,
+  counts?: { input: number; output: number },
+  model?: string,
+) {
   const text = JSON.stringify(value)
   return protocol === "chat"
     ? Response.json({
+        model,
         choices: [{ finish_reason: "stop", message: { role: "assistant", content: text } }],
         ...(counts
           ? {
@@ -63,6 +71,7 @@ function succeed(protocol: "chat" | "responses", value: unknown, counts?: { inpu
           : {}),
       })
     : Response.json({
+        model,
         status: "completed",
         output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }],
         ...(counts
@@ -128,6 +137,7 @@ test("generation and all 75 slots use scoped native requests with durable retry 
           protocol,
           { title: data.title, summary: "fixed marker", body: data.text },
           data.id === "doc-2" ? undefined : { input: 20, output: 8 },
+          wire.model,
         )
       }
       expect(Object.keys(data).sort()).toEqual(["question", "tools", "transcript"])
@@ -143,17 +153,19 @@ test("generation and all 75 slots use scoped native requests with durable retry 
                 query: "marker",
               },
           { input: 20, output: 8 },
+          wire.model,
         )
       }
       const result = history.at(-1).result
       if (result.action === "list") {
-        return succeed(protocol, { action: "read", ref: result.pages[0].ref }, { input: 20, output: 8 })
+        return succeed(protocol, { action: "read", ref: result.pages[0].ref }, { input: 20, output: 8 }, wire.model)
       }
       expect(result.excerpts[0].text).toContain("marker")
       return succeed(
         protocol,
         { action: "answer", answer: "fixed", citations: [result.excerpts[0].handle] },
         { input: 30, output: 5 },
+        wire.model,
       )
     },
   })
@@ -241,7 +253,12 @@ test("stopping drains one physical request, excludes a parallel writer and resum
         started.resolve()
         await release.promise
       }
-      return succeed("responses", { title: data.title, summary: "summary", body: data.text }, { input: 6, output: 3 })
+      return succeed(
+        "responses",
+        { title: data.title, summary: "summary", body: data.text },
+        { input: 6, output: 3 },
+        wire.model,
+      )
     },
   })
   const stop = new AbortController()
@@ -273,7 +290,12 @@ test("token gates preserve unknown liabilities and stop on a reported reservatio
     port: 0,
     fetch() {
       sends++
-      return succeed("responses", { title: "title", summary: "summary", body: "body" }, { input: 125, output: 10 })
+      return succeed(
+        "responses",
+        { title: "title", summary: "summary", body: "body" },
+        { input: 125, output: 10 },
+        "gen-model",
+      )
     },
   })
   try {
@@ -303,6 +325,154 @@ test("token gates preserve unknown liabilities and stop on a reported reservatio
       expect(journal.history("generation/doc-1", 0)[0].outcome).toBe("uncertain")
       expect(journal.totals()).toMatchObject({ sends: 1, unknown: 1, unknownReserve: 130 })
     })
+  } finally {
+    await upstream.stop(true)
+  }
+})
+
+test("both protocols reject missing and wrong model declarations while keeping costs across reopen", async () => {
+  await using temporary = await tmpdir()
+  const observed: string[] = []
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const request = (await req.json()) as Native
+      const protocol = request.messages ? "chat" : "responses"
+      const { example } = JSON.parse((request.messages ?? request.input)![1].content)
+      observed.push(protocol + "/" + example)
+      const label =
+        example === "wrong"
+          ? "another-family"
+          : example === "missing"
+            ? undefined
+            : example === "alias" || example === "undeclared"
+              ? "fixed-model-2026"
+              : example === "unsafe"
+                ? TEST_KEY
+                : request.model
+      return succeed(protocol, { answer: "7" }, { input: 9, output: 3 }, label)
+    },
+  })
+  try {
+    for (const protocol of ["chat", "responses"] as const) {
+      const root = path.join(temporary.path, protocol)
+      const host = setup(root, upstream.port!, 20)
+      const policy = resolveRequest(
+        {
+          ...host.request({ phase: "generation", document: "doc-1" }),
+          protocol,
+          model: "fixed-model",
+        },
+        "loopback",
+      )
+      const trusted = resolveRequest(
+        {
+          ...policy,
+          modelAliases: [{ reported: "fixed-model-2026", evidence: "fixture-probe:model-id" }],
+        },
+        "loopback",
+      )
+      expect(() =>
+        resolveRequest(
+          {
+            ...policy,
+            modelAliases: [{ reported: "fixed-model-2026", evidence: "" }],
+          },
+          "loopback",
+        ),
+      ).toThrow("invalid-model-alias-policy")
+      const invoke = (example: string, route = policy) =>
+        withJournal(root, host.cap, async (journal) => {
+          return sendModel(
+            journal,
+            host,
+            route,
+            { slot: example, step: 0, system: "test", data: { example } },
+            (v) => v,
+          )
+        })
+      const before = observed.length
+      expect((await invoke("exact")).value).toEqual({ answer: "7" })
+      expect((await invoke("exact")).value).toEqual({ answer: "7" })
+      expect((await invoke("alias", trusted)).value).toEqual({ answer: "7" })
+      expect((await invoke("alias", trusted)).value).toEqual({ answer: "7" })
+      for (const [example, reason] of [
+        ["wrong", "mismatch"],
+        ["missing", "missing"],
+        ["undeclared", "mismatch"],
+        ["unsafe", "invalid"],
+      ]) {
+        await expect(invoke(example)).rejects.toThrow("upstream-model-" + reason)
+        await expect(invoke(example)).rejects.toThrow("recorded-model-rejected")
+      }
+      await expect(invoke("undeclared", trusted)).rejects.toThrow("evaluation-request-changed-on-replay")
+      expect(observed).toHaveLength(before + 6)
+      await withJournal(root, host.cap, async (journal) => {
+        const accounting = journal.accounting()
+        expect(accounting.totals).toMatchObject({ sends: 6, known: 6, knownTokens: 72 })
+        expect(accounting.sends.map((row) => [row.modelStatus, row.reportedModel, row.modelEvidence])).toEqual([
+          ["exact", "fixed-model", null],
+          ["alias", "fixed-model-2026", "fixture-probe:model-id"],
+          ["mismatch", "another-family", null],
+          ["missing", null, null],
+          ["mismatch", "fixed-model-2026", null],
+          ["invalid", null, null],
+        ])
+        for (const slot of ["wrong", "missing", "undeclared", "unsafe"]) {
+          expect(journal.history(slot, 0)[0].value).toBeNull()
+        }
+      })
+      const old = new Database(path.join(root, "ledger.sqlite"))
+      try {
+        for (const column of ["reportedModel", "modelStatus", "modelEvidence"])
+          old.exec("ALTER TABLE sends DROP COLUMN " + column)
+      } finally {
+        old.close()
+      }
+      await expect(invoke("exact")).rejects.toThrow("recorded-model-unverified")
+      expect(observed).toHaveLength(before + 6)
+    }
+  } finally {
+    await upstream.stop(true)
+  }
+})
+
+test("unverified upstream models contribute costs without producing any answer rows", async () => {
+  await using temporary = await tmpdir()
+  const material = await fixture(temporary.path)
+  const drafts = path.join(temporary.path, "drafts.json")
+  await fixtureDrafts(material.input, drafts)
+  let physical = 0
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const request = (await req.json()) as Native
+      const model = ++physical === 2 ? undefined : "unrelated-model"
+      return succeed(
+        request.messages ? "chat" : "responses",
+        { action: "answer", answer: "7", citations: [] },
+        { input: 9, output: 3 },
+        model,
+      )
+    },
+  })
+  try {
+    const root = path.join(temporary.path, "campaign")
+    const host = setup(root, upstream.port!, 3)
+    const first = await answerHistoryLive(host, { ...material, drafts })
+    expect(first).toMatchObject({
+      counts: { search: 1, pages: 1, both: 1 },
+      pause: "campaign-send-limit",
+      usage: { sends: 3, known: 3, knownTokens: 36 },
+    })
+    for (const arm of ["search", "pages", "both"]) {
+      expect(await Bun.file(path.join(first.output, arm, "answers.json")).json()).toEqual([])
+    }
+    const second = await answerHistoryLive(host, { ...material, drafts })
+    expect(second).toMatchObject({ counts: first.counts, usage: { sends: 3 } })
+    expect(physical).toBe(3)
   } finally {
     await upstream.stop(true)
   }

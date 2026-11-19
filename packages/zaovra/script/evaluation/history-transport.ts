@@ -1,4 +1,4 @@
-import { Journal, type Usage, whole } from "./history-journal"
+import { Journal, type ModelDeclaration, type Usage, whole } from "./history-journal"
 import { sha256 } from "./history-library"
 import { HistoryPaused } from "./history-run"
 
@@ -7,6 +7,7 @@ export type ModelRequest = {
   baseURL: string
   protocol: "responses" | "chat"
   model: string
+  modelAliases?: ReadonlyArray<{ reported: string; evidence: string }>
   context?: string
   maxRequestBytes: number
   maxOutputTokens: number
@@ -22,8 +23,28 @@ export type TransportHost = {
   signal?: AbortSignal
 }
 
+const isModelLabel = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,127}$/.test(value) &&
+  !/^(?:sk-|www\.)/i.test(value) &&
+  !/\.(?:com|net|org|io|dev|ai)(?:$|\/)/i.test(value)
+
 export function resolveRequest(input: ModelRequest, mode: TransportHost["mode"]): ModelRequest {
   if (!URL.canParse(input.baseURL)) throw new Error("invalid-evaluation-model-request")
+  const aliases = input.modelAliases ?? []
+  if (
+    !Array.isArray(aliases) ||
+    aliases.length > 12 ||
+    new Set(aliases.map(({ reported }) => reported)).size !== aliases.length ||
+    aliases.some(
+      ({ reported, evidence }) =>
+        !isModelLabel(reported) ||
+        reported === input.model ||
+        typeof evidence !== "string" ||
+        !/^[a-zA-Z0-9][a-zA-Z0-9._:/#-]{0,159}$/.test(evidence),
+    )
+  )
+    throw new Error("invalid-model-alias-policy")
   const endpoint = new URL(input.baseURL)
   const allowed =
     mode === "gravitex"
@@ -38,7 +59,7 @@ export function resolveRequest(input: ModelRequest, mode: TransportHost["mode"])
     endpoint.hash ||
     !["responses", "chat"].includes(input.protocol) ||
     !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.route) ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,127}$/.test(input.model) ||
+    !isModelLabel(input.model) ||
     (input.context !== undefined && (typeof input.context !== "string" || input.context.length > 12_000)) ||
     [
       input.maxRequestBytes,
@@ -58,6 +79,7 @@ export function resolveRequest(input: ModelRequest, mode: TransportHost["mode"])
     baseURL: endpoint.href,
     protocol: input.protocol,
     model: input.model,
+    ...(aliases.length ? { modelAliases: aliases.map(({ reported, evidence }) => ({ reported, evidence })) } : {}),
     context: input.context ?? "",
     maxRequestBytes: input.maxRequestBytes,
     maxOutputTokens: input.maxOutputTokens,
@@ -72,6 +94,17 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
+}
+
+function verifyModel(policy: ModelRequest, raw: unknown, credential?: string): ModelDeclaration {
+  const reported = record(raw)?.model
+  if (reported == null) return { reportedModel: null, modelStatus: "missing", modelEvidence: null }
+  if (!isModelLabel(reported) || (credential && reported.includes(credential)))
+    return { reportedModel: null, modelStatus: "invalid", modelEvidence: null }
+  if (reported === policy.model) return { reportedModel: reported, modelStatus: "exact", modelEvidence: null }
+  const alias = policy.modelAliases?.find((item) => item.reported === reported)
+  if (alias) return { reportedModel: reported, modelStatus: "alias", modelEvidence: alias.evidence }
+  return { reportedModel: reported, modelStatus: "mismatch", modelEvidence: null }
 }
 
 function metering(value: unknown, chat: boolean): Usage | undefined {
@@ -173,12 +206,20 @@ export async function sendModel<A>(
         },
   )
   if (Buffer.byteLength(body) > policy.maxRequestBytes) throw new Error("evaluation-request-byte-limit")
-  const requestHash = sha256(target + "\n" + body)
+  const aliases = policy.modelAliases?.length ? "\n" + JSON.stringify(policy.modelAliases) : ""
+  const requestHash = sha256(target + "\n" + body + aliases)
   const done = journal.history(request.slot, request.step)
   if (done.some((send) => send.requestHash !== requestHash))
     throw new HistoryPaused("evaluation-request-changed-on-replay")
   const last = done.at(-1)
   if (last?.outcome === "ok" && last.value !== null) {
+    const declaration = verifyModel(policy, { model: last.reportedModel })
+    if (
+      (declaration.modelStatus !== "exact" && declaration.modelStatus !== "alias") ||
+      declaration.modelStatus !== last.modelStatus ||
+      declaration.modelEvidence !== last.modelEvidence
+    )
+      throw new Error("recorded-model-unverified")
     const usage = last.usage ? (JSON.parse(last.usage) as Usage) : undefined
     return { value: decode(JSON.parse(last.value)), tokens: usage?.total }
   }
@@ -189,6 +230,8 @@ export async function sendModel<A>(
     const credential = host.credential(policy.route)
     if (!credential || !/^[A-Za-z0-9._~+\/-]{8,1024}={0,2}$/.test(credential))
       throw new HistoryPaused("credential-unavailable")
+    if ([body, aliases, policy.route].some((value) => value.includes(credential)))
+      throw new Error("credential-in-model-request")
     const timeout = AbortSignal.timeout(policy.timeoutMs)
     const signal = AbortSignal.any([timeout, ...[request.signal].filter((item) => item !== undefined)])
     const physical = journal.start(
@@ -220,11 +263,18 @@ export async function sendModel<A>(
     }
     const raw = await boundedJson(response).catch(() => undefined)
     const usage = metering(raw, chat)
+    const declaration = verifyModel(policy, raw, credential)
     const status = response.status
     const overOutput = (usage?.output ?? 0) > policy.maxOutputTokens
     if (!response.ok) {
       const retryable = status === 429 || status >= 500
-      journal.finish(physical, { outcome: retryable ? "retryable" : "rejected", status, usage, overOutput })
+      journal.finish(physical, {
+        outcome: retryable ? "retryable" : "rejected",
+        status,
+        usage,
+        overOutput,
+        declaration,
+      })
       if (!retryable) throw new Error("upstream-rejected")
       if (attempt < policy.maxAttempts && !host.signal?.aborted) {
         // Every retry has its own durable reservation. Honor a bounded Retry-After.
@@ -233,6 +283,10 @@ export async function sendModel<A>(
       }
       continue
     }
+    if (declaration.modelStatus !== "exact" && declaration.modelStatus !== "alias") {
+      journal.finish(physical, { outcome: "model-rejected", status, usage, overOutput, declaration })
+      throw new Error("upstream-model-" + declaration.modelStatus)
+    }
     const text = answerText(raw, chat)
     let value: A
     try {
@@ -240,11 +294,11 @@ export async function sendModel<A>(
       value = decode(JSON.parse(text))
       if (JSON.stringify(value).includes(credential)) throw new Error("invalid-model-text")
     } catch {
-      journal.finish(physical, { outcome: "invalid-output", status, usage, overOutput })
+      journal.finish(physical, { outcome: "invalid-output", status, usage, overOutput, declaration })
       if (host.signal?.aborted) throw new HistoryPaused("host-stopped")
       throw new Error("invalid-model-output")
     }
-    journal.finish(physical, { outcome: "ok", status, usage, value, overOutput })
+    journal.finish(physical, { outcome: "ok", status, usage, value, overOutput, declaration })
     return { value, tokens: usage?.total }
   }
   throw new Error("retry-limit")

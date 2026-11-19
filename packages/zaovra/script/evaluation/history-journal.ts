@@ -12,8 +12,13 @@ export type Usage = {
   cachedInput: number | null
   reasoning: number | null
 }
-type Outcome = "in-flight" | "ok" | "retryable" | "rejected" | "invalid-output" | "uncertain"
-type PhysicalSend = {
+type Outcome = "in-flight" | "ok" | "retryable" | "rejected" | "invalid-output" | "uncertain" | "model-rejected"
+export type ModelDeclaration = {
+  reportedModel: string | null
+  modelStatus: "exact" | "alias" | "mismatch" | "missing" | "invalid" | "unverified"
+  modelEvidence: string | null
+}
+type PhysicalSend = ModelDeclaration & {
   id: string
   slot: string
   step: number
@@ -81,6 +86,17 @@ export class Journal {
       );
       UPDATE sends SET outcome = 'uncertain' WHERE outcome = 'in-flight';
     `)
+    // Keep existing reservations and treat any pre-verification cached response as unverified.
+    const columns = new Set(
+      db
+        .query<{ name: string }, []>("PRAGMA table_info(sends)")
+        .all()
+        .map((row) => row.name),
+    )
+    if (!columns.has("reportedModel")) db.exec("ALTER TABLE sends ADD COLUMN reportedModel TEXT")
+    if (!columns.has("modelStatus"))
+      db.exec("ALTER TABLE sends ADD COLUMN modelStatus TEXT NOT NULL DEFAULT 'unverified'")
+    if (!columns.has("modelEvidence")) db.exec("ALTER TABLE sends ADD COLUMN modelEvidence TEXT")
     db.query("INSERT OR IGNORE INTO manifest VALUES ('nonce', ?)").run(randomUUID())
     this.nonce = db.query<{ value: string }, []>("SELECT value FROM manifest WHERE key = 'nonce'").get()!.value
     db.query("INSERT INTO invocations(started, maxSends, maxTokens) VALUES (?, ?, ?)").run(
@@ -145,12 +161,13 @@ export class Journal {
       usage?: Usage
       value?: unknown
       overOutput?: boolean
+      declaration?: ModelDeclaration
     },
   ) {
     const row = this.db
       .query(
         `
-      UPDATE sends SET outcome = ?, status = ?, usage = ?, value = ?, elapsed = ?, overOutput = ?
+      UPDATE sends SET outcome = ?, status = ?, usage = ?, value = ?, elapsed = ?, overOutput = ?, reportedModel = ?, modelStatus = ?, modelEvidence = ?
       WHERE id = ? AND outcome = 'in-flight'
     `,
       )
@@ -161,6 +178,9 @@ export class Journal {
         result.value === undefined ? null : JSON.stringify(result.value),
         Date.now() - send.started,
         result.overOutput ? 1 : 0,
+        result.declaration?.reportedModel ?? null,
+        result.declaration?.modelStatus ?? "unverified",
+        result.declaration?.modelEvidence ?? null,
         send.id,
       )
     if (row.changes !== 1) throw new Error("physical-send-settlement-conflict")
@@ -200,7 +220,8 @@ export class Journal {
     const sends = this.db
       .query<Omit<PhysicalSend, "value">, []>(
         `
-      SELECT id, slot, step, attempt, requestHash, model, route, reserve, outcome, status, usage, started, elapsed, overOutput
+      SELECT id, slot, step, attempt, requestHash, model, route, reserve, outcome, status, usage, started, elapsed, overOutput,
+        reportedModel, modelStatus, modelEvidence
       FROM sends ORDER BY rowid
     `,
       )
