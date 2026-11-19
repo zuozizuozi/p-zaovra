@@ -982,10 +982,9 @@ const layer = Layer.effect(
         return { needsContinuation: false, step: currentStep }
       }
       const tidyAllowed = yield* tidyTools.allowed(session.id)
-      const excludedMemory =
-        !tidyAllowed && Config.latest(configuration, "memory")?.modelTools === false
-          ? MemoryTidyTools.conversationTools
-          : undefined
+      const excludedMemory = tidyAllowed
+        ? undefined
+        : MemoryTidyTools.excludedFromConversation(Config.latest(configuration, "memory")?.modelTools)
       const toolMaterialization =
         isLastStep || textOnlyRecovery || deliveryReport
           ? undefined

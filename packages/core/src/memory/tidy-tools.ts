@@ -29,7 +29,7 @@ const permitted: ReadonlySet<string> = new Set([
   "memory_extract",
 ])
 /** Product memory tools omitted by the recorder-and-index-only configuration. */
-export const conversationTools: ReadonlySet<string> = new Set([
+const conversationTools: ReadonlySet<string> = new Set([
   "memory_search",
   "memory_note",
   "memory_page",
@@ -37,6 +37,12 @@ export const conversationTools: ReadonlySet<string> = new Set([
   "memory_check",
   "memory_review",
 ])
+const tidyOnly: ReadonlySet<string> = new Set(["memory_review", "memory_extract"])
+
+export function excludedFromConversation(modelTools: boolean | undefined) {
+  return modelTools === false ? conversationTools : tidyOnly
+}
+
 const denied: ReadonlySet<string> = new Set()
 
 const layer = Layer.effect(

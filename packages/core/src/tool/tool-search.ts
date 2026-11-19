@@ -97,10 +97,9 @@ const layer = Layer.effectDiscard(
                 .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
               const agent = yield* agents.get(context.agent)
               const memoryNoteAllowed = yield* memoryWriting.allowed(context.sessionID)
-              const excluded =
-                Config.latest(yield* config.entries(), "memory")?.modelTools === false
-                  ? MemoryTidyTools.conversationTools
-                  : undefined
+              const excluded = MemoryTidyTools.excludedFromConversation(
+                Config.latest(yield* config.entries(), "memory")?.modelTools,
+              )
               const catalog = (yield* registry.materialize(agent?.permissions, excluded)).definitions.filter(
                 (tool) => tool.name !== name && (tool.name !== "memory_note" || memoryNoteAllowed),
               )

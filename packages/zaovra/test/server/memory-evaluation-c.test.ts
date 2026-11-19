@@ -116,7 +116,9 @@ test.skipIf(process.platform !== "win32")(
       expect(result.stageUsage?.stages.map((stage) => stage.unknownRequests)).toEqual([3, 3, 3, 3, 3])
       expect(result.stageUsage?.fullChain).toMatchObject({ status: "unknown", eligibleForCostComparison: false })
       expect(calls).toHaveLength(15)
-      expect(calls.flatMap((call) => call.names).filter((name) => name === "memory_extract" || name === "memory_review")).toEqual([])
+      expect(
+        calls.flatMap((call) => call.names).filter((name) => name === "memory_extract" || name === "memory_review"),
+      ).toEqual([])
       expect(calls.filter((_, index) => index % 3 === 1).every((call) => call.names.includes("memory_note"))).toBe(true)
       const generations = []
       for (let stage = 1; stage <= 5; stage++)
