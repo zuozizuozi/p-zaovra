@@ -1,4 +1,4 @@
-import { Journal, type ModelDeclaration, type Usage, whole } from "./history-journal"
+import { Journal, type ModelDeclaration, type OutputFailure, type Usage, whole } from "./history-journal"
 import { sha256 } from "./history-library"
 import { HistoryPaused } from "./history-run"
 
@@ -288,16 +288,31 @@ export async function sendModel<A>(
       throw new Error("upstream-model-" + declaration.modelStatus)
     }
     const text = answerText(raw, chat)
+    // Persist only the failure category: malformed text can contain credentials or private content.
+    const invalid = (outputFailure: OutputFailure): never => {
+      journal.finish(physical, { outcome: "invalid-output", status, usage, overOutput, declaration, outputFailure })
+      if (host.signal?.aborted) throw new HistoryPaused("host-stopped")
+      throw new Error("invalid-model-output:" + outputFailure)
+    }
+    const envelope = record(raw)
+    const choice = Array.isArray(envelope?.choices) ? record(envelope.choices[0]) : undefined
+    if ((chat && choice?.finish_reason === "length") || (!chat && envelope?.status === "incomplete"))
+      invalid("response-incomplete")
+    if (!text) return invalid("assistant-text-unavailable")
+    if (text.includes(credential)) invalid("credential-in-output")
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      return invalid(text.trimStart().startsWith("```") ? "markdown-fence" : "invalid-json")
+    }
     let value: A
     try {
-      if (!text || text.includes(credential)) throw new Error("invalid-model-text")
-      value = decode(JSON.parse(text))
-      if (JSON.stringify(value).includes(credential)) throw new Error("invalid-model-text")
+      value = decode(parsed)
     } catch {
-      journal.finish(physical, { outcome: "invalid-output", status, usage, overOutput, declaration })
-      if (host.signal?.aborted) throw new HistoryPaused("host-stopped")
-      throw new Error("invalid-model-output")
+      return invalid("schema-mismatch")
     }
+    if (JSON.stringify(value).includes(credential)) invalid("credential-in-output")
     journal.finish(physical, { outcome: "ok", status, usage, value, overOutput, declaration })
     return { value, tokens: usage?.total }
   }

@@ -477,3 +477,56 @@ test("unverified upstream models contribute costs without producing any answer r
     await upstream.stop(true)
   }
 })
+
+test("invalid answers retain only a diagnostic category and never resend on replay", async () => {
+  await using temporary = await tmpdir()
+  const cases = [
+    ["response-incomplete", "ignored"],
+    ["assistant-text-unavailable", ""],
+    ["credential-in-output", TEST_KEY],
+    ["markdown-fence", "```json\n{}\n```"],
+    ["invalid-json", "not JSON"],
+    ["schema-mismatch", '{"wrong":"field"}'],
+  ] as const
+  let sent = 0
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch() {
+      const [reason, text] = cases[sent++ % cases.length]!
+      return Response.json({
+        model: "fixed-model",
+        status: reason === "response-incomplete" ? "incomplete" : "completed",
+        output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }],
+        usage: { input_tokens: 9, output_tokens: 3, total_tokens: 12 },
+      })
+    },
+  })
+  try {
+    const host = setup(temporary.path, upstream.port!, cases.length)
+    const policy = resolveRequest({
+      ...host.request({ phase: "generation", document: "doc-1" }),
+      protocol: "responses",
+      model: "fixed-model",
+    }, "loopback")
+    for (const [reason] of cases) {
+      const invoke = () => withJournal(host.root, host.cap, async (journal) =>
+        sendModel(journal, host, policy, { slot: reason, step: 0, system: "test", data: {} }, () => {
+          throw new Error("private diagnostic details")
+        }),
+      )
+      await expect(invoke()).rejects.toThrow("invalid-model-output:" + reason)
+      await expect(invoke()).rejects.toThrow("recorded-invalid-output")
+    }
+    expect(sent).toBe(cases.length)
+    await withJournal(host.root, host.cap, async (journal) => {
+      const report = journal.accounting()
+      expect(report.sends.map((send) => send.outputFailure)).toEqual(cases.map(([reason]) => reason))
+      expect(report.totals.knownTokens).toBe(cases.length * 12)
+      expect(JSON.stringify(report)).not.toContain(TEST_KEY)
+      expect(JSON.stringify(report)).not.toContain("private diagnostic details")
+    })
+  } finally {
+    await upstream.stop(true)
+  }
+})

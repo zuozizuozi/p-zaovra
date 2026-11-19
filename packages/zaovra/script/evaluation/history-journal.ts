@@ -18,6 +18,14 @@ export type ModelDeclaration = {
   modelStatus: "exact" | "alias" | "mismatch" | "missing" | "invalid" | "unverified"
   modelEvidence: string | null
 }
+export type OutputFailure =
+  | "response-incomplete"
+  | "assistant-text-unavailable"
+  | "credential-in-output"
+  | "markdown-fence"
+  | "invalid-json"
+  | "schema-mismatch"
+
 type PhysicalSend = ModelDeclaration & {
   id: string
   slot: string
@@ -28,6 +36,7 @@ type PhysicalSend = ModelDeclaration & {
   route: string
   reserve: number
   outcome: Outcome
+  outputFailure: OutputFailure | null
   status: number | null
   usage: string | null
   value: string | null
@@ -93,6 +102,7 @@ export class Journal {
         .all()
         .map((row) => row.name),
     )
+    if (!columns.has("outputFailure")) db.exec("ALTER TABLE sends ADD COLUMN outputFailure TEXT")
     if (!columns.has("reportedModel")) db.exec("ALTER TABLE sends ADD COLUMN reportedModel TEXT")
     if (!columns.has("modelStatus"))
       db.exec("ALTER TABLE sends ADD COLUMN modelStatus TEXT NOT NULL DEFAULT 'unverified'")
@@ -161,13 +171,14 @@ export class Journal {
       usage?: Usage
       value?: unknown
       overOutput?: boolean
+      outputFailure?: OutputFailure
       declaration?: ModelDeclaration
     },
   ) {
     const row = this.db
       .query(
         `
-      UPDATE sends SET outcome = ?, status = ?, usage = ?, value = ?, elapsed = ?, overOutput = ?, reportedModel = ?, modelStatus = ?, modelEvidence = ?
+      UPDATE sends SET outcome = ?, status = ?, usage = ?, value = ?, elapsed = ?, overOutput = ?, reportedModel = ?, modelStatus = ?, modelEvidence = ?, outputFailure = ?
       WHERE id = ? AND outcome = 'in-flight'
     `,
       )
@@ -181,6 +192,7 @@ export class Journal {
         result.declaration?.reportedModel ?? null,
         result.declaration?.modelStatus ?? "unverified",
         result.declaration?.modelEvidence ?? null,
+        result.outputFailure ?? null,
         send.id,
       )
     if (row.changes !== 1) throw new Error("physical-send-settlement-conflict")
@@ -221,7 +233,7 @@ export class Journal {
       .query<Omit<PhysicalSend, "value">, []>(
         `
       SELECT id, slot, step, attempt, requestHash, model, route, reserve, outcome, status, usage, started, elapsed, overOutput,
-        reportedModel, modelStatus, modelEvidence
+        reportedModel, modelStatus, modelEvidence, outputFailure
       FROM sends ORDER BY rowid
     `,
       )
