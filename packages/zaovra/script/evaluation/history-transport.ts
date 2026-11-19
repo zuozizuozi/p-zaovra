@@ -154,8 +154,12 @@ function answerText(value: unknown, chat: boolean) {
   }
   if (envelope.status !== "completed" || !Array.isArray(envelope.output)) return
   const messages = envelope.output.map(record).filter((item) => item?.type === "message")
-  const message = messages.length === 1 ? messages[0] : undefined
+  const message = messages.at(-1)
   if (message?.role !== "assistant" || !Array.isArray(message.content)) return
+  if (message.status != null && message.status !== "completed") return
+  // Older routes omit phase for a single answer. In a phased response only the final message is an answer.
+  if (message.phase !== "final_answer" && !(messages.length === 1 && message.phase == null)) return
+  if (messages.slice(0, -1).some((item) => item?.role !== "assistant" || item.phase !== "commentary")) return
   const parts = message.content.map(record)
   if (parts.some((part) => part?.type !== "output_text" || typeof part.text !== "string")) return
   return parts.map((part) => part?.text).join("")

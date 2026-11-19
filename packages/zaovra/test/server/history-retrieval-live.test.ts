@@ -530,3 +530,41 @@ test("invalid answers retain only a diagnostic category and never resend on repl
     await upstream.stop(true)
   }
 })
+
+test("Responses selects a single final assistant message after commentary and refuses ambiguous output", async () => {
+  await using temporary = await tmpdir()
+  const msg = (phase?: string, text = '{"action":"abstain"}') => ({
+    type: "message", role: "assistant", status: "completed", phase, content: [{ type: "output_text", text }],
+  })
+  const cases = [
+    { output: [msg("commentary", "working"), msg("final_answer")], valid: true },
+    { output: [msg()], valid: true },
+    { output: [msg("final_answer")], valid: true },
+    { output: [msg("commentary")], valid: false },
+    { output: [msg("final_answer"), msg("final_answer")], valid: false },
+    { output: [msg(), msg("final_answer")], valid: false },
+    { output: [msg("final_answer"), msg("commentary")], valid: false },
+    { output: [{ ...msg("final_answer"), status: "incomplete" }], valid: false },
+    { output: [msg("commentary"), { ...msg("final_answer"), content: [{ type: "refusal", refusal: "no" }] }], valid: false },
+  ]
+  let requests = 0
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1", port: 0, fetch() {
+      return Response.json({ model: "fixed-model", status: "completed", output: cases[requests++]!.output })
+    },
+  })
+  try {
+    const host = setup(temporary.path, upstream.port!, cases.length, 2_000_000)
+    const policy = resolveRequest({ ...host.request({ phase: "generation", document: "doc-1" }), model: "fixed-model", protocol: "responses" }, "loopback")
+    for (const [i, c] of cases.entries()) {
+      const run = withJournal(host.root, host.cap, async (journal) =>
+        sendModel(journal, host, policy, { slot: String(i), step: 0, system: "test", data: {} }, (v) => v),
+      )
+      if (c.valid) expect((await run).value).toEqual({ action: "abstain" })
+      else await expect(run).rejects.toThrow("assistant-text-unavailable")
+    }
+    expect(requests).toBe(cases.length)
+  } finally {
+    await upstream.stop(true)
+  }
+})
