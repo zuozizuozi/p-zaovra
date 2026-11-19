@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { Database } from "bun:sqlite"
 import { execFileSync } from "node:child_process"
 import path from "node:path"
 import { runEvaluationChain } from "../../../../script/evaluation/memory/pilot"
@@ -163,6 +164,18 @@ for (const scenario of ["http-404", "valid-count"] as const) {
           Bun.file(path.join(tmp.path, "tidy.jsonl")).text(),
           Bun.file(path.join(tmp.path, "ordinary.jsonl")).text(),
         ])
+        using db = new Database(path.join(root, "profile", "sessions.sqlite"), { readonly: true })
+        const terminalRows = evidence?.terminal?.sessionID
+          ? db
+              .query<{ seq: number; data: string }, [string]>(
+                "select seq, data from session_message where session_id = ? and type = 'assistant' order by seq",
+              )
+              .all(evidence.terminal.sessionID)
+              .map(({ seq, data }) => {
+                const message = JSON.parse(data)
+                return { seq, error: message.error, finish: message.finish }
+              })
+          : []
         if (process.env.ZAOVRA_TEST_REPORT_DIR)
           await Bun.write(
             path.join(process.env.ZAOVRA_TEST_REPORT_DIR, `d-${scenario}.json`),
@@ -171,6 +184,7 @@ for (const scenario of ["http-404", "valid-count"] as const) {
                 result,
                 evidence,
                 calls,
+                terminalRows,
                 tidyRelay: logs[0],
                 ordinaryRelay: logs[1],
                 stoppedOnFailure: await Bun.file(path.join(root, "stage-4", "tidy-stopped.json"))
