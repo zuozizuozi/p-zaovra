@@ -86,6 +86,7 @@ function mount(tool: string, error = "Offline operation failed: original detail"
     ...failure,
     id: "success",
     callID: "successful-call",
+    settledSeq: 6,
     messageID: last.id,
     state: {
       status: "completed",
@@ -147,6 +148,9 @@ function mount(tool: string, error = "Offline operation failed: original detail"
         turnID: user.id,
         callID: "failed-call",
         basisSeq: 10,
+        ...(status === "recovered" || status === "exploratory"
+          ? { evidence: { assistantMessageID: last.id, callID: success.callID, settledSeq: success.settledSeq! } }
+          : {}),
         status,
         reason:
           status === "recovered"
@@ -155,7 +159,9 @@ function mount(tool: string, error = "Offline operation failed: original detail"
               ? "exploratory-miss"
               : status === "interrupted"
                 ? "interrupted"
-                : "unverified",
+                : status === "failed"
+                  ? "tool-error"
+                  : "unverified",
       })
     },
     settle(finish = "stop") {

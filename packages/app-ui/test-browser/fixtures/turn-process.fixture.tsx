@@ -84,7 +84,8 @@ const value = {
 }
 
 function mount(blocked = false, before = false) {
-  const tools = blocked ? [failure] : [failure, success]
+  const completed = { ...last, id: "msg_last", sessionID: "ses_process", turn: "msg_request", seq: 5 }
+  const written = { ...success, messageID: completed.id, sessionID: completed.sessionID, settledSeq: 6 }
   const owner = { ...first, id: "msg_first", sessionID: "ses_process", turn: "msg_request", seq: 2 }
   const reported: ToolPart = {
     ...failure,
@@ -100,12 +101,14 @@ function mount(blocked = false, before = false) {
       basisSeq: 8,
       status: blocked ? "failed" : "exploratory",
       reason: blocked ? "tool-error" : "exploratory-miss",
+      ...(blocked ? {} : { evidence: { assistantMessageID: written.messageID, callID: written.callID, settledSeq: written.settledSeq } }),
     },
   }
+  const tools = blocked ? [reported] : [reported, written]
   const quiet = quietToolFailures({
     message: owner,
-    messages: [owner],
-    parts: { [owner.id]: [reported] },
+    messages: [owner, completed],
+    parts: { [owner.id]: [reported], [completed.id]: blocked ? [] : [written] },
     working: false,
   })
   const [state, setState] = createStore({ folded: true })
