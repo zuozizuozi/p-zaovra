@@ -21,6 +21,7 @@ import { LayerNodePlatform } from "../effect/app-node-platform"
 import { Location } from "../location"
 import type { SessionSchema } from "../session/schema"
 import { SessionStore } from "../session/store"
+import { SessionOwnership } from "../session/ownership"
 import { SessionRunnerModel } from "../session/runner/model"
 import { SessionOutputRecovery } from "../session/output-recovery"
 import { MemoryStore } from "./store"
@@ -63,6 +64,13 @@ export const supportsSelection = Effect.fn("MemoryTidy.supportsSelection")(funct
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/MemoryTidyExecution") {}
 
+const dispatchFor = (run: MemoryTidyStore.Run) =>
+  Effect.gen(function* () {
+    const claim = yield* SessionOwnership.Current
+    if (claim?.memoryTidy?.runID !== run.id) return undefined
+    return { id: claim.id, checkpoint: claim.memoryTidy.checkpoint, tokens: claim.memoryTidy.tokens }
+  })
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -80,6 +88,8 @@ const layer = Layer.effect(
       run: MemoryTidyStore.Run,
       request: LLMRequest,
     ) {
+      const dispatch = yield* dispatchFor(run)
+      if (!dispatch) return yield* denied("整理只能由确认任务的宿主执行。")
       if (
         run.directory !== location.directory ||
         (run.scope !== Memory.Scope.user &&
@@ -109,21 +119,28 @@ const layer = Layer.effect(
         current.route.endpoint.path !== request.model.route.endpoint.path
       )
         return yield* denied("整理模型的实际线路已经改变，请重新确认整理任务。")
-      return input
+      return { input, dispatch }
     })
 
     return Service.of({
       prepare: Effect.fn("MemoryTidyExecution.prepare")(function* (sessionID, request) {
         const run = yield* store.forSession(sessionID)
         if (!run) return request
-        yield* authority(run, request)
-        const remaining = run.token_limit - (yield* store.usage({ runID: run.id })).charged
-        if (remaining <= 0)
+        const { input, dispatch } = yield* authority(run, request)
+        const limit = MemoryTidyStore.dispatchLimit(run, dispatch)
+        if (limit === undefined) return yield* denied("整理断点需要当前任务的明确续做授权。")
+        const { charged } = yield* store.usage({ runID: run.id })
+        const remaining = limit - charged
+        if (remaining <= 0) {
+          yield* store
+            .pauseBudget({ ...input, budget: "run", minimumTokens: charged + 1, dispatch })
+            .pipe(Effect.catchTag("MemoryTidy.Rejected", () => Effect.void))
           return yield* new LLMError({
             module: "MemoryTidyExecution",
             method: "prepare",
             reason: new QuotaExceededReason({ message: "本次整理预算已用完，未发送请求。" }),
           })
+        }
         const requested =
           request.generation?.maxTokens ??
           request.model.defaults?.generation?.maxTokens ??
@@ -143,6 +160,7 @@ const layer = Layer.effect(
             const run = yield* store.forSession(sessionID)
             if (!run) return stream
             yield* authority(run, request)
+            let sent = false
             // A transport without an executor admission hook cannot participate
             // in the budget contract. Do not fall back to an unmetered stream.
             if (!supportsInputCount(request.model))
@@ -151,16 +169,21 @@ const layer = Layer.effect(
             const previousCompletion = yield* RequestExecutor.RequestCompletion
             const fetchOptions = yield* Effect.serviceOption(FetchHttpClient.RequestInit)
             return stream.pipe(
+              Stream.provideService(RequestExecutor.AutomaticRetries, false),
               Stream.provideService(RequestExecutor.RequestAdmission, (attempt) =>
                 Effect.gen(function* () {
                   yield* previousAdmission(attempt)
-                  yield* authority(run, request)
-                  const output = MemoryTidyBudget.wireLimit(request, attempt.request, run.token_limit)
+                  const fresh = yield* store.forSession(sessionID)
+                  if (!fresh || fresh.id !== run.id) return yield* denied("整理授权已失效，未发送模型请求。")
+                  const { dispatch } = yield* authority(fresh, request)
+                  const limit = MemoryTidyStore.dispatchLimit(fresh, dispatch)
+                  if (limit === undefined) return yield* denied("整理断点需要当前任务的明确续做授权。")
+                  const output = MemoryTidyBudget.wireLimit(request, attempt.request, limit)
                   if (!output) return yield* denied("整理请求缺少有效输出上限，或包含未授权的线路/服务端操作。")
                   const counted = yield* count(http, attempt.request)
                   // Counting is asynchronous. Recheck revocation, the selected
                   // model and current config before recording the reservation.
-                  const current = yield* authority(run, request)
+                  const { input: current } = yield* authority(run, request)
                   yield* budget.admit({
                     authority: current,
                     id: attempt.id,
@@ -168,7 +191,10 @@ const layer = Layer.effect(
                     wire: attempt.request,
                     inputLimit: counted,
                     outputLimit: output,
+                    dispatch,
+                    canPause: !sent,
                   })
+                  sent = true
                 }),
               ),
               Stream.provideService(RequestExecutor.RequestCompletion, (receipt) =>

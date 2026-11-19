@@ -318,7 +318,7 @@ const layer = Layer.effect(
               "会话的宿主持久状态损坏或版本不受支持；请升级或修复状态后再执行。会话仍可读取和导出，未发送模型或工具请求。",
           }),
         })
-      const limit = limits.limit
+      const limit = (yield* SessionOwnership.Current)?.memoryTidy ? undefined : limits.limit
       const deadline = SessionBudget.deadline(session, limits.duration, limits.policy?.deadline)
       const duration = deadline === undefined ? undefined : deadline - DateTime.toEpochMillis(session.time.created)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
@@ -2659,7 +2659,8 @@ const layer = Layer.effect(
             }
             if (Cause.hasInterrupts(result.cause)) return yield* Effect.failCause(result.cause)
             const error = Option.getOrUndefined(Cause.findErrorOption(result.cause))
-            if (!(error instanceof LLMError) || !recovery.eligible) return yield* Effect.failCause(result.cause)
+            if (!(error instanceof LLMError) || !recovery.eligible || (yield* SessionOwnership.Current)?.memoryTidy)
+              return yield* Effect.failCause(result.cause)
             const session = yield* getSession(sessionID)
             const context = yield* getContext(sessionID)
             const last = context.findLast((message) => message.type === "assistant")

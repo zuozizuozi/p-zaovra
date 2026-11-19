@@ -1529,7 +1529,12 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/memory/tidy/${encodeURIComponent(input.id)}/start`,
-            query: { location: input["location"], layer: input["layer"] },
+            query: {
+              location: input["location"],
+              layer: input["layer"],
+              checkpoint: input["checkpoint"],
+              resumeTokens: input["resumeTokens"],
+            },
             successStatus: 200,
             declaredStatuses: [409, 401, 400],
             empty: false,

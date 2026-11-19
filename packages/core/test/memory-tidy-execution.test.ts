@@ -71,7 +71,7 @@ for (const scenario of [
   "defaults-during-count",
   "unknown-usage",
   "retry",
-  "retry-revoked",
+  "no-host-claim",
   "unsupported",
   "ordinary",
   "remote-image",
@@ -117,7 +117,7 @@ for (const scenario of [
         }
         state.generated.push(body)
         state.charges.push(await state.charged())
-        if ((scenario === "retry" || scenario === "retry-revoked") && state.generated.length === 1)
+        if (scenario === "retry" && state.generated.length === 1)
           return Response.json({ error: { type: "server_error", message: "Fixture retry." } }, { status: 503 })
         if (scenario === "generation-redirect")
           return new Response(null, { status: 307, headers: { location: "/unadmitted" } })
@@ -261,7 +261,6 @@ for (const scenario of [
               await Effect.runPromise(automatic.disable(tmp.path, "automatic"))
             if (scenario === "cancel-during-count") await Effect.runPromise(store.finish(run!.id, "cancelled"))
             if (scenario === "config-during-count") state.enabled = false
-            if (scenario === "retry-revoked" && state.counted.length === 2) state.enabled = false
             if (scenario === "route-during-count")
               current.model = current.model.route
                 .with({ endpoint: { baseURL: "https://changed.invalid" } })
@@ -355,9 +354,12 @@ for (const scenario of [
             yield* guard.wrap(sessionID, request, llm.stream(request)).pipe(Stream.runDrain)
           }).pipe(
             Effect.provideService(
-              RequestExecutor.AutomaticRetries,
-              scenario === "retry" || scenario === "retry-revoked",
+              SessionOwnership.Current,
+              run && scenario !== "no-host-claim"
+                ? { id: "fixture-owner", check: Effect.void, memoryTidy: { runID: run.id } }
+                : undefined,
             ),
+            Effect.provideService(RequestExecutor.AutomaticRetries, scenario === "retry"),
             Effect.provideService(RequestExecutor.RequestAdmission, () =>
               Effect.sync(() => {
                 state.admissions++
@@ -379,12 +381,10 @@ for (const scenario of [
             "summary",
             "generation-redirect",
             "retry",
-            "retry-revoked",
           ].includes(scenario)
           if (scenario === "runner" && Exit.isFailure(outcome)) throw new Error(Cause.pretty(outcome.cause))
           expect(outcome._tag).toBe(
-            scenario === "summary-revoked" ||
-              (sent && scenario !== "generation-redirect" && scenario !== "retry-revoked")
+            scenario === "summary-revoked" || (sent && scenario !== "generation-redirect" && scenario !== "retry")
               ? "Success"
               : "Failure",
           )
@@ -397,16 +397,15 @@ for (const scenario of [
           if (Exit.isFailure(outcome) && scenario === "daily-budget")
             expect(Cause.pretty(outcome.cause)).toContain("每日额度按 UTC 零点重置")
           expect(state.redirects).toBe(0)
-          expect(state.generated).toHaveLength(scenario === "retry" ? 2 : sent ? 1 : 0)
+          expect(state.generated).toHaveLength(sent ? 1 : 0)
           expect(state.counted).toHaveLength(
-            ["ordinary", "unsupported", "remote-image", "overlay", "summary-revoked"].includes(scenario)
+            ["ordinary", "unsupported", "remote-image", "overlay", "summary-revoked", "no-host-claim"].includes(
+              scenario,
+            )
               ? 0
-              : scenario === "retry" || scenario === "retry-revoked"
-                ? 2
-                : 1,
+              : 1,
           )
-          if (sent)
-            expect(state.charges).toEqual(scenario === "retry" ? [132, 264] : [scenario === "ordinary" ? 0 : 132])
+          if (sent) expect(state.charges).toEqual([scenario === "ordinary" ? 0 : 132])
           if (scenario === "runner-unbounded") {
             expect(state.generated[0]?.max_output_tokens).toBe(32)
             expect(state.counted[0]?.input).toEqual(state.generated[0]?.input)
@@ -425,13 +424,11 @@ for (const scenario of [
           }
           if (run)
             expect(yield* store.usage({ runID: run.id })).toEqual(
-              scenario === "retry"
-                ? { known: 15, reserved: 132, charged: 147, unknown: 1 }
-                : scenario === "unknown-usage" || scenario === "generation-redirect" || scenario === "retry-revoked"
-                  ? { known: 0, reserved: 132, charged: 132, unknown: 1 }
-                  : sent
-                    ? { known: 15, reserved: 0, charged: 15, unknown: 0 }
-                    : { known: 0, reserved: 0, charged: 0, unknown: 0 },
+              scenario === "unknown-usage" || scenario === "generation-redirect" || scenario === "retry"
+                ? { known: 0, reserved: 132, charged: 132, unknown: 1 }
+                : sent
+                  ? { known: 15, reserved: 0, charged: 15, unknown: 0 }
+                  : { known: 0, reserved: 0, charged: 0, unknown: 0 },
             )
         }).pipe(
           Effect.provide(
@@ -478,3 +475,4 @@ for (const scenario of [
       server.stop(true)
     }
   })
+import { SessionOwnership } from "@zaovra-ai/core/session/ownership"

@@ -10047,6 +10047,13 @@ export type MemoryPrepareTidyOutput = {
     readonly tokens: number
     readonly dailyTokens: number
     readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly budgetPause?: {
+      readonly id: string
+      readonly budget: "run" | "day"
+      readonly utcDay: string
+      readonly minimumTokens?: number
+    }
+    readonly resumedTokenLimit?: number
     readonly executing: boolean
     readonly usage: {
       readonly known: number
@@ -10080,6 +10087,13 @@ export type MemoryListTidyOutput = {
     readonly tokens: number
     readonly dailyTokens: number
     readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly budgetPause?: {
+      readonly id: string
+      readonly budget: "run" | "day"
+      readonly utcDay: string
+      readonly minimumTokens?: number
+    }
+    readonly resumedTokenLimit?: number
     readonly executing: boolean
     readonly usage: {
       readonly known: number
@@ -10114,6 +10128,13 @@ export type MemoryGetTidyOutput = {
     readonly tokens: number
     readonly dailyTokens: number
     readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly budgetPause?: {
+      readonly id: string
+      readonly budget: "run" | "day"
+      readonly utcDay: string
+      readonly minimumTokens?: number
+    }
+    readonly resumedTokenLimit?: number
     readonly executing: boolean
     readonly usage: {
       readonly known: number
@@ -10130,11 +10151,27 @@ export type MemoryStartTidyInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
     readonly layer?: "project" | "user" | undefined
+    readonly checkpoint?: string | undefined
+    readonly resumeTokens?: number | undefined
   }["location"]
   readonly layer?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
     readonly layer?: "project" | "user" | undefined
+    readonly checkpoint?: string | undefined
+    readonly resumeTokens?: number | undefined
   }["layer"]
+  readonly checkpoint?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+    readonly checkpoint?: string | undefined
+    readonly resumeTokens?: number | undefined
+  }["checkpoint"]
+  readonly resumeTokens?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+    readonly checkpoint?: string | undefined
+    readonly resumeTokens?: number | undefined
+  }["resumeTokens"]
 }
 
 export type MemoryStartTidyOutput = {
@@ -10148,6 +10185,13 @@ export type MemoryStartTidyOutput = {
     readonly tokens: number
     readonly dailyTokens: number
     readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly budgetPause?: {
+      readonly id: string
+      readonly budget: "run" | "day"
+      readonly utcDay: string
+      readonly minimumTokens?: number
+    }
+    readonly resumedTokenLimit?: number
     readonly executing: boolean
     readonly usage: {
       readonly known: number
@@ -10182,6 +10226,13 @@ export type MemoryCancelTidyOutput = {
     readonly tokens: number
     readonly dailyTokens: number
     readonly state: "active" | "completed" | "cancelled" | "failed"
+    readonly budgetPause?: {
+      readonly id: string
+      readonly budget: "run" | "day"
+      readonly utcDay: string
+      readonly minimumTokens?: number
+    }
+    readonly resumedTokenLimit?: number
     readonly executing: boolean
     readonly usage: {
       readonly known: number

@@ -113,7 +113,12 @@ export const MemoryHandler = HttpApiBuilder.group(Api, "server.memory", (handler
         "memory.startTidy",
         Effect.fn(function* (ctx) {
           const tidy = yield* MemoryTidy.Service
-          return { data: taskView(yield* tidy.start(ctx.params.id, ctx.query.layer).pipe(Effect.mapError(tidyError))) }
+          const { checkpoint, resumeTokens } = ctx.query
+          if (!checkpoint && resumeTokens !== undefined) return yield* tidyError({ reason: "invalid" })
+          const resume = checkpoint ? { checkpoint, tokens: resumeTokens } : undefined
+          return {
+            data: taskView(yield* tidy.start(ctx.params.id, ctx.query.layer, resume).pipe(Effect.mapError(tidyError))),
+          }
         }, Effect.provide(tidyLayer)),
       )
       .handle(
@@ -205,6 +210,8 @@ function taskView(view: MemoryTidy.View): Memory.TidyTask {
     tokens: view.run.token_limit,
     dailyTokens: view.run.daily_limit,
     state: view.run.state,
+    ...(view.run.state === "active" && view.run.budget_pause ? { budgetPause: view.run.budget_pause } : {}),
+    ...(view.run.budget_resume ? { resumedTokenLimit: view.run.budget_resume.tokens } : {}),
     executing: view.executing,
     usage: view.usage,
     time: { created: view.run.time_created, finished: view.run.time_finished },

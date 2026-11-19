@@ -18,6 +18,8 @@ export const MemoryTidyRunTable = sqliteTable(
     token_limit: integer().notNull(),
     daily_limit: integer().notNull(),
     state: text().$type<"active" | "completed" | "cancelled" | "failed">().notNull(),
+    budget_pause: text({ mode: "json" }).$type<Memory.TidyPause>(),
+    budget_resume: text({ mode: "json" }).$type<{ checkpoint: string; owner: string; tokens: number }>(),
     time_created: integer().notNull(),
     time_finished: integer(),
   },

@@ -1,7 +1,7 @@
 export * as MemoryTidyStore from "./tidy-store"
 
 import { randomUUID } from "node:crypto"
-import { and, desc, eq, sql } from "drizzle-orm"
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Schema } from "effect"
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError"
 import { EffectDrizzleQueryError } from "drizzle-orm/effect-core/errors"
@@ -28,10 +28,14 @@ export type Request = {
   dailyTokens: number
 }
 export type Authority = { sessionID: SessionSchema.ID; scope: Memory.Scope; enabled: boolean }
+export type Resume = { checkpoint: string; tokens?: number }
+export type Dispatch = { id: string; checkpoint?: string; tokens?: number }
 
 export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Rejected", {
   reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy"]),
   budget: Schema.optional(Schema.Literals(["run", "day"])),
+  utcDay: Schema.optional(Schema.String),
+  minimumTokens: Schema.optional(Schema.Number),
 }) {}
 
 export interface Interface {
@@ -45,7 +49,12 @@ export interface Interface {
   readonly ownsSession: (run: Run) => Effect.Effect<boolean>
   readonly authorize: (input: Authority) => Effect.Effect<Run, Rejected>
   readonly guarded: <A, E>(input: Authority, operation: Effect.Effect<A, E>) => Effect.Effect<A, E | Rejected>
-  readonly reserve: (input: Authority & { attemptID: string; tokens: number }) => Effect.Effect<void, Rejected>
+  readonly reserve: (
+    input: Authority & { attemptID: string; tokens: number; dispatch?: Dispatch },
+  ) => Effect.Effect<void, Rejected>
+  readonly pauseBudget: (
+    input: Authority & { budget: "run" | "day"; utcDay?: string; minimumTokens?: number; dispatch?: Dispatch },
+  ) => Effect.Effect<void, Rejected>
   readonly settle: (attemptID: string, actual: number) => Effect.Effect<{ exceeded: boolean }, Rejected>
   readonly finish: (id: string, state: "completed" | "cancelled" | "failed") => Effect.Effect<void, Rejected>
   readonly usage: (input: UsageScope) => Effect.Effect<Usage>
@@ -56,6 +65,21 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/Memo
 const integer = (value: number) => Number.isSafeInteger(value) && value >= 0
 const modelKey = (model: { id: string; providerID: string; variant?: string }) =>
   JSON.stringify([model.providerID, model.id, model.variant ?? "default"])
+
+export const tokenLimit = (run: Run) => run.budget_resume?.tokens ?? run.token_limit
+export const utcDay = (now: number) => new Date(now).toISOString().slice(0, 10)
+
+/** A checkpoint is consumed by the first successful reservation, never by a read or a start click. */
+export function dispatchLimit(run: Run, dispatch?: Dispatch) {
+  const limit = tokenLimit(run)
+  const pause = run.budget_pause
+  if (!pause) return !run.budget_resume || run.budget_resume.owner === dispatch?.id ? limit : undefined
+  if (!dispatch || dispatch.checkpoint !== pause.id) return undefined
+  if (pause.budget === "day") return dispatch.tokens === undefined ? limit : undefined
+  const tokens = dispatch.tokens
+  if (!tokens || !integer(tokens) || tokens <= limit || tokens < (pause.minimumTokens ?? 0)) return undefined
+  return tokens
+}
 
 export function readUsage(db: Database.Interface["db"], input?: UsageScope) {
   return db
@@ -126,6 +150,7 @@ const layer = Layer.effect(
             eq(SessionInputTable.session_id, SessionTable.id),
             eq(SessionInputTable.id, run.input.id),
             eq(SessionInputTable.admitted_seq, run.input.seq),
+            isNull(SessionInputTable.cancelled_seq),
           ),
         )
         .where(and(eq(SessionTable.id, run.session_id), eq(SessionTable.directory, run.directory)))
@@ -133,6 +158,18 @@ const layer = Layer.effect(
 
       if (!session?.model || modelKey(session.model) !== modelKey(run.model))
         return yield* new Rejected({ reason: "unauthorized" })
+      const additionalInput = yield* db
+        .select({ id: SessionInputTable.id })
+        .from(SessionInputTable)
+        .where(
+          and(
+            eq(SessionInputTable.session_id, run.session_id),
+            gt(SessionInputTable.admitted_seq, run.input.seq),
+            isNull(SessionInputTable.cancelled_seq),
+          ),
+        )
+        .get()
+      if (additionalInput) return yield* new Rejected({ reason: "unauthorized" })
       yield* memory.scope(session)
       if (!(yield* memory.canAutomate(run.scope))) return yield* new Rejected({ reason: "unauthorized" })
       return run
@@ -179,7 +216,13 @@ const layer = Layer.effect(
           .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       guarded: <A, E>(input: Authority, operation: Effect.Effect<A, E>) =>
         db
-          .transaction(() => authorize(input).pipe(Effect.andThen(operation)))
+          .transaction(() =>
+            Effect.gen(function* () {
+              const run = yield* authorize(input)
+              if (run.budget_pause) return yield* new Rejected({ reason: "unauthorized" })
+              return yield* operation
+            }),
+          )
           .pipe(
             Effect.catch((error): Effect.Effect<never, E | Rejected> => {
               if (isSqlError(error) || error instanceof EffectDrizzleQueryError) return rejectSqlError(error)
@@ -269,6 +312,32 @@ const layer = Layer.effect(
             }),
           )
           .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
+      pauseBudget: (input) =>
+        db
+          .transaction(() =>
+            Effect.gen(function* () {
+              const run = yield* authorize(input)
+              if (dispatchLimit(run, input.dispatch) === undefined)
+                return yield* new Rejected({ reason: "unauthorized" })
+              // An unresolved generation is never a replayable budget checkpoint.
+              if ((yield* readUsage(db, { runID: run.id })).unknown > 0)
+                return yield* new Rejected({ reason: "conflict" })
+              const minimumTokens = input.minimumTokens
+              yield* db
+                .update(MemoryTidyRunTable)
+                .set({
+                  budget_pause: {
+                    id: randomUUID(),
+                    budget: input.budget,
+                    utcDay: input.utcDay ?? utcDay(yield* Clock.currentTimeMillis),
+                    ...(minimumTokens && integer(minimumTokens) ? { minimumTokens } : {}),
+                  },
+                })
+                .where(eq(MemoryTidyRunTable.id, run.id))
+                .run()
+            }),
+          )
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       reserve: (input) =>
         db
           .transaction(() =>
@@ -276,6 +345,8 @@ const layer = Layer.effect(
               if (!input.attemptID || !integer(input.tokens) || input.tokens === 0)
                 return yield* new Rejected({ reason: "invalid" })
               const run = yield* authorize(input)
+              const authorizedLimit = dispatchLimit(run, input.dispatch)
+              if (authorizedLimit === undefined) return yield* new Rejected({ reason: "unauthorized" })
               if (
                 yield* db
                   .select({ id: MemoryTidyAttemptTable.id })
@@ -285,7 +356,9 @@ const layer = Layer.effect(
               )
                 return yield* new Rejected({ reason: "duplicate" })
               const now = yield* Clock.currentTimeMillis
-              const day = new Date(now).toISOString().slice(0, 10)
+              const day = utcDay(now)
+              if (run.budget_pause?.budget === "day" && day <= run.budget_pause.utcDay)
+                return yield* new Rejected({ reason: "conflict" })
               yield* db
                 .insert(MemoryTidyDayTable)
                 .values({ day, token_limit: run.daily_limit })
@@ -301,10 +374,29 @@ const layer = Layer.effect(
               const daily = yield* readUsage(db, { day })
               if (!limit) return yield* Effect.die("Missing daily allowance after upsert")
               // A new UTC day never restores this task's own allowance.
-              if (input.tokens > run.token_limit - total.charged)
-                return yield* new Rejected({ reason: "limit", budget: "run" })
+              if (run.budget_pause && total.unknown > 0) return yield* new Rejected({ reason: "conflict" })
+              if (input.tokens > authorizedLimit - total.charged)
+                return yield* new Rejected({
+                  reason: "limit",
+                  budget: "run",
+                  utcDay: day,
+                  minimumTokens: total.charged + input.tokens,
+                })
               if (input.tokens > limit.token_limit - daily.charged)
-                return yield* new Rejected({ reason: "limit", budget: "day" })
+                return yield* new Rejected({ reason: "limit", budget: "day", utcDay: day })
+              if (run.budget_pause && input.dispatch)
+                yield* db
+                  .update(MemoryTidyRunTable)
+                  .set({
+                    budget_pause: null,
+                    budget_resume: {
+                      checkpoint: run.budget_pause.id,
+                      owner: input.dispatch.id,
+                      tokens: authorizedLimit,
+                    },
+                  })
+                  .where(eq(MemoryTidyRunTable.id, run.id))
+                  .run()
               yield* db
                 .insert(MemoryTidyAttemptTable)
                 .values({

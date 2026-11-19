@@ -7681,6 +7681,13 @@ export type MemoryTidyRequest = {
   dailyTokens?: number
 }
 
+export type MemoryTidyPause = {
+  id: string
+  budget: "run" | "day"
+  utcDay: string
+  minimumTokens?: number
+}
+
 export type MemoryTidyTask = {
   id: string
   requestID: string
@@ -7691,6 +7698,8 @@ export type MemoryTidyTask = {
   tokens: number
   dailyTokens: number
   state: "active" | "completed" | "cancelled" | "failed"
+  budgetPause?: MemoryTidyPause
+  resumedTokenLimit?: number
   executing: boolean
   usage: {
     known: number
@@ -17612,6 +17621,8 @@ export type V2MemoryStartTidyData = {
       workspace?: string
     }
     layer?: "project" | "user"
+    checkpoint?: string
+    resumeTokens?: string
   }
   url: "/api/memory/tidy/{id}/start"
 }

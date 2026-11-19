@@ -1,4 +1,5 @@
 import { Memory } from "@zaovra-ai/schema/memory"
+import { PositiveInt } from "@zaovra-ai/schema/schema"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { LocationQuery, locationQueryOpenApi } from "./location"
@@ -167,7 +168,11 @@ export const MemoryGroup = HttpApiGroup.make("server.memory")
   .add(
     HttpApiEndpoint.post("memory.startTidy", "/api/memory/tidy/:id/start", {
       params: { id: Schema.String },
-      query: Query,
+      query: Schema.Struct({
+        ...Query.fields,
+        checkpoint: Schema.optional(Schema.String),
+        resumeTokens: Schema.NumberFromString.pipe(Schema.decodeTo(PositiveInt), Schema.optional),
+      }),
       success: Schema.Struct({ data: Memory.TidyTask }),
       error: MemoryTidyError,
     })

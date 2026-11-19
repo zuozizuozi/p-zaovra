@@ -26,13 +26,17 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     sent: false,
     busy: false,
     error: false,
+    resumeTokens: {} as Record<string, string>,
   })
   const available = createMemo(() =>
-    models.list().filter((item) =>
-      item.api?.npm === "@ai-sdk/openai" &&
-      (Boolean(item.api.url?.trim()) || item.provider.id === "openai") &&
-      models.type({ providerID: item.provider.id, modelID: item.id }) === "chat",
-    ),
+    models
+      .list()
+      .filter(
+        (item) =>
+          item.api?.npm === "@ai-sdk/openai" &&
+          (Boolean(item.api.url?.trim()) || item.provider.id === "openai") &&
+          models.type({ providerID: item.provider.id, modelID: item.id }) === "chat",
+      ),
   )
   const selected = createMemo(() =>
     available().find((item) => item.id === state.model?.modelID && item.provider.id === state.model?.providerID),
@@ -133,9 +137,17 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     if (state.busy || (action === "start" && blocked(task.layer))) return
     setState({ busy: true, error: false })
     const input = { location, layer: task.layer, id: task.id }
+    const pause = task.budgetPause
     await (
       action === "start"
-        ? client.startTidy(input, { throwOnError: true })
+        ? client.startTidy(
+            {
+              ...input,
+              checkpoint: pause?.id,
+              resumeTokens: pause?.budget === "run" ? String(Number(state.resumeTokens[task.id])) : undefined,
+            },
+            { throwOnError: true },
+          )
         : client.cancelTidy(input, { throwOnError: true })
     ).then(
       () => {
@@ -307,7 +319,9 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
                 task.state === "active"
                   ? task.executing
                     ? "settings.memory.task.running"
-                    : "settings.memory.task.paused"
+                    : task.usage.unknown > 0
+                      ? "settings.memory.task.pausedUnknown"
+                      : "settings.memory.task.paused"
                   : task.state === "completed"
                     ? "settings.memory.task.completed"
                     : task.state === "cancelled"
@@ -319,8 +333,9 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
               {task.model.providerID} / {task.model.id} · {new Date(task.time.created).toLocaleString()}
             </p>
             <p class="text-xs">
-              {language.t("settings.memory.task.charged")}: {task.usage.charged} / {task.tokens} ·{" "}
-              {language.t("settings.memory.task.dailyTokens")}: {task.dailyTokens}
+              {language.t("settings.memory.task.charged")}: {task.usage.charged} /{" "}
+              {task.resumedTokenLimit ?? task.tokens} · {language.t("settings.memory.task.dailyTokens")}:{" "}
+              {task.dailyTokens}
             </p>
             <Show when={task.usage.unknown > 0}>
               <p class="text-xs">
@@ -328,14 +343,48 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
               </p>
             </Show>
             <Show when={task.state === "active"}>
+              <Show when={task.budgetPause}>
+                {(pause) => (
+                  <Show
+                    when={pause().budget === "run"}
+                    fallback={
+                      <p class="text-xs">{language.t("settings.memory.task.resumeDay", { day: pause().utcDay })}</p>
+                    }
+                  >
+                    <label class="text-xs">
+                      {language.t("settings.memory.task.resumeLimit")}
+                      <TextInputV2
+                        type="number"
+                        min={Math.max((task.resumedTokenLimit ?? task.tokens) + 1, pause().minimumTokens ?? 0)}
+                        step="1"
+                        value={state.resumeTokens[task.id] ?? ""}
+                        onInput={(event) => setState("resumeTokens", task.id, event.currentTarget.value)}
+                        disabled={state.busy || task.executing}
+                      />
+                    </label>
+                  </Show>
+                )}
+              </Show>
               <div class="flex gap-2">
-                <Show when={!task.executing}>
+                <Show when={!task.executing && task.usage.unknown === 0}>
                   <ButtonV2
                     variant="neutral"
-                    disabled={state.busy || blocked(task.layer) || task.directory !== props.directory}
+                    disabled={
+                      state.busy ||
+                      blocked(task.layer) ||
+                      task.directory !== props.directory ||
+                      (task.budgetPause?.budget === "run" &&
+                        (!Number.isSafeInteger(Number(state.resumeTokens[task.id])) ||
+                          Number(state.resumeTokens[task.id]) <= (task.resumedTokenLimit ?? task.tokens) ||
+                          Number(state.resumeTokens[task.id]) < (task.budgetPause.minimumTokens ?? 0)))
+                    }
                     onClick={() => void act(task, "start")}
                   >
-                    {language.t("settings.memory.task.continue")}
+                    {language.t(
+                      task.budgetPause?.budget === "run"
+                        ? "settings.memory.task.confirmResume"
+                        : "settings.memory.task.continue",
+                    )}
                   </ButtonV2>
                 </Show>
                 <ButtonV2 variant="neutral" disabled={state.busy} onClick={() => void act(task, "cancel")}>

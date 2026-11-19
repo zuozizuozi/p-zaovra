@@ -6140,6 +6140,8 @@ export class Memory extends HeyApiClient {
         workspace?: string
       }
       layer?: "project" | "user"
+      checkpoint?: string
+      resumeTokens?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6151,6 +6153,8 @@ export class Memory extends HeyApiClient {
             { in: "path", key: "id" },
             { in: "query", key: "location" },
             { in: "query", key: "layer" },
+            { in: "query", key: "checkpoint" },
+            { in: "query", key: "resumeTokens" },
           ],
         },
       ],

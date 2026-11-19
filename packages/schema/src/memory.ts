@@ -155,6 +155,14 @@ export const TidyRequest = Schema.Struct({
 }).annotate({ identifier: "Memory.TidyRequest" })
 export interface TidyRequest extends Schema.Schema.Type<typeof TidyRequest> {}
 
+export const TidyPause = Schema.Struct({
+  id: Schema.String,
+  budget: Schema.Literals(["run", "day"]),
+  utcDay: Schema.String,
+  minimumTokens: PositiveInt.pipe(optional),
+}).annotate({ identifier: "Memory.TidyPause" })
+export interface TidyPause extends Schema.Schema.Type<typeof TidyPause> {}
+
 export const TidyTask = Schema.Struct({
   id: Schema.String,
   requestID: Schema.String,
@@ -165,6 +173,8 @@ export const TidyTask = Schema.Struct({
   tokens: PositiveInt,
   dailyTokens: PositiveInt,
   state: Schema.Literals(["active", "completed", "cancelled", "failed"]),
+  budgetPause: TidyPause.pipe(optional),
+  resumedTokenLimit: PositiveInt.pipe(optional),
   // Active durable tasks can be ready or paused; opening this view never resumes them.
   executing: Schema.Boolean,
   usage: Schema.Struct({

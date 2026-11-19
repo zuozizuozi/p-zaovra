@@ -1137,11 +1137,18 @@ type Endpoint16_7Input = {
   readonly id: Endpoint16_7Request["params"]["id"]
   readonly location?: Endpoint16_7Request["query"]["location"]
   readonly layer?: Endpoint16_7Request["query"]["layer"]
+  readonly checkpoint?: Endpoint16_7Request["query"]["checkpoint"]
+  readonly resumeTokens?: Endpoint16_7Request["query"]["resumeTokens"]
 }
 const Endpoint16_7 = (raw: RawClient["server.memory"]) => (input: Endpoint16_7Input) =>
   raw["memory.startTidy"]({
     params: { id: input["id"] },
-    query: { location: input["location"], layer: input["layer"] },
+    query: {
+      location: input["location"],
+      layer: input["layer"],
+      checkpoint: input["checkpoint"],
+      resumeTokens: input["resumeTokens"],
+    },
   }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),

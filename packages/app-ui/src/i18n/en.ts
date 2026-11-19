@@ -32,6 +32,10 @@ export const dict = {
   "settings.memory.task.charged": "Charged tokens",
   "settings.memory.task.unknown": "Unconfirmed reservations retained",
   "settings.memory.task.continue": "Start / continue",
+  "settings.memory.task.resumeDay": "The daily limit renews after {{day}} (UTC). Continue this task after it renews.",
+  "settings.memory.task.resumeLimit": "New total token limit for this task (includes tokens already used)",
+  "settings.memory.task.confirmResume": "Approve new limit and continue",
+  "settings.memory.task.pausedUnknown": "Paused while usage is unconfirmed",
   "settings.memory.task.stop": "Cancel task",
   "session.revert.planChanged":
     "The restore plan changed. Open Reset to this point again, review the updated files, and confirm.",

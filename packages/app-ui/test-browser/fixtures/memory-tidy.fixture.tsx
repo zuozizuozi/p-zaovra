@@ -64,7 +64,7 @@ mock.module("@/context/server-sync", () => ({
 }))
 const { SettingsMemoryV2 } = await import("../../src/components/settings-v2/memory")
 let dispose: (() => void) | undefined
-const calls: { path: string; body: Record<string, unknown> }[] = []
+const calls: { path: string; body: Record<string, unknown>; query: URLSearchParams }[] = []
 let failure: "prepare" | "start" | "automatic" | undefined
 let automatic: MemoryAutomaticPreference | null = null
 let tasks: MemoryTidyTask[] = []
@@ -101,7 +101,7 @@ async function mount(initial: MemoryTidyTask[] = []) {
     baseUrl: "http://tidy.invalid",
     throwOnError: true,
     fetch: async (request) => {
-      const path = new URL(request.url).pathname
+      const { pathname: path, searchParams: query } = new URL(request.url)
       if (request.method === "GET" && path === `/api/memory/${failedRead}`) {
         readFailures++
         return Response.json({ message: "Read unavailable" }, { status: 503 })
@@ -132,12 +132,12 @@ async function mount(initial: MemoryTidyTask[] = []) {
             },
           ],
         })
-      const layer = new URL(request.url).searchParams.get("layer") ?? "project"
+      const layer = query.get("layer") ?? "project"
       if (request.method === "GET" && path === "/api/memory/tidy")
         return Response.json({ data: tasks.filter((task) => task.layer === layer) })
       const text = await request.text()
       const body = text ? (JSON.parse(text) as Record<string, unknown>) : {}
-      calls.push({ path, body })
+      calls.push({ path, body, query })
       if (hold) await hold
       if (path === "/api/memory/automatic") {
         const input = body as {
@@ -366,7 +366,8 @@ test("automatic consent has a separate confirmation, idempotent retry and an exp
   })
   button("Disable automatic tidy and stop its task").click()
   await until(() => calls.length === 3 && button("Review automatic project tidy") !== undefined)
-  expect(calls[2]).toEqual({ path: "/api/memory/automatic/disable", body: { expected: confirmed.requestID } })
+  expect(calls[2].path).toBe("/api/memory/automatic/disable")
+  expect(calls[2].body).toEqual({ expected: confirmed.requestID })
   expect(tasks).toEqual([])
   expect(localWrites).toBe(0)
 })
@@ -472,13 +473,51 @@ test("reopening a paused task reads without spending and cancellation retains un
       time: { created: 1, finished: null },
     },
   ])
-  await until(() => button("Start / continue") !== undefined)
+  await until(() => button("Cancel task") !== undefined)
+  expect(button("Start / continue")).toBeUndefined()
   expect(calls).toHaveLength(0)
+  expect(document.body.textContent).toContain("Paused while usage is unconfirmed")
   expect(document.body.textContent).toContain("Unconfirmed reservations retained: 100")
   button("Cancel task").click()
   await until(() => document.body.textContent?.includes("Cancelled") === true)
   expect(calls.map((call) => call.path)).toEqual(["/api/memory/tidy/tidy-existing/cancel"])
   expect(document.body.textContent).toContain("110 / 200000")
+})
+
+test("a single-run checkpoint needs explicit approval of a larger total", async () => {
+  await mount([
+    {
+      id: "tidy-budget",
+      requestID: "admitted",
+      sessionID: "session-tidy",
+      layer: "project",
+      directory: "/tidy-project",
+      model: { id: "chat-b", providerID: "configured" },
+      tokens: 200,
+      dailyTokens: 1000,
+      state: "active",
+      budgetPause: { id: "checkpoint", budget: "run", utcDay: "2026-11-18", minimumTokens: 350 },
+      executing: false,
+      usage: { known: 160, reserved: 0, charged: 160, unknown: 0 },
+      time: { created: 1, finished: null },
+    },
+  ])
+  await until(() => !!button("Approve new limit and continue"))
+  const approve = button("Approve new limit and continue")
+  const input = document.querySelector<HTMLInputElement>('[data-slot="memory-tidy-task"] input[type="number"]')!
+  expect(approve.disabled).toBe(true)
+  input.value = "349"
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+  expect(approve.disabled).toBe(true)
+  expect(calls).toHaveLength(0)
+  input.value = "350"
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+  expect(approve.disabled).toBe(false)
+  approve.click()
+  await until(() => calls.length === 1)
+  expect(calls[0].path).toBe("/api/memory/tidy/tidy-budget/start")
+  expect(calls[0].query.get("checkpoint")).toBe("checkpoint")
+  expect(calls[0].query.get("resumeTokens")).toBe("350")
 })
 
 test("changing the project invalidates an unsubmitted confirmation", async () => {

@@ -69,6 +69,7 @@ export const migrations = (
     import("./migration/20261115184829_memory-file-links"),
     import("./migration/20261116054623_memory-automatic"),
     import("./migration/20261116061652_read-receipt"),
+    import("./migration/20261119152350_memory-tidy-resume"),
     import("./migration/20261119153927_memory-extracted-digest"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

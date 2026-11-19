@@ -150,6 +150,7 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
     expect(paused.state).toBe("active")
     expect(paused.executing).toBe(false)
     expect(paused.usage).toEqual(live.usage)
+    expect((await read("/" + task.id + "/start", {})).status).toBe(409)
     const usage = await fetch(new URL("/api/usage?memoryTidy=separate", reopened.url))
     expect(usage.status, await usage.clone().text()).toBe(200)
     const totals = (await usage.json()).data

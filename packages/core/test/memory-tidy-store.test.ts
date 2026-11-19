@@ -247,20 +247,55 @@ test("reopening the database retains unknown reservations and the original grant
       const h = yield* host
       const run = yield* h.store.create(request, h.create)
       yield* h.store.reserve({ ...authority(run), attemptID: "disconnected", tokens: 160 })
-      return run
+      const waiting = yield* h.store.create(
+        {
+          ...request,
+          scope: Memory.Scope.user,
+          requestID: "durable-budget",
+          tokens: 80,
+        },
+        h.create,
+      )
+      const scope = authority(waiting)
+      yield* h.store.reserve({ ...scope, attemptID: "worked-before-restart", tokens: 60 })
+      yield* h.store.settle("worked-before-restart", 40)
+      const denied = yield* h.store.reserve({ ...scope, attemptID: "not-sent", tokens: 49 }).pipe(Effect.flip)
+      expect(denied).toMatchObject({ reason: "limit", budget: "run" })
+      yield* h.store.pauseBudget({ ...scope, budget: "run", minimumTokens: denied.minimumTokens })
+      return { run, waiting: (yield* h.store.get(waiting.id))! }
     }).pipe(Effect.provide(reopen()), Effect.scoped),
   )
   await Effect.runPromise(
     Effect.gen(function* () {
       const h = yield* host
       const retry = yield* h.store.create(request, () => Effect.die("must not create after restart"))
-      expect(retry).toEqual(first)
-      expect(yield* h.store.usage({ runID: first.id })).toEqual({ known: 0, reserved: 160, charged: 160, unknown: 1 })
+      expect(retry).toEqual(first.run)
+      expect(yield* h.store.usage({ runID: first.run.id })).toEqual({
+        known: 0,
+        reserved: 160,
+        charged: 160,
+        unknown: 1,
+      })
       expect(
-        (yield* h.store.reserve({ ...authority(first), attemptID: "new", tokens: 160 }).pipe(Effect.flip)).reason,
+        (yield* h.store.reserve({ ...authority(first.run), attemptID: "new", tokens: 160 }).pipe(Effect.flip)).reason,
       ).toBe("limit")
       yield* h.store.settle("disconnected", 30)
-      expect(yield* h.store.usage({ runID: first.id })).toEqual({ known: 30, reserved: 0, charged: 30, unknown: 0 })
+      expect(yield* h.store.usage({ runID: first.run.id })).toEqual({ known: 30, reserved: 0, charged: 30, unknown: 0 })
+      const restored = yield* h.store.get(first.waiting.id)
+      expect(restored).toEqual(first.waiting)
+      expect(restored?.budget_pause?.minimumTokens).toBe(89)
+      yield* h.store.reserve({
+        ...authority(first.waiting),
+        attemptID: "approved-after-reopen",
+        tokens: 49,
+        dispatch: { id: "reopened-owner", checkpoint: restored!.budget_pause!.id, tokens: 90 },
+      })
+      expect(yield* h.store.usage({ runID: first.waiting.id })).toEqual({
+        known: 40,
+        reserved: 49,
+        charged: 89,
+        unknown: 1,
+      })
     }).pipe(Effect.provide(reopen()), Effect.scoped),
   )
 })
@@ -399,6 +434,44 @@ it.effect("cancellation preserves unknown usage; late settlement is idempotent b
     expect((yield* h.store.settle("late", 41).pipe(Effect.flip)).reason).toBe("conflict")
     expect(yield* h.store.usage({ runID: run.id })).toEqual({ known: 40, reserved: 0, charged: 40, unknown: 0 })
     expect((yield* h.store.authorize(authority(run)).pipe(Effect.flip)).reason).toBe("unauthorized")
+  }),
+)
+
+it.effect("only a fresh checkpoint can reserve an explicit extension and transfer execution ownership", () =>
+  Effect.gen(function* () {
+    const h = yield* host
+    const run = yield* h.store.create(request, h.create)
+    const input = authority(run)
+    yield* h.store.reserve({ ...input, attemptID: "known-before-pause", tokens: 160 })
+    expect((yield* h.store.pauseBudget({ ...input, budget: "run" }).pipe(Effect.flip)).reason).toBe("conflict")
+    yield* h.store.settle("known-before-pause", 160)
+    const denied = yield* h.store.reserve({ ...input, attemptID: "unsent", tokens: 60 }).pipe(Effect.flip)
+    expect(denied).toMatchObject({ reason: "limit", budget: "run", minimumTokens: 220 })
+    yield* h.store.pauseBudget({ ...input, budget: "run", minimumTokens: denied.minimumTokens })
+    const pause = (yield* h.store.get(run.id))!.budget_pause!
+    yield* adjust("24 hours")
+    expect((yield* h.store.reserve({ ...input, attemptID: "unowned", tokens: 60 }).pipe(Effect.flip)).reason).toBe(
+      "unauthorized",
+    )
+    const dispatch = { id: "explicit-owner", checkpoint: pause.id, tokens: 240 }
+    yield* h.store.reserve({ ...input, attemptID: "first-after-pause", tokens: 60, dispatch })
+    expect(yield* h.store.get(run.id)).toMatchObject({
+      input: run.input,
+      token_limit: 200,
+      budget_pause: null,
+      budget_resume: { checkpoint: pause.id, owner: dispatch.id, tokens: 240 },
+    })
+    expect(
+      (yield* h.store
+        .reserve({
+          ...input,
+          attemptID: "second-owner",
+          tokens: 10,
+          dispatch: { ...dispatch, id: "other-owner", tokens: 300 },
+        })
+        .pipe(Effect.flip)).reason,
+    ).toBe("unauthorized")
+    expect(yield* h.store.usage({ runID: run.id })).toEqual({ known: 160, reserved: 60, charged: 220, unknown: 1 })
   }),
 )
 

@@ -26,7 +26,11 @@ export type Request = {
 export interface Interface {
   /** Admit once, without starting provider work. The budgeted host owns the later wake. */
   readonly prepare: (input: Request, modelAvailable?: boolean) => Effect.Effect<View, MemoryTidyStore.Rejected>
-  readonly start: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
+  readonly start: (
+    id: string,
+    layer?: "project" | "user",
+    resume?: MemoryTidyStore.Resume,
+  ) => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly get: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly list: (layer?: "project" | "user") => Effect.Effect<View[]>
   readonly cancel: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
@@ -98,7 +102,7 @@ export const layer = Layer.effect(
     })
     return Service.of({
       get,
-      start: Effect.fn("MemoryTidy.start")(function* (id, layer) {
+      start: Effect.fn("MemoryTidy.start")(function* (id, layer, resume) {
         const current = yield* get(id, layer)
         if (current.run.state !== "active") return current
         if (current.run.directory !== location.directory)
@@ -106,6 +110,7 @@ export const layer = Layer.effect(
         yield* tasks.start(
           id,
           config.entries().pipe(Effect.map((entries) => Config.latest(entries, "memory")?.enabled === true)),
+          resume,
         )
         return yield* get(id, layer)
       }),

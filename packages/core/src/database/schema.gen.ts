@@ -108,6 +108,8 @@ export default {
           \`token_limit\` integer NOT NULL,
           \`daily_limit\` integer NOT NULL,
           \`state\` text NOT NULL,
+          \`budget_pause\` text,
+          \`budget_resume\` text,
           \`time_created\` integer NOT NULL,
           \`time_finished\` integer
         );

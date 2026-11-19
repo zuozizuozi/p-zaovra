@@ -28,6 +28,8 @@ export interface Interface {
     wire: HttpClientRequest.HttpClientRequest
     inputLimit: number
     outputLimit: number
+    dispatch?: MemoryTidyStore.Dispatch
+    canPause?: boolean
   }) => Effect.Effect<void, LLMError>
   /** A completed parser receipt can settle only its own admitted physical attempt. */
   readonly complete: (runID: string, receipt: CompletedAttempt) => Effect.Effect<"settled" | "unknown", LLMError>
@@ -54,8 +56,22 @@ const layer = Layer.effect(
             ...input.authority,
             attemptID: input.id,
             tokens: input.inputLimit + bounded,
+            dispatch: input.dispatch,
           })
           .pipe(
+            Effect.tapError((error) =>
+              error.reason === "limit" && error.budget && input.canPause
+                ? store
+                    .pauseBudget({
+                      ...input.authority,
+                      budget: error.budget,
+                      utcDay: error.utcDay,
+                      minimumTokens: error.minimumTokens,
+                      dispatch: input.dispatch,
+                    })
+                    .pipe(Effect.catchTag("MemoryTidy.Rejected", () => Effect.void))
+                : Effect.void,
+            ),
             Effect.mapError(
               (error) =>
                 new LLMError({

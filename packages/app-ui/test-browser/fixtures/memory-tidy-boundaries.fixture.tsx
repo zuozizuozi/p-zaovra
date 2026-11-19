@@ -239,11 +239,9 @@ test("project recovery freeze leaves user scope available and cancellation prese
   expect(action().disabled).toBe(true)
   scope.value = "user"
   scope.dispatchEvent(new Event("change", { bubbles: true }))
-  await until(() => !!button("Start / continue"))
-  expect(button("Start / continue").disabled).toBe(false)
-  button("Start / continue").click()
-  await until(() => !button("Cancel task").disabled && !button("Start / continue"))
-  expect(calls.map((x) => x.path)).toEqual(["/api/memory/tidy/tidy-user/start"])
+  await until(() => !!button("Cancel task") && !button("Cancel task").disabled)
+  expect(button("Start / continue")).toBeUndefined()
+  expect(calls).toEqual([])
   button("Cancel task").click()
   await until(() => document.body.textContent?.includes("Cancelled") === true)
   expect(document.body.textContent).toContain("Unconfirmed reservations retained: 100")
@@ -258,7 +256,7 @@ test("project recovery freeze leaves user scope available and cancellation prese
   scope.value = "project"
   scope.dispatchEvent(new Event("change", { bubbles: true }))
   expect(action().disabled).toBe(true)
-  expect(calls).toHaveLength(2)
+  expect(calls.map((item) => item.path)).toEqual(["/api/memory/tidy/tidy-user/cancel"])
 })
 for (const change of ["directory", "server", "close"] as const)
   test(`confirmed in-flight prepare retains original identity and target on ${change}`, async () => {

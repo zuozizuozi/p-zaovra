@@ -1,9 +1,10 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "49dabb06-7b14-4d49-ba5c-813631e7e414",
+  "id": "13b2fe6e-873d-4fb1-8d06-fdeefefba88e",
   "prevIds": [
-    "af9e00eb-a724-42cc-89cc-87da4e9dfd89"
+    "49dabb06-7b14-4d49-ba5c-813631e7e414",
+    "3ad7c1b3-188e-459a-95a8-2ec8985c5d95"
   ],
   "ddl": [
     {
@@ -815,6 +816,26 @@
       "default": null,
       "generated": null,
       "name": "state",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "budget_pause",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "budget_resume",
       "entityType": "columns",
       "table": "memory_tidy_run"
     },
