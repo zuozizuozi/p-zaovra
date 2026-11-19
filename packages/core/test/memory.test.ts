@@ -257,6 +257,19 @@ describe("memory store", () => {
     }),
   )
 
+  it.live("search includes distant query matches in a long historical message within the session passage limit", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const store = yield* MemoryStore.Service
+      yield* say(first, 1, "user", "Review the resync candidate." + " Details.".repeat(70) + " The main commit was 0123456.")
+      const found = yield* store.search({ scope: project, place, query: "resync candidate main commit" })
+      const passages = found.sessions[0]!.passages
+      expect(passages.length).toBeLessThanOrEqual(3)
+      expect(passages.some((item) => item.text.includes("resync candidate"))).toBe(true)
+      expect(passages.some((item) => item.text.includes("main commit was 0123456"))).toBe(true)
+    }),
+  )
+
   it.live("search finds what was said in other conversations, not tool input and not the asking conversation", () =>
     Effect.gen(function* () {
       yield* setup

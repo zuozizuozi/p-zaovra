@@ -1048,14 +1048,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               passages: [] as Array<{ role: string; text: string; score: number }>,
             }
             match.score = Math.max(match.score, score)
-            match.passages.push({
-              role: row.type,
-              text: passage(
-                text,
-                words.map((word) => word.text),
-              ),
-              score,
-            })
+            match.passages.push({ role: row.type, text, score })
             return found.set(row.session_id, match)
           },
           new Map<
@@ -1074,15 +1067,26 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
           sessions: Array.from(sessions.values())
             .toSorted((left, right) => right.score - left.score || right.time - left.time)
             .slice(0, limit)
-            .map((match) => ({
-              sessionID: match.sessionID,
-              title: match.title,
-              time: match.time,
-              passages: match.passages
-                .toSorted((left, right) => right.score - left.score)
-                .slice(0, 3)
-                .map((item) => ({ role: item.role, text: item.text })),
-            })),
+            .map((match) => {
+              const selected = match.passages.toSorted((left, right) => right.score - left.score).slice(0, 3)
+              const keywords = words.map((word) => word.text)
+              const passages = selected.map((item) => ({ role: item.role, text: passage(item.text, keywords) }))
+              // Prefer distinct messages. Use spare excerpts for query terms beyond their opening matches.
+              for (const item of selected) {
+                if (passages.length === 3) break
+                const lower = item.text.toLowerCase()
+                while (passages.length < 3) {
+                  const missing = keywords.filter(
+                    (word) => lower.includes(word) && !passages.some((entry) => entry.text.toLowerCase().includes(word)),
+                  )
+                  if (!missing.length) break
+                  const text = passage(item.text, missing)
+                  if (!missing.some((word) => text.toLowerCase().includes(word))) break
+                  passages.push({ role: item.role, text })
+                }
+              }
+              return { sessionID: match.sessionID, title: match.title, time: match.time, passages }
+            }),
         }
       })
 
