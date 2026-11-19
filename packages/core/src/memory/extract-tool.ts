@@ -252,7 +252,7 @@ const layer = Layer.effectDiscard(
                       sessionID: id,
                       seq: row.seq,
                       extractedMessageID: row.id,
-                      extractedDigest: input.source.digest,
+                      extractedPassage: { text, quote: input.quote },
                     })
                     return { kept: note !== undefined, ...(note ? { note } : {}) }
                   }),

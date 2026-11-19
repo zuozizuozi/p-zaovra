@@ -39,7 +39,7 @@ export interface WriteInput {
   readonly seq?: number
   /** Host-validated historical source. One extracted note per message, independent of model wording. */
   readonly extractedMessageID?: SessionMessage.ID
-  readonly extractedDigest?: string
+  readonly extractedPassage?: { text: string; quote: string }
   /** Host-validated prior Read evidence, inserted atomically with a new model note. */
   readonly readFiles?: ReadonlyArray<Memory.FileBinding>
 }
@@ -809,8 +809,15 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
               const key = input.extractedMessageID
                 ? `extracted:${Hash.sha256(JSON.stringify([input.sessionID, input.extractedMessageID, input.seq]))}`
                 : `text:${textHash(text)}`
-              if (input.extractedDigest !== undefined) {
-                if (!input.extractedMessageID || !/^[a-f0-9]{64}$/.test(input.extractedDigest)) return undefined
+              const digest = input.extractedPassage && Hash.sha256(input.extractedPassage.text)
+              if (input.extractedPassage) {
+                if (!input.extractedMessageID || (yield* suppressed(input.scope, input.extractedPassage.text)))
+                  return undefined
+                if (
+                  input.extractedPassage.quote !== input.extractedPassage.text &&
+                  (yield* suppressed(input.scope, input.extractedPassage.quote))
+                )
+                  return undefined
                 const link = yield* binding(input.scope)
                 const deleted = yield* db
                   .select({ id: MemoryNoteTable.id })
@@ -818,7 +825,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                   .where(
                     and(
                       inArray(MemoryNoteTable.scope, link ? [input.scope, link.legacy_scope] : [input.scope]),
-                      eq(MemoryNoteTable.extracted_digest, input.extractedDigest),
+                      eq(MemoryNoteTable.extracted_digest, digest!),
                       sql`${MemoryNoteTable.time_deleted} IS NOT NULL`,
                     ),
                   )
@@ -861,7 +868,7 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
                 seq: input.seq,
                 time_observed: Date.now(),
                 ...(files ? { files, file_revision: 1 } : {}),
-                extracted_digest: input.extractedDigest,
+                extracted_digest: digest,
               })
             }),
           )

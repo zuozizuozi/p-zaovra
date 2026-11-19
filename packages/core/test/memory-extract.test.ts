@@ -218,6 +218,39 @@ for (const legacy of [false, true])
       }),
     ))
 
+test("tidy respects an erased user note when its full passage or exact quote matches", () =>
+  withExtraction((h) =>
+    Effect.gen(function* () {
+      const erased = "Keep billing exports on the local disk."
+      const note = yield* h.store.write({
+        scope: h.project,
+        origin: "user",
+        kind: "decision",
+        status: "verified",
+        text: erased,
+      })
+      yield* h.store.remove(note!.id)
+      const run = yield* h.grant()
+      for (const [source, quote, expected] of [
+        [erased, "billing exports", false],
+        [`Prior decision: ${erased}`, erased, false],
+        ["Run weekly backups.", "weekly backups", true],
+      ] as const) {
+        const session = yield* h.create()
+        yield* h.turn(session.id, source)
+        const passage = (yield* h.read(run.session_id, session.id)).find((item) => item.role === "assistant")!
+        const result = yield* h.call(run.session_id, {
+          action: "save",
+          kind: "decision",
+          source: passage.source,
+          quote,
+          text: expected ? "Back up once per week." : "Exported bills stay on this computer.",
+        })
+        expect(result.output?.structured).toMatchObject({ kept: expected })
+      }
+    }),
+  ))
+
 test("ordinary, cancelled, switched-model and wrong-layer invocations cannot read or save history", () =>
   withExtraction((h, state) =>
     Effect.gen(function* () {
