@@ -1,3 +1,4 @@
+import { waitForReadiness } from "../location"
 import { MemoryTidyExecution } from "@zaovra-ai/core/memory/tidy-execution"
 import { Location } from "@zaovra-ai/core/location"
 import { MemoryAutomatic } from "@zaovra-ai/core/memory/automatic"
@@ -25,6 +26,7 @@ export const MemoryAutomaticHandler = HttpApiBuilder.group(Api, "server.memoryAu
         const automatic = yield* MemoryAutomatic.Service
         const location = yield* Location.Service
         if (location.workspaceID) return yield* error({ reason: "unauthorized" })
+        yield* waitForReadiness("catalog")
         const preference = yield* automatic
           .confirm(location.directory, ctx.payload, yield* MemoryTidyExecution.supportsSelection(ctx.payload.model))
           .pipe(Effect.mapError(error))

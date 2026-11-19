@@ -7,6 +7,8 @@ import { MemoryGroup } from "@zaovra-ai/protocol/groups/memory"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
+import { PluginV2 } from "@zaovra-ai/core/plugin"
+import { PluginInternal } from "@zaovra-ai/core/plugin/internal"
 import { Catalog } from "@zaovra-ai/core/catalog"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
@@ -38,6 +40,7 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
   const runtime = ManagedRuntime.make(
     AppNodeBuilder.build(
       LayerNode.group([
+        PluginV2.node,
         Catalog.node,
         MemoryTidy.node,
         MemoryTidyTasks.node,
@@ -127,8 +130,10 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
       }),
     ).pipe(Effect.provideService(Scope.Scope, runtime.scope)),
   )
+  await runtime.runPromise(PluginV2.Service.use((plugins) => plugins.add(PluginInternal.readyID, () => Effect.void)))
   const context = await runtime.runPromise(
     Effect.context<
+      | PluginV2.Service
       | Catalog.Service
       | MemoryTidy.Service
       | MemoryTidyStore.Service

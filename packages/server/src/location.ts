@@ -15,14 +15,17 @@ export class LocationMiddleware extends HttpApiMiddleware.Service<LocationMiddle
   "@zaovra/HttpApiLocation",
 ) {}
 
+/** Configured providers appear only after the Location's catalog plugins finish startup. */
+export const waitForReadiness = (kind: "catalog" | "agents") =>
+  PluginV2.Service.use((plugins) =>
+    plugins
+      .wait(kind === "agents" ? PluginInternal.agentReadyID : PluginInternal.readyID)
+      .pipe(Effect.timeout("15 seconds"), Effect.orDie),
+  )
+
 export function response<A, E, R>(data: Effect.Effect<A, E, R>, readiness?: "agents" | "catalog") {
   return Effect.gen(function* () {
-    if (readiness) {
-      const plugins = yield* PluginV2.Service
-      yield* plugins
-        .wait(readiness === "agents" ? PluginInternal.agentReadyID : PluginInternal.readyID)
-        .pipe(Effect.timeout("15 seconds"), Effect.orDie)
-    }
+    if (readiness) yield* waitForReadiness(readiness)
     const location = yield* Location.Service
     return {
       location: new Location.Info({

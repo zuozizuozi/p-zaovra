@@ -26,10 +26,21 @@ const { createEmbeddedRoutes } = await import("./routes")
 const { Layer } = await import("effect")
 const { HttpRouter, HttpServer } = await import("effect/unstable/http")
 
+const enabledConfig = {
+  memory: { enabled: true },
+  provider: {
+    offline: {
+      npm: "@ai-sdk/openai",
+      options: { baseURL: "http://127.0.0.1:1/v1" },
+      models: { offline: { limit: { context: 32000, output: 32 } } },
+    },
+  },
+}
+
 test("production routes bind tidy globals outside Location without starting a provider", async () => {
   const directory = path.join(root!, "project")
   await fs.mkdir(directory, { recursive: true })
-  await Bun.write(path.join(directory, "zaovra.json"), JSON.stringify({ memory: { enabled: true } }))
+  await Bun.write(path.join(directory, "zaovra.json"), JSON.stringify(enabledConfig))
   const web = HttpRouter.toWebHandler(createEmbeddedRoutes().pipe(Layer.provide(HttpServer.layerServices)), {
     disableLogger: true,
   })
@@ -71,7 +82,7 @@ test("production routes bind tidy globals outside Location without starting a pr
 test("automatic HTTP settings default off, isolate directories and reject stale consent", async () => {
   const directory = path.join(root!, "automatic-project")
   await fs.mkdir(directory, { recursive: true })
-  await Bun.write(path.join(directory, "zaovra.json"), JSON.stringify({ memory: { enabled: true } }))
+  await Bun.write(path.join(directory, "zaovra.json"), JSON.stringify(enabledConfig))
   const web = HttpRouter.toWebHandler(createEmbeddedRoutes().pipe(Layer.provide(HttpServer.layerServices)), {
     disableLogger: true,
   })

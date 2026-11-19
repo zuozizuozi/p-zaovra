@@ -1,3 +1,4 @@
+import { waitForReadiness } from "../location"
 import { MemoryTidyExecution } from "@zaovra-ai/core/memory/tidy-execution"
 import { Location } from "@zaovra-ai/core/location"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -83,6 +84,7 @@ export const MemoryHandler = HttpApiBuilder.group(Api, "server.memory", (handler
       .handle(
         "memory.prepareTidy",
         Effect.fn(function* (ctx) {
+          yield* waitForReadiness("catalog")
           const tidy = yield* MemoryTidy.Service
           return {
             data: taskView(
