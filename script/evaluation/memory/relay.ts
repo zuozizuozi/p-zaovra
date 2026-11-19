@@ -5,6 +5,7 @@ import { Option, Schema } from "effect"
 import { OpenAIChat } from "../../../packages/llm/src/protocols/openai-chat"
 import { OpenAIResponses } from "../../../packages/llm/src/protocols/openai-responses"
 import { observeUsage } from "./usage"
+import { createTidyRelay, isCountInput } from "./tidy-relay"
 import { createStageUsage, StageUsageHeader } from "./stage-usage"
 import { SessionHostState } from "../../../packages/schema/src/session-host-state"
 
@@ -21,6 +22,13 @@ export function evaluationRelayBinding(relay: object) {
 }
 
 const usageOwners = new WeakMap<object, () => ReturnType<typeof createStageUsage> & Disposable>()
+const tidyOwners = new WeakMap<object, () => ReturnType<typeof createTidyRelay>>()
+
+export function evaluationTidyRelay(relay: object) {
+  const ownedTidy = tidyOwners.get(relay)
+  if (!ownedTidy) throw new Error("evaluation-tidy-relay-not-owned")
+  return ownedTidy()
+}
 
 export function startEvaluationStageUsage(
   relay: object,
@@ -50,6 +58,8 @@ export function startEvaluationRelay(options: {
   maxRequests: number
   maxRequestBytes: number
   maxOutput: number
+  /** A separate Responses relay for one explicitly bound tidy task. */
+  maxCountRequests?: number
   /** B3 wire template evidence only; never authenticates host provenance. */
   b3HostHints?: boolean
 }) {
@@ -66,6 +76,11 @@ export function startEvaluationRelay(options: {
       (value) => Number.isSafeInteger(value) && value > 0,
     ) ||
     input.maxRequests > 60 ||
+    (input.maxCountRequests !== undefined &&
+      (input.protocol !== "openai-responses" ||
+        !Number.isSafeInteger(input.maxCountRequests) ||
+        input.maxCountRequests < 1 ||
+        input.maxCountRequests > 60)) ||
     input.maxRequestBytes > 131072 ||
     input.maxOutput > 4096 ||
     endpoint.username ||
@@ -87,6 +102,10 @@ export function startEvaluationRelay(options: {
   let stageUsage: ReturnType<typeof createStageUsage> | undefined
   let stageUsageEnabled = false
   const log = (record: object) => appendFileSync(file, JSON.stringify(record) + "\n")
+  const tidy =
+    input.maxCountRequests === undefined
+      ? undefined
+      : createTidyRelay({ target, apiKey: input.apiKey, maxCountRequests: input.maxCountRequests, log })
   const deny = (status: number, reason: string) => {
     if (!closed) log({ phase: "denied", reason })
     return new Response(null, { status })
@@ -97,6 +116,7 @@ export function startEvaluationRelay(options: {
     protocol: input.protocol,
     endpointHash: createHash("sha256").update(target).digest("hex"),
     maxRequests: input.maxRequests,
+    ...(tidy ? { maxCountRequests: input.maxCountRequests } : {}),
     maxRequestBytes: input.maxRequestBytes,
     maxOutput: input.maxOutput,
     tokenLimit: "not-proven",
@@ -109,13 +129,16 @@ export function startEvaluationRelay(options: {
       maxRequestBodySize: input.maxRequestBytes,
       async fetch(request) {
         const url = new URL(request.url)
+        const counting = Boolean(tidy) && url.pathname === "/v1/responses/input_tokens"
         if (
           request.method !== "POST" ||
-          url.pathname !== "/v1" + suffix ||
+          (!counting && url.pathname !== "/v1" + suffix) ||
           url.search ||
           request.headers.get("authorization") !== `Bearer ${key}`
         )
           return deny(403, "local-route-or-authorization")
+        const tidyScope = tidy?.current
+        if (tidy && !tidyScope) return deny(403, "evaluation-tidy-binding")
         const stage = stageUsage?.match(request.headers.get(StageUsageHeader))
         const binding = stage?.binding
         if (stageUsageEnabled && !binding) return deny(403, "evaluation-stage-binding")
@@ -138,6 +161,21 @@ export function startEvaluationRelay(options: {
         const parsed = wire.parsed
         if (Option.isNone(parsed) || !parsed.value || typeof parsed.value !== "object") return deny(400, "invalid-json")
         const body = parsed.value as Record<string, unknown>
+        if (counting && tidy && tidyScope) {
+          if (
+            body.model !== input.model ||
+            !isCountInput(body) ||
+            Option.isNone(
+              Schema.decodeUnknownOption(OpenAIResponses.route.body.schema, { onExcessProperty: "error" })({
+                ...body,
+                stream: true,
+              }),
+            ) ||
+            !localText(body.input)
+          )
+            return deny(400, "tidy-count-wire-schema")
+          return tidy.count(tidyScope, request, bytes, body)
+        }
         if (
           body.model !== input.model ||
           body.stream !== true ||
@@ -165,11 +203,14 @@ export function startEvaluationRelay(options: {
         if (stageUsageEnabled && (!stage || stageUsage?.match(stage.key) !== stage))
           return deny(403, "evaluation-stage-binding")
         const id = randomUUID()
+        if (tidy && (!tidyScope || !tidy.consume(tidyScope, body, id)))
+          return deny(403, "evaluation-tidy-count-not-bound")
         log({
           id,
           phase: "admitted",
           ordinal: sent + 1,
           ...binding,
+          ...(tidyScope ? { taskID: tidyScope.taskID, sessionID: tidyScope.sessionID } : {}),
           bytes: bytes.length,
           sha256: createHash("sha256").update(bytes).digest("hex"),
           output,
@@ -225,7 +266,12 @@ export function startEvaluationRelay(options: {
             body: bytes,
             redirect: "error",
             headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
-            signal: AbortSignal.any([request.signal, controller.signal, deadline]),
+            signal: AbortSignal.any([
+              request.signal,
+              controller.signal,
+              deadline,
+              ...(tidyScope ? [tidyScope.controller.signal] : []),
+            ]),
           })
           if (!closed) log({ id, phase: "headers", status: response.status })
           const reader = response.body?.getReader()
@@ -325,6 +371,7 @@ export function startEvaluationRelay(options: {
       return (stopping ??= (async () => {
         try {
           stageUsage?.close()
+          tidy?.stop()
           for (const record of pendingLabels.values()) record()
         } finally {
           closed = true
@@ -348,7 +395,13 @@ export function startEvaluationRelay(options: {
       endpointHash: manifest.endpointHash,
     }
   })
+  if (tidy)
+    tidyOwners.set(handle, () => {
+      if (closed) throw new Error("evaluation-relay-closed")
+      return tidy
+    })
   usageOwners.set(handle, () => {
+    if (tidy) throw new Error("evaluation-tidy-relay-is-separate")
     if (closed || stageUsage || (sent && !stageUsageEnabled))
       throw new Error("evaluation-stage-usage-relay-already-used")
     const usage = createStageUsage(log)

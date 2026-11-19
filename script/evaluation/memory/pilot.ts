@@ -4,7 +4,7 @@ import { mkdir, writeFile, access } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { casePrompts, chains, prepare, change } from "./cases"
 import type { PublishCaseVersion } from "./cases"
-import { startEvaluationStageUsage } from "./relay"
+import { evaluationRelayBinding, evaluationTidyRelay, startEvaluationStageUsage } from "./relay"
 import { gradeBilling } from "./billing"
 import { runEvaluationSession } from "./session"
 import { validCapture } from "./observe"
@@ -16,7 +16,8 @@ type Input = {
   candidate: string
   family: "gpt" | "deepseek"
   modelID: string
-  treatment: "A" | "B" | "C"
+  treatment: "A" | "B" | "C" | "D"
+  tidy?: { relay: object; tokens: number; dailyTokens: number }
   relay?: object
   baseURL: string
   reserveTokens: number
@@ -37,7 +38,7 @@ export function runBillingChain(input: Omit<Input, "caseVersion">) {
   })
 }
 
-/** One frozen five-Session A/B/C chain, not full acceptance or a complete billing ledger.
+/** One frozen five-Session A/B/C/D chain, not full acceptance or a complete billing ledger.
  * The outer host admits the reserve and owns the resource-limited process tree. Grading
  * is a trusted host callback after the Session Job is empty, never supplied by the model.
  */
@@ -62,7 +63,7 @@ export async function runEvaluationChain(
     !path.isAbsolute(input.root) ||
     !/^[a-f0-9]{40}$/.test(input.candidate) ||
     !["gpt", "deepseek"].includes(input.family) ||
-    !["A", "B", "C"].includes(input.treatment) ||
+    !["A", "B", "C", "D"].includes(input.treatment) ||
     !fixture ||
     typeof input.grade !== "function" ||
     !validCapture(input.capture) ||
@@ -78,17 +79,35 @@ export async function runEvaluationChain(
   )
     throw new Error("invalid-billing-pilot")
   const protocol = input.family === "gpt" ? "openai-responses" : "openai-chat"
-  const authority =
-    input.treatment === "C"
-      ? createMemoryAuthority({
-          relay: input.relay ?? {},
-          baseURL: input.baseURL,
-          relayKey: input.relayKey,
-          modelID: input.modelID,
-          providerID: `evaluation-${input.family}`,
-          protocol,
-        })
-      : undefined
+  const advanced = input.treatment === "C" || input.treatment === "D"
+  if ((input.treatment === "D") !== Boolean(input.tidy)) throw new Error("invalid-evaluation-tidy-input")
+  const tidy = input.tidy
+  const tidyBinding = tidy && evaluationRelayBinding(tidy.relay)
+  const tidyRelay = tidy && evaluationTidyRelay(tidy.relay)
+  if (
+    tidy &&
+    (!input.relay ||
+      input.relay === tidy.relay ||
+      input.family !== "gpt" ||
+      tidyBinding?.protocol !== "openai-responses" ||
+      tidyBinding.model !== input.modelID ||
+      tidyBinding.endpointHash !== evaluationRelayBinding(input.relay).endpointHash ||
+      !Number.isSafeInteger(tidy.tokens) ||
+      !Number.isSafeInteger(tidy.dailyTokens) ||
+      tidy.tokens < 1 ||
+      tidy.dailyTokens < tidy.tokens)
+  )
+    throw new Error("invalid-evaluation-tidy-relay-binding")
+  const authority = advanced
+    ? createMemoryAuthority({
+        relay: input.relay ?? {},
+        baseURL: input.baseURL,
+        relayKey: input.relayKey,
+        modelID: input.modelID,
+        providerID: `evaluation-${input.family}`,
+        protocol,
+      })
+    : undefined
   const source = path.resolve(import.meta.dir, "../../..")
   const environment = Object.fromEntries(
     ["PATH", "Path", "SystemRoot", "WINDIR", "HOME", "USERPROFILE"].flatMap((key) =>
@@ -128,15 +147,31 @@ export async function runEvaluationChain(
   await mkdir(path.join(profile, "config", "zaovra"), { recursive: true })
   await writeFile(path.join(profile, ".evaluation-profile"), "zaovra-memory-evaluation-v1\n", { flag: "wx" })
   const providerID = `evaluation-${input.family}`
+  const tidyModel = { id: input.modelID, providerID: "evaluation-tidy" }
   const config = {
     model: `${providerID}/${input.modelID}`,
     shell: "powershell",
     formatter: false,
     lsp: false,
-    memory: { enabled: input.treatment !== "A", taskSearch: input.treatment === "C", index: { enabled: true } },
+    memory: { enabled: input.treatment !== "A", taskSearch: advanced, index: { enabled: true } },
     agent: { build: { steps: 8 } },
     permission: { "*": "allow", external_directory: "deny", task: "deny", webfetch: "deny", websearch: "deny" },
     provider: {
+      ...(tidyBinding
+        ? {
+            [tidyModel.providerID]: {
+              npm: "@ai-sdk/openai",
+              options: { baseURL: tidyBinding.baseURL, apiKey: tidyBinding.apiKey, timeout: 120000 },
+              models: {
+                [tidyModel.id]: {
+                  tool_call: true,
+                  options: { maxTokens: 4096 },
+                  limit: { context: 32000, output: 4096 },
+                },
+              },
+            },
+          }
+        : {}),
       [providerID]: {
         npm: input.family === "gpt" ? "@ai-sdk/openai" : "@ai-sdk/openai-compatible",
         options: { baseURL: endpoint.toString(), apiKey: input.relayKey, timeout: 120000 },
@@ -180,8 +215,18 @@ export async function runEvaluationChain(
     budget: { reserved: input.reserveTokens, status: "unknown", release: false },
     memoryNoteProfile: authority ? "experimental-host-bound" : "unknown",
     ...(authority ? { upstreamEndpointHash: authority.endpointHash } : {}),
-    taskSearch: input.treatment === "C",
-    tidy: false,
+    taskSearch: advanced,
+    tidy: Boolean(tidy),
+    ...(tidy && tidyRelay
+      ? {
+          tidyConfig: {
+            model: tidyModel,
+            tokens: tidy.tokens,
+            dailyTokens: tidy.dailyTokens,
+            countLimit: tidyRelay.evidence().countLimit,
+          },
+        }
+      : {}),
     ...(input.capture ? { capture: input.capture } : {}),
   }
   // Only the short-lived local relay capability enters this profile. No upstream key enters the backend.
@@ -229,6 +274,9 @@ export async function runEvaluationChain(
             }
           : {}),
         ...(input.capture ? { capture: input.capture } : {}),
+        ...(index === 3 && tidy && tidyRelay
+          ? { tidy: { model: tidyModel, tokens: tidy.tokens, dailyTokens: tidy.dailyTokens, relay: tidyRelay } }
+          : {}),
         ...(index === 3 ? { poison: { chain: chain.id, sourceSessionID: previousSessionID! } } : {}),
       })
       phase = "session-evidence"
@@ -259,10 +307,21 @@ export async function runEvaluationChain(
         "invalid-host-grade",
       ]
       const reason =
-        error instanceof Error && allowed.includes(error.message) ? error.message : "unclassified-stage-error"
+        error instanceof Error &&
+        (allowed.includes(error.message) || /^evaluation-tidy-[a-z0-9-]+$/.test(error.message))
+          ? error.message
+          : "unclassified-stage-error"
       const evidence = (
         await Promise.all(
-          ["incomplete.json", "backend.log", "session.json", "grade.json", "fixture.json"].map(
+          [
+            "incomplete.json",
+            "backend.log",
+            "session.json",
+            "grade.json",
+            "fixture.json",
+            "tidy.json",
+            "tidy-stopped.json",
+          ].map(
             async (name) =>
               await access(path.join(stage, name)).then(
                 () => [`stage-${index + 1}/${name}`],
@@ -278,8 +337,9 @@ export async function runEvaluationChain(
         phase,
         reason,
         evidence,
-        category:
-          reason === "evaluation-session-not-completed"
+        category: reason.startsWith("evaluation-tidy-")
+          ? "tidy-rejected"
+          : reason === "evaluation-session-not-completed"
             ? "product-turn"
             : reason === "evaluation-session-deadline"
               ? "deadline-unresolved"
@@ -290,8 +350,16 @@ export async function runEvaluationChain(
       break
     }
   }
+  const tidyEvidence = Bun.file(path.join(input.root, "stage-4", "tidy.json"))
   const result = {
     ...manifest,
+    ...(tidy
+      ? {
+          tidyOutcome: (await tidyEvidence.exists())
+            ? { evidence: "stage-4/tidy.json", status: (await tidyEvidence.json()).status }
+            : { status: "not-run" },
+        }
+      : {}),
     stages,
     pass: stages.every((stage) => stage.status === "completed" && stage.pass),
     counts: {
