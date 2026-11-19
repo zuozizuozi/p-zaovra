@@ -64,7 +64,7 @@ export const Info = Wire.check(
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 
 // Preserve future stored reports without granting them display authority.
-export const Stored = Schema.Union([Info, Schema.Record(Schema.String, Schema.Unknown)])
+export const Stored = Schema.Union([Wire, Schema.Record(Schema.String, Schema.Unknown)])
 
 export function read(value: unknown, failedSeq?: number) {
   const report = Option.getOrUndefined(Schema.decodeUnknownOption(Info)(value))
