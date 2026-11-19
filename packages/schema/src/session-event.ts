@@ -354,7 +354,7 @@ export namespace Tool {
   export const Disposition = Event.define({
     type: "session.next.tool.disposition",
     ...options,
-    schema: { ...Base, reports: Schema.Array(SessionToolDisposition.Info) },
+    schema: { ...Base, reports: Schema.Array(SessionToolDisposition.Wire) },
   })
   export type Disposition = typeof Disposition.Type
 

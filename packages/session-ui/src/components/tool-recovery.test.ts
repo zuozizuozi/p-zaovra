@@ -65,7 +65,18 @@ test("a valid persisted result survives an absent request and success page and m
 
 for (const status of ["recovered", "exploratory", "failed", "interrupted", "unknown"] as const)
   test("reads authoritative status " + status, () => {
-    const part = { ...failure, failureDisposition: { ...report, status } }
+    const reason = {
+      recovered: "same-operation",
+      exploratory: "exploratory-miss",
+      failed: "tool-error",
+      interrupted: "interrupted",
+      unknown: "unverified",
+    } as const
+    const evidence = status === "recovered" || status === "exploratory" ? report.evidence : undefined
+    const part = {
+      ...failure,
+      failureDisposition: JSON.parse(JSON.stringify({ ...report, status, reason: reason[status], evidence })),
+    }
     const value = { ...input, parts: { [message.id]: [part] } }
     expect(toolFailureDisposition(message, part)?.status).toBe(status)
     expect(recoveredToolFailures(value)).toEqual(status === "recovered" ? [part] : [])
@@ -85,6 +96,12 @@ for (const invalid of [
   { ...report, basisSeq: -1 },
   { ...report, basisSeq: 2.5 },
   { ...report, status: "green" },
+  { ...report, reason: "uncertain", evidence: undefined },
+  { ...report, reason: "uncertain" },
+  { ...report, evidence: undefined },
+  { ...report, evidence: { ...report.evidence, settledSeq: 7 } },
+  { ...report, evidence: { ...report.evidence, settledSeq: 13 } },
+  { ...report, evidence: { ...report.evidence, assistantMessageID: report.assistantMessageID } },
 ])
   test("malformed, future or foreign report has no display authority " + JSON.stringify(invalid), () => {
     const part = { ...failure, failureDisposition: invalid }

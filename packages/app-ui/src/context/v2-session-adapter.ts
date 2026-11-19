@@ -391,7 +391,7 @@ export function hasUnfinishedShell(messages: readonly Message[], parts: Readonly
 }
 
 function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAssistantTool): Part {
-  const disposition = SessionToolDisposition.read(tool.failureDisposition)
+  const disposition = SessionToolDisposition.read(tool.failureDisposition, tool.settledSeq)
   const content = tool.state.status === "pending" ? [] : tool.state.content
   const output = content
     .map((item) => (item.type === "text" ? item.text : `[${item.name ?? item.uri}](${item.uri})`))

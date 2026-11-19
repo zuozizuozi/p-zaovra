@@ -518,6 +518,14 @@ describe("persisted tool failure dispositions", () => {
       yield* f.success(first)
       yield* f.end(first)
       const saved = SessionToolDisposition.read((yield* f.tool(first)).failureDisposition)!
+      // Historical events can decode even when their verdict is unusable.
+      for (const invalid of [
+        { ...saved, status: "failed" as const },
+        { ...saved, evidence: { ...saved.evidence!, settledSeq: (yield* f.tool(first)).settledSeq! } },
+      ]) {
+        yield* f.events.publish(SessionEvent.Tool.Disposition, { ...base, reports: [invalid] })
+        expect((yield* f.tool(first)).failureDisposition).toEqual(saved)
+      }
       yield* f.prompt("An unrelated new request")
       const second = yield* f.start()
       yield* f.fail(second)

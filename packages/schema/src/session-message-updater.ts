@@ -340,7 +340,8 @@ function project(source: Adapter, event: SessionEvent.Event) {
               if (
                 !event.durable ||
                 event.durable.seq <= report.basisSeq ||
-                !SessionToolDisposition.read(report) ||
+                !SessionToolDisposition.read(report, tool?.settledSeq) ||
+                (report.evidence && tool?.settledSeq === undefined) ||
                 !tool ||
                 tool.state.status !== "error" ||
                 !current ||

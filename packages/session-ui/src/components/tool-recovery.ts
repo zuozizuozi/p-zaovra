@@ -12,7 +12,7 @@ type RecoveryInput = {
 /** Read the persisted verdict, never infer recovery from the visible page. */
 export function toolFailureDisposition(message: AssistantMessage | undefined, part: Part) {
   if (!message || part.type !== "tool" || part.state.status !== "error") return
-  const report = SessionToolDisposition.read(part.failureDisposition)
+  const report = SessionToolDisposition.read(part.failureDisposition, part.settledSeq)
   if (
     !report ||
     !message.turn ||
