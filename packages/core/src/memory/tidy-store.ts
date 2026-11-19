@@ -30,6 +30,7 @@ export type Authority = { sessionID: SessionSchema.ID; scope: Memory.Scope; enab
 
 export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Rejected", {
   reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy"]),
+  budget: Schema.optional(Schema.Literals(["run", "day"])),
 }) {}
 
 export interface Interface {
@@ -294,12 +295,12 @@ const layer = Layer.effect(
 
               const total = yield* usage({ runID: run.id })
               const daily = yield* usage({ day })
-              if (
-                !limit ||
-                input.tokens > run.token_limit - total.charged ||
-                input.tokens > limit.token_limit - daily.charged
-              )
-                return yield* new Rejected({ reason: "limit" })
+              if (!limit) return yield* Effect.die("Missing daily allowance after upsert")
+              // A new UTC day never restores this task's own allowance.
+              if (input.tokens > run.token_limit - total.charged)
+                return yield* new Rejected({ reason: "limit", budget: "run" })
+              if (input.tokens > limit.token_limit - daily.charged)
+                return yield* new Rejected({ reason: "limit", budget: "day" })
               yield* db
                 .insert(MemoryTidyAttemptTable)
                 .values({

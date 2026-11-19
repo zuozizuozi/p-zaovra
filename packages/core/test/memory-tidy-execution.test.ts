@@ -58,6 +58,7 @@ No files changed.`
 for (const scenario of [
   "success",
   "over-budget",
+  "daily-budget",
   "count-missing",
   "count-invalid",
   "count-redirect",
@@ -231,6 +232,24 @@ for (const scenario of [
               : scenario.startsWith("automatic-")
                 ? yield* prepareAutomatic
                 : (yield* tidy.prepare({ requestID: "confirmed", model: selected, tokens: 500 })).run
+          if (scenario === "daily-budget") {
+            const prior = (yield* tidy.prepare({
+              requestID: "older",
+              layer: "user",
+              model: selected,
+              tokens: 200,
+              dailyTokens: 200,
+            })).run
+            yield* store.reserve({
+              sessionID: prior.session_id,
+              scope: prior.scope,
+              enabled: true,
+              attemptID: "older",
+              tokens: 100,
+            })
+            yield* store.settle("older", 100)
+            yield* store.finish(prior.id, "completed")
+          }
           const sessionID =
             run?.session_id ??
             (yield* sessions.create({ model: selected, location: { directory: AbsolutePath.make(tmp.path) } })).id
@@ -373,6 +392,10 @@ for (const scenario of [
             expect(Cause.pretty(outcome.cause)).toContain("HTTP 404")
           if (Exit.isFailure(outcome) && scenario === "count-invalid")
             expect(Cause.pretty(outcome.cause)).toContain("输入计数无效")
+          if (Exit.isFailure(outcome) && scenario === "over-budget")
+            expect(Cause.pretty(outcome.cause)).toContain("本次整理任务余额不足")
+          if (Exit.isFailure(outcome) && scenario === "daily-budget")
+            expect(Cause.pretty(outcome.cause)).toContain("每日额度按 UTC 零点重置")
           expect(state.redirects).toBe(0)
           expect(state.generated).toHaveLength(scenario === "retry" ? 2 : sent ? 1 : 0)
           expect(state.counted).toHaveLength(

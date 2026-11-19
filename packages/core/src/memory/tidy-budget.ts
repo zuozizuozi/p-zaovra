@@ -64,7 +64,10 @@ const layer = Layer.effect(
                   reason:
                     error.reason === "limit"
                       ? new QuotaExceededReason({
-                          message: "剩余整理预算不足以覆盖本次请求的输入和输出上界，未发送请求。",
+                          message:
+                            error.budget === "day"
+                              ? "今日整理余额不足，本次生成请求未发送。每日额度按 UTC 零点重置。"
+                              : "本次整理任务余额不足，生成请求未发送。跨日不会重置本任务的额度。",
                         })
                       : new InvalidRequestReason({ message: `整理请求未获预算授权：${error.reason}。` }),
                 }),

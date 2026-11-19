@@ -369,14 +369,17 @@ it.effect("daily allowance spans runs; crossing UTC day never releases a run's u
     const second = yield* h.store.create({ ...request, scope: Memory.Scope.user, requestID: "second" }, h.create)
     const day = new Date(yield* Clock.currentTimeMillis).toISOString().slice(0, 10)
     yield* h.store.reserve({ ...authority(first), attemptID: "first", tokens: 160 })
-    expect(
-      (yield* h.store.reserve({ ...authority(second), attemptID: "second", tokens: 160 }).pipe(Effect.flip)).reason,
-    ).toBe("limit")
+    const daily = yield* h.store.reserve({ ...authority(second), attemptID: "second", tokens: 160 }).pipe(Effect.flip)
+    expect(daily.reason).toBe("limit")
+    expect(daily.budget).toBe("day")
+    expect((yield* h.store.usage({ runID: second.id })).charged).toBe(0)
     yield* adjust("24 hours")
     yield* h.store.reserve({ ...authority(second), attemptID: "second", tokens: 160 })
-    expect(
-      (yield* h.store.reserve({ ...authority(first), attemptID: "first-retry", tokens: 160 }).pipe(Effect.flip)).reason,
-    ).toBe("limit")
+    const exhausted = yield* h.store
+      .reserve({ ...authority(first), attemptID: "first-retry", tokens: 160 })
+      .pipe(Effect.flip)
+    expect(exhausted.reason).toBe("limit")
+    expect(exhausted.budget).toBe("run")
     expect(yield* h.store.usage({ day })).toEqual({ known: 0, reserved: 160, charged: 160, unknown: 1 })
     expect(yield* h.store.usage({ runID: first.id })).toEqual({ known: 0, reserved: 160, charged: 160, unknown: 1 })
   }),
