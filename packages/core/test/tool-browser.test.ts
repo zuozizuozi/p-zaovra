@@ -49,6 +49,7 @@ test.skipIf(process.platform !== "win32")("does not register browser in Windows 
   expect(registered).toBe(false)
 })
 
+// The child runs two serial cases, each with its own 60-second deadline.
 test("browser integration on the Desktop Node runtime", async () => {
   const output = path.join(tmpdir(), `browser-integration-${process.pid}.mjs`)
   const bundler = Bun.resolveSync(
@@ -80,7 +81,7 @@ test("browser integration on the Desktop Node runtime", async () => {
           build.onResolve({ filter: /^jsonc-parser$/ }, (args) => ({
             path: Bun.resolveSync(args.path, args.resolveDir).replace(/lib[\\/]umd[\\/]main.js$/, "lib/esm/main.js"),
           }))
-          build.onLoad({ filter: /(?:photon|skill)\.ts$/ }, async (args) => ({
+          build.onLoad({ filter: /(?:photon|skill|powershell-operand-context)\.ts$/ }, async (args) => ({
             contents: (await Bun.file(args.path).text()).replace(/ with \{ type: "(?:text|file)" \}/g, ""),
             loader: "ts",
           }))
@@ -99,4 +100,4 @@ test("browser integration on the Desktop Node runtime", async () => {
     env: { ...Bun.env },
   })
   if ((await child.exited) !== 0) throw new Error("Node browser integration failed")
-}, 60000)
+}, 150000)
