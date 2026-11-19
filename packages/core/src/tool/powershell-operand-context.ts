@@ -55,6 +55,12 @@ function isNonPathFragment(node: Node) {
     return /^\(\s*Resolve-Path\s+-LiteralPath\s+(['"])\.\1\s*\)\.Path$/i.test(parent.firstNamedChild?.text ?? "")
   }
 
+  if (
+    parent.type === "array_literal_expression" &&
+    parent.namedChildCount === 2 &&
+    parent.lastNamedChild?.id === expression.id
+  )
+    return isDisplayedReplacement(parent)
   if (parent.type !== "argument_expression_list") return false
   const call = parent.parent?.parent
   if (!call || call.type !== "invokation_expression" || !stringReplace(call)) return false
@@ -92,4 +98,52 @@ function stringReplace(call: Node): boolean {
       receiver.firstNamedChild?.text + "." + receiver.namedChild(1)?.text,
     ) || stringReplace(receiver)
   )
+}
+
+function isDisplayedReplacement(pair: Node) {
+  let value = pair
+  while (value.parent?.namedChildCount === 1 && value.parent.text === value.text) value = value.parent
+  const replacement = value.parent
+  if (
+    replacement?.type !== "comparison_expression" ||
+    replacement.lastNamedChild?.id !== value.id ||
+    !/^-[ci]?replace$/i.test(replacement.namedChild(1)?.text ?? "")
+  )
+    return false
+
+  // Follow only the value being displayed. Assignment, redirection, another
+  // command, or additional Write-Output arguments end this proof.
+  value = replacement
+  let output = false
+  while (value.parent) {
+    const outer = value.parent
+    if (outer.type === "statement_list") return output && outer.parent?.type === "program"
+    if (
+      (outer.namedChildCount === 1 && outer.text === value.text) ||
+      (outer.type === "parenthesized_expression" && outer.namedChildCount === 1) ||
+      (outer.type === "comparison_expression" &&
+        outer.firstNamedChild?.id === value.id &&
+        /^-[ci]?replace$/i.test(outer.namedChild(1)?.text ?? "")) ||
+      (outer.type === "format_expression" &&
+        outer.lastNamedChild?.id === value.id &&
+        /^(['"])[^'"`$]*\1$/.test(outer.firstNamedChild?.text ?? "")) ||
+      (outer.type === "command_elements" && outer.text.trim() === value.text)
+    ) {
+      value = outer
+      continue
+    }
+    if (
+      !output &&
+      outer.type === "command" &&
+      outer.namedChildCount === 2 &&
+      outer.lastNamedChild?.id === value.id &&
+      /^Write-Output$/i.test(outer.firstNamedChild?.text ?? "")
+    ) {
+      value = outer
+      output = true
+      continue
+    }
+    return false
+  }
+  return false
 }

@@ -37,3 +37,23 @@ test("computed file operands and unparsed inputs keep their literal checks", asy
     expect((await analyzeShellCommand(command, "powershell")).paths, command).toContain("\\r")
   }
 })
+
+test("formatted replacement text can be displayed without treating its escape strings as files", async () => {
+  const command =
+    "$p = Join-Path (Get-Location) 'beta-proof.txt'; $b = [System.IO.File]::ReadAllBytes($p); Write-Output (\"Length={0}\" -f $b.Length); Write-Output (\"Hex={0}\" -f (($b | ForEach-Object { $_.ToString('X2') }) -join ' ')); Write-Output (\"Text={0}\" -f ([System.Text.Encoding]::UTF8.GetString($b) -replace \"`r\", '\\r' -replace \"`n\", '\\n'))"
+  const scan = await analyzeShellCommand(command, "powershell")
+  expect(scan.paths).toContain("beta-proof.txt")
+  expect(scan.paths).not.toContain("\\r")
+  expect(scan.paths).not.toContain("\\n")
+  const display = command.slice(command.lastIndexOf("Write-Output"))
+  for (const use of [
+    display + "; Get-Item -LiteralPath '\\r'",
+    display.replace("Write-Output", "Get-Item"),
+    display + " | Get-Item",
+    display + " > log.txt",
+    "$file = " + display,
+    display.replace("Write-Output", "Write-Output -OutVariable result"),
+  ]) {
+    expect((await analyzeShellCommand(use, "powershell")).paths, use).toContain("\\r")
+  }
+})
