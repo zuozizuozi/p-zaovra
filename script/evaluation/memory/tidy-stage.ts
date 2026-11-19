@@ -2,11 +2,12 @@ import path from "node:path"
 import { createHash, randomUUID } from "node:crypto"
 import { writeFile } from "node:fs/promises"
 import type { Zaovra } from "@zaovra-ai/client"
+import { snapshot } from "./observe"
 import type { createTidyRelay } from "./tidy-relay"
 
 type Client = ReturnType<typeof Zaovra.make>
 type Task = Awaited<ReturnType<Client["memory"]["getTidy"]>>
-type View = Awaited<ReturnType<typeof snapshot>>
+type View = Awaited<ReturnType<typeof inspectTidyMemory>>
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
 
 export type EvaluationTidy = {
@@ -16,7 +17,7 @@ export type EvaluationTidy = {
   readonly relay: ReturnType<typeof createTidyRelay>
 }
 
-async function snapshot(
+async function inspectTidyMemory(
   client: Client,
   scope: { location: { directory: string }; layer: "project" },
   signal: AbortSignal,
@@ -25,11 +26,11 @@ async function snapshot(
   const pages = await client.memory.listPages(scope, { signal })
   const sources = new Map<string, { id: string; seq?: number; hash: string }[]>()
   for (const sessionID of new Set(notes.flatMap((note) => (note.sessionID ? [note.sessionID] : [])))) {
-    const messages = await client.messages.list({ sessionID, limit: 100, order: "asc" }, { signal })
-    if (messages.cursor?.next) throw new Error("evaluation-tidy-source-evidence-too-large")
+    signal.throwIfAborted()
+    const original = await snapshot(client, sessionID, 8, 5_000)
     sources.set(
       sessionID,
-      messages.data.flatMap((message) =>
+      original.messages.flatMap((message) =>
         message.type === "user" ? [{ id: message.id, seq: message.seq, hash: hash(message) }] : [],
       ),
     )
@@ -75,7 +76,7 @@ export async function runEvaluationTidy(input: {
       after?: { id: string; textHash: string }[]
     }
     inserted = fixture.inserted
-    before = await snapshot(client, scope, signal)
+    before = await inspectTidyMemory(client, scope, signal)
     if (
       fixture.fixture !== "artificial-poison" ||
       !before.notes.some(
@@ -135,7 +136,7 @@ export async function runEvaluationTidy(input: {
     }
   }
   if (before) {
-    after = await snapshot(client, scope, AbortSignal.timeout(5_000)).catch(() => undefined)
+    after = await inspectTidyMemory(client, scope, AbortSignal.timeout(5_000)).catch(() => undefined)
     if (!after) reason ??= "evaluation-tidy-final-snapshot-unavailable"
   }
   const transport = tidy.relay.evidence()

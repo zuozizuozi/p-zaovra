@@ -42,13 +42,13 @@ test("dedicated count relay binds one positive exact-wire permit with its own ph
     maxOutput: 100,
     maxRequestBytes: 4096,
   })
-  const send = (suffix: string, body: object, apiKey = relay.apiKey) =>
+  const send = (suffix: string, body: object, apiKey: string = relay.apiKey) =>
     fetch(relay.baseURL + "/responses" + suffix, {
       method: "POST",
       headers: { authorization: "Bearer " + apiKey },
       body: JSON.stringify(body),
     })
-  const input = { model, input: [{ type: "message", role: "user", content: "test" }] }
+  const input = { model, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "test" }] }] }
   const generation = { ...input, stream: true, max_output_tokens: 25 }
   try {
     expect((await send("/input_tokens", input)).status).toBe(403)
