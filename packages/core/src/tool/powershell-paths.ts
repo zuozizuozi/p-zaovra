@@ -2,11 +2,14 @@ import path from "node:path"
 import { domainToUnicode } from "node:url"
 
 /** Lexical literal operands only: never evaluates PowerShell, variables, types or cmdlets. */
-export function powerShellLiteralOperands(command: string) {
+export function powerShellLiteralOperands(command: string, operandCommand = command) {
   if (command.length > 16_384) return { paths: [], complete: false }
-  const tokens = command.match(/'(?:[^']|'')*'|"(?:`[\s\S]|[^"`])*"|["']|[^"'\s;&|<>(){},[\]]+/g) ?? []
+  const tokens = Array.from(command.matchAll(/'(?:[^']|'')*'|"(?:`[\s\S]|[^"`])*"|["']|[^"'\s;&|<>(){},[\]]+/g))
   let complete = true
-  const paths = tokens.flatMap((token, index) => {
+  const paths = tokens.flatMap((match, index) => {
+    const token = match[0]
+    if (operandCommand !== command && operandCommand.slice(match.index, match.index + token.length).trim() === "")
+      return []
     if (token === "'" || token === '\"') {
       complete = false
       return []

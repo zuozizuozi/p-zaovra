@@ -3,8 +3,8 @@ import type { ShellIdentity } from "../shell-identity"
 import { powerShellLiteralOperands } from "./powershell-paths"
 
 /** Narrow literal-operand scan, never a shell parser or an OS sandbox. */
-export function analyzeCommand(command: string, shell: ShellIdentity.Identity["type"]) {
-  const literals = shell === "powershell" ? powerShellLiteralOperands(command) : undefined
+export function analyzeCommand(command: string, shell: ShellIdentity.Identity["type"], operandCommand = command) {
+  const literals = shell === "powershell" ? powerShellLiteralOperands(command, operandCommand) : undefined
   const tokens = command.match(/"[^"]*"|'[^']*'|[^\s"';&|<>]+/g) ?? []
   const unquoted = command.replace(/"[^"]*"|'[^']*'/g, "")
   const dynamic = shell === "cmd" ? command : command.replace(/'[^']*'/g, "")
@@ -103,4 +103,13 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     externalRisk,
     ...(literals ? { literalScanComplete: literals.complete } : {}),
   }
+}
+
+export async function analyzeShellCommand(command: string, shell: ShellIdentity.Identity["type"]) {
+  if (shell !== "powershell" || command.length > 16_384 || !/['"]\\/.test(command))
+    return analyzeCommand(command, shell)
+  const operandCommand = await import("./powershell-operand-context")
+    .then((module) => module.operandText(command))
+    .catch(() => command)
+  return analyzeCommand(command, shell, operandCommand)
 }

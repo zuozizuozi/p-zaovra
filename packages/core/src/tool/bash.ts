@@ -19,7 +19,7 @@ import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
 import { BackgroundJob } from "../background-job"
 import { ShellIdentity } from "../shell-identity"
-import { analyzeCommand } from "./bash-preflight"
+import { analyzeShellCommand } from "./bash-preflight"
 import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
@@ -164,7 +164,7 @@ const commandPreflight = Effect.fn("BashTool.commandPreflight")(function* (
   cwd: string,
   shell: ShellIdentity.Identity["type"],
 ) {
-  const syntax = analyzeCommand(command, shell)
+  const syntax = yield* Effect.promise(() => analyzeShellCommand(command, shell))
   const targets = yield* Effect.forEach(syntax.paths, (value) =>
     Effect.gen(function* () {
       const resolved = path.resolve(cwd, value)
