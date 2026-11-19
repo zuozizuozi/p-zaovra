@@ -126,6 +126,8 @@ describe("shared shell identity", () => {
     expect(ShellIdentity.guidance({ ...base, version: "5.1" })).toContain("curl.exe")
     expect(ShellIdentity.guidance({ ...base, version: "7.3" })).toContain("Supports && and ||")
     expect(ShellIdentity.guidance({ ...base, version: "7.0" })).toContain("Supports && and ||")
+    expect(ShellIdentity.guidance({ ...base, version: "5.1" })).toContain("Get-ChildItem -Name")
+    expect(ShellIdentity.guidance({ ...base, version: "7.4" })).toContain("dir /b treats /b as a path")
   })
   test("UTF8 byte truncation drops incomplete characters only", async () => {
     const bytes = Buffer.from("中🙂文")
