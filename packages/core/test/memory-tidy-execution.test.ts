@@ -369,6 +369,10 @@ for (const scenario of [
               ? "Success"
               : "Failure",
           )
+          if (Exit.isFailure(outcome) && scenario === "count-missing")
+            expect(Cause.pretty(outcome.cause)).toContain("HTTP 404")
+          if (Exit.isFailure(outcome) && scenario === "count-invalid")
+            expect(Cause.pretty(outcome.cause)).toContain("输入计数无效")
           expect(state.redirects).toBe(0)
           expect(state.generated).toHaveLength(scenario === "retry" ? 2 : sent ? 1 : 0)
           expect(state.counted).toHaveLength(

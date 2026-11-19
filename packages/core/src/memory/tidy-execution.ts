@@ -233,7 +233,8 @@ const count = Effect.fn("MemoryTidyExecution.count")(function* (
   )
   return yield* Effect.gen(function* () {
     const response = yield* http.execute(counting)
-    if (response.status !== 200) return yield* denied("模型线路未能提供精确输入计数，未发送生成请求。")
+    if (response.status !== 200)
+      return yield* denied(`模型线路的输入计数接口返回 HTTP ${response.status}，未发送生成请求。`)
     const value = yield* response.json
     const decoded = Schema.decodeUnknownOption(
       Schema.Struct({ object: Schema.Literal("response.input_tokens"), input_tokens: Schema.Number }),
@@ -243,7 +244,9 @@ const count = Effect.fn("MemoryTidyExecution.count")(function* (
     return decoded.value.input_tokens
   }).pipe(
     Effect.timeout("20 seconds"),
-    Effect.mapError(() => denied("无法取得完整输入的精确计数，未发送生成请求。")),
+    Effect.mapError((error) =>
+      error instanceof LLMError ? error : denied("无法取得完整输入的精确计数，未发送生成请求。"),
+    ),
   )
 })
 
