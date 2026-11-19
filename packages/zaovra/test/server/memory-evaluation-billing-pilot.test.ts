@@ -107,6 +107,7 @@ test.skipIf(process.platform !== "win32")(
           baseURL: relay.baseURL,
           reserveTokens: 1,
           relayKey: relay.apiKey,
+          ...(treatment === "B" ? { relay } : {}),
         })
         if (!result.pass) console.error({ stages: result.stages, rounds, relay: await Bun.file(journal).text() })
         expect(result.pass).toBe(true)
@@ -126,6 +127,22 @@ test.skipIf(process.platform !== "win32")(
           ).toBe(true)
         }
         expect(new Set(sessions).size).toBe(5)
+        if (treatment === "B") {
+          expect(result.stageUsage?.stages.map((stage) => stage.sessionID)).toEqual(sessions)
+          expect(result.stageUsage?.stages.map((stage) => stage.physicalRequests)).toEqual(rounds)
+          expect(result.stageUsage?.fullChain).toMatchObject({
+            status: "reported",
+            reportedRequests: 13,
+            observed: { input: 260, output: 65, total: 325 },
+            eligibleForCostComparison: true,
+          })
+          expect(result.stageUsage?.laterStages).toMatchObject({
+            reportedRequests: 10,
+            observed: { input: 200, output: 50, total: 250 },
+            eligibleForCostComparison: true,
+          })
+        }
+        if (treatment === "A") expect(result.stageUsage).toBeUndefined()
         const fourth = requests.find((entry) => entry.stage === 4)!.body
         expect(fourth.includes(chain.poisonedNote)).toBe(treatment === "B")
         expect(fourth).not.toContain("artificial-poison")

@@ -27,6 +27,7 @@ export async function runEvaluationSession(input: {
     | { factor: "host-hint-style"; value: "original" | "short" }
     | { factor: "host-hint-language"; value: "en" | "zh" }
   memoryAuthority?: ReturnType<typeof createMemoryAuthority>
+  stageUsage?: { baseURL: string; key: string; bindSession(sessionID: string): void }
   poison?: { chain: string; sourceSessionID: string }
   /** Opt-in sensitive own-turn projection; delivered only after final consistency and empty Job. */
   capture?: CaptureBounds
@@ -43,7 +44,10 @@ export async function runEvaluationSession(input: {
     throw new Error("invalid-evaluation-session")
   if (
     Object.keys(input.providerEnvironment ?? {}).some(
-      (name) => !/^ZAOVRA_EVAL_[A-Z0-9_]+$/.test(name) || name.startsWith("ZAOVRA_EVAL_MEMORY_"),
+      (name) =>
+        !/^ZAOVRA_EVAL_[A-Z0-9_]+$/.test(name) ||
+        name.startsWith("ZAOVRA_EVAL_MEMORY_") ||
+        name === "ZAOVRA_EVAL_STAGE_USAGE",
     )
   )
     throw new Error("invalid-evaluation-provider-environment")
@@ -142,6 +146,9 @@ export async function runEvaluationSession(input: {
   }
   Object.assign(environment, input.providerEnvironment, kernelEnvironment, {
     ...(memoryStage ? { ZAOVRA_EVAL_MEMORY_HOST: memoryStage.environment } : {}),
+    ...(input.stageUsage
+      ? { ZAOVRA_EVAL_STAGE_USAGE: JSON.stringify({ baseURL: input.stageUsage.baseURL, key: input.stageUsage.key }) }
+      : {}),
     ZAOVRA_DB: path.join(input.profile, "sessions.sqlite"),
     ZAOVRA_DISABLE_MODELS_FETCH: "true",
     ZAOVRA_EXPERIMENTAL_EVENT_SYSTEM: "true",
@@ -210,6 +217,7 @@ export async function runEvaluationSession(input: {
     { location: { directory: input.directory }, model: input.model },
     { signal },
   )
+  input.stageUsage?.bindSession(session.id)
   const admitted = await client.sessions.prompt({ sessionID: session.id, prompt: { text: input.prompt } }, { signal })
   const admission = { sessionID: admitted.sessionID, id: admitted.id, admittedSeq: admitted.admittedSeq }
   const read = (capture?: CaptureBounds) =>

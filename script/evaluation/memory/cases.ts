@@ -205,6 +205,18 @@ export const chains: ReadonlyArray<Chain> = [
   },
 ]
 
+export type PublishCaseVersion = "byte-preserving-v2"
+
+export function casePrompts(chain: Chain, version?: PublishCaseVersion) {
+  if (version === undefined) return chain.prompts
+  if (chain.id !== "publish" || version !== "byte-preserving-v2") throw new Error("invalid-memory-case-version")
+  return chain.prompts.map((prompt, index) =>
+    index === 3
+      ? prompt + " 必须使用同目录改名保留原文件的全部字节（包括行尾换行状态）；不要读取内容后重建文件。"
+      : prompt,
+  )
+}
+
 export async function prepare(directory: string, id: string) {
   const chain = chains.find((item) => item.id === id)
   if (!chain) throw new Error("unknown-memory-chain")

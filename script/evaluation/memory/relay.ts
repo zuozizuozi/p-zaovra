@@ -5,6 +5,7 @@ import { Option, Schema } from "effect"
 import { OpenAIChat } from "../../../packages/llm/src/protocols/openai-chat"
 import { OpenAIResponses } from "../../../packages/llm/src/protocols/openai-responses"
 import { observeUsage } from "./usage"
+import { createStageUsage, StageUsageHeader } from "./stage-usage"
 import { SessionHostState } from "../../../packages/schema/src/session-host-state"
 
 const owned = new WeakMap<
@@ -17,6 +18,23 @@ export function evaluationRelayBinding(relay: object) {
   const read = owned.get(relay)
   if (!read) throw new Error("evaluation-relay-not-owned")
   return read()
+}
+
+const usageOwners = new WeakMap<object, () => ReturnType<typeof createStageUsage> & Disposable>()
+
+export function startEvaluationStageUsage(
+  relay: object,
+  expected: { baseURL: string; apiKey: string; model: string; protocol: string },
+) {
+  const binding = evaluationRelayBinding(relay)
+  if (
+    binding.baseURL !== expected.baseURL ||
+    binding.apiKey !== expected.apiKey ||
+    binding.model !== expected.model ||
+    binding.protocol !== expected.protocol
+  )
+    throw new Error("evaluation-stage-usage-relay-mismatch")
+  return usageOwners.get(relay)!()
 }
 
 /** Evaluation-only physical send guard, NOT a token counter or a settlement engine.
@@ -66,6 +84,8 @@ export function startEvaluationRelay(options: {
   const pendingLabels = new Map<AbortController, () => void>()
   let sent = 0
   let closed = false
+  let stageUsage: ReturnType<typeof createStageUsage> | undefined
+  let stageUsageEnabled = false
   const log = (record: object) => appendFileSync(file, JSON.stringify(record) + "\n")
   const deny = (status: number, reason: string) => {
     if (!closed) log({ phase: "denied", reason })
@@ -96,6 +116,9 @@ export function startEvaluationRelay(options: {
           request.headers.get("authorization") !== `Bearer ${key}`
         )
           return deny(403, "local-route-or-authorization")
+        const stage = stageUsage?.match(request.headers.get(StageUsageHeader))
+        const binding = stage?.binding
+        if (stageUsageEnabled && !binding) return deny(403, "evaluation-stage-binding")
         const wire = await (async () => {
           try {
             const bytes = new Uint8Array(await request.arrayBuffer())
@@ -139,11 +162,14 @@ export function startEvaluationRelay(options: {
           return deny(400, "wire-output-limit")
         // No await between the limit check and synchronous recording: concurrent local callers cannot oversubscribe.
         if (closed || sent >= input.maxRequests) return deny(429, "physical-request-limit")
+        if (stageUsageEnabled && (!stage || stageUsage?.match(stage.key) !== stage))
+          return deny(403, "evaluation-stage-binding")
         const id = randomUUID()
         log({
           id,
           phase: "admitted",
           ordinal: sent + 1,
+          ...binding,
           bytes: bytes.length,
           sha256: createHash("sha256").update(bytes).digest("hex"),
           output,
@@ -164,7 +190,13 @@ export function startEvaluationRelay(options: {
         const deadline = AbortSignal.timeout(120000)
         const started = performance.now()
         active.add(controller)
-        const usage = observeUsage(input.protocol, [input.apiKey, key, input.baseURL, endpoint.hostname])
+        const usage = observeUsage(input.protocol, [
+          input.apiKey,
+          key,
+          input.baseURL,
+          endpoint.hostname,
+          stage?.key ?? "",
+        ])
         let labelsRecorded = false
         const recordModels = (end: "eof" | "incomplete" | "cancelled") => {
           if (closed || labelsRecorded) return
@@ -174,6 +206,19 @@ export function startEvaluationRelay(options: {
           log({ id, phase: "response-termination-observed", end, ...usage.termination() })
         }
         pendingLabels.set(controller, () => recordModels("cancelled"))
+        let usageRecorded = false
+        const settle = stage?.track(id, sent, () => {
+          recordUsage("cancelled")
+          controller.abort()
+        })
+        function recordUsage(end: "eof" | "incomplete" | "cancelled") {
+          if (closed || usageRecorded) return
+          usageRecorded = true
+          const observation = usage.result()
+          log({ id, phase: "usage-observed", end, ...observation })
+          settle?.(observation)
+          recordModels(end)
+        }
         try {
           const response = await fetch(target, {
             method: "POST",
@@ -185,18 +230,12 @@ export function startEvaluationRelay(options: {
           if (!closed) log({ id, phase: "headers", status: response.status })
           const reader = response.body?.getReader()
           if (!reader) {
+            if (stage) recordUsage("eof")
             recordModels("eof")
             active.delete(controller)
             return new Response(null, { status: response.status })
           }
           let received = 0
-          let usageRecorded = false
-          const recordUsage = (end: "eof" | "incomplete" | "cancelled") => {
-            if (closed || usageRecorded) return
-            usageRecorded = true
-            log({ id, phase: "usage-observed", end, ...usage.result() })
-            recordModels(end)
-          }
           return new Response(
             new ReadableStream<Uint8Array>({
               async pull(stream) {
@@ -246,6 +285,7 @@ export function startEvaluationRelay(options: {
             },
           )
         } catch (error) {
+          if (stage) recordUsage("incomplete")
           recordModels("incomplete")
           if (!closed)
             log({
@@ -284,6 +324,7 @@ export function startEvaluationRelay(options: {
     stop() {
       return (stopping ??= (async () => {
         try {
+          stageUsage?.close()
           for (const record of pendingLabels.values()) record()
         } finally {
           closed = true
@@ -305,6 +346,25 @@ export function startEvaluationRelay(options: {
       model: input.model,
       protocol: input.protocol,
       endpointHash: manifest.endpointHash,
+    }
+  })
+  usageOwners.set(handle, () => {
+    if (closed || stageUsage || (sent && !stageUsageEnabled))
+      throw new Error("evaluation-stage-usage-relay-already-used")
+    const usage = createStageUsage(log)
+    log({ phase: "stage-usage-enabled", runID: usage.runID, version: 1 })
+    stageUsage = usage
+    stageUsageEnabled = true
+    return {
+      ...usage,
+      [Symbol.dispose]() {
+        if (stageUsage !== usage) return
+        try {
+          usage.close()
+        } finally {
+          stageUsage = undefined
+        }
+      },
     }
   })
   return handle

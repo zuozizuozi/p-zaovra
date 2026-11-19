@@ -112,6 +112,9 @@ test.skipIf(process.platform !== "win32")(
             .catch(() => "no backend log")),
       ).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
       expect(new Set(sessions).size).toBe(5)
+      expect(result.stageUsage?.stages.map((stage) => stage.sessionID)).toEqual(sessions)
+      expect(result.stageUsage?.stages.map((stage) => stage.unknownRequests)).toEqual([3, 3, 3, 3, 3])
+      expect(result.stageUsage?.fullChain).toMatchObject({ status: "unknown", eligibleForCostComparison: false })
       expect(calls).toHaveLength(15)
       expect(calls.filter((_, index) => index % 3 === 1).every((call) => call.names.includes("memory_note"))).toBe(true)
       const generations = []
@@ -166,6 +169,15 @@ test.skipIf(process.platform !== "win32")(
         },
       })
       expect(changed.counts).toEqual({ planned: 5, entered: 2, completed: 1, notRun: 3 })
+      expect(changed.stageUsage?.runID).not.toBe(result.stageUsage?.runID)
+      expect(changed.stageUsage?.stages.map((stage) => stage.status)).toEqual([
+        "unknown",
+        "no-requests",
+        "not-run",
+        "not-run",
+        "not-run",
+      ])
+      expect(changed.stageUsage?.fullChain.eligibleForCostComparison).toBe(false)
       expect(changed.stages[1]).toMatchObject({ status: "failed", reason: "evaluation-backend-ended-before-ready" })
       expect(calls).toHaveLength(18)
       expect(await Bun.file(path.join(mismatchRoot, "stage-2", "incomplete.json")).exists()).toBe(true)

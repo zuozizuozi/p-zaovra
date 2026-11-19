@@ -11,10 +11,11 @@ import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionRuntime } from "../../src/effect/session-runtime"
+import type { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { createEvaluationMemoryProfile } from "../../../../script/evaluation/memory/model-profile"
 
 /** Only the isolated launcher reads this private parent capability. No product route/config switch. */
-export function createMemoryHost(value: string, generation: string) {
+export function createMemoryHost(value: string, generation: string, replacements: LayerNode.Replacements = []) {
   const decoded = Schema.decodeUnknownOption(
     Schema.UnknownFromJsonString.pipe(
       Schema.decodeTo(
@@ -45,6 +46,7 @@ export function createMemoryHost(value: string, generation: string) {
     throw new Error("invalid-evaluation-memory-host")
   let grant: ReturnType<typeof createEvaluationMemoryProfile> | undefined
   const host = SessionRuntime.create([
+    ...replacements,
     [
       ModelMemoryProfile.node,
       Layer.succeed(

@@ -27,11 +27,14 @@ export async function startEvaluationBackend(replacements?: LayerNode.Replacemen
   const { createLayer, observeRuntime } = await import("./evaluation/runtime-idle")
   const { SessionRuntime } = await import("../src/effect/session-runtime")
   const { createMemoryHost } = await import("./evaluation/memory-host")
+  const staging = process.env.ZAOVRA_EVAL_STAGE_USAGE
+  const usage = staging ? (await import("./evaluation/stage-usage")).stageUsageExecutor(staging) : undefined
   const experiment = process.env.ZAOVRA_EVAL_MEMORY_HOST
-    ? createMemoryHost(process.env.ZAOVRA_EVAL_MEMORY_HOST, generation)
+    ? createMemoryHost(process.env.ZAOVRA_EVAL_MEMORY_HOST, generation, usage ? [usage] : [])
     : undefined
-  if (experiment && replacements !== undefined) throw new Error("conflicting-evaluation-host-inputs")
-  const host = experiment?.host ?? (replacements === undefined ? SessionRuntime : SessionRuntime.create(replacements))
+  if ((experiment || usage) && replacements !== undefined) throw new Error("conflicting-evaluation-host-inputs")
+  const scoped = usage ? [usage] : replacements
+  const host = experiment?.host ?? (scoped === undefined ? SessionRuntime : SessionRuntime.create(scoped))
   const runtime = ManagedRuntime.make(createLayer(host), { memoMap })
   if (experiment) await runtime.runPromise(experiment.initialize)
   const listener = await Server.listen({ hostname: "127.0.0.1", port: 0, runtime: host })
