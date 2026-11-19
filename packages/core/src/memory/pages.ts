@@ -75,6 +75,28 @@ export function source(note: Memory.Note): Memory.PageSource {
   }
 }
 
+export function lookup(pages: ReadonlyArray<Memory.Page>, query = "") {
+  const limit = 10
+  const card = ({ id, title, summary, revision, status }: Memory.Page) => ({ id, title, summary, revision, status })
+  const words = MemoryStore.terms(query)
+  if (words.length === 0) return pages.slice(0, limit).map(card)
+
+  const candidates = pages.map((page) => {
+    const heading = page.title + " " + page.summary
+    return { page, heading, score: MemoryStore.relevance(heading, words) }
+  })
+  const primary = candidates.filter((item) => item.score > 0).sort((a, b) => b.score - a.score)
+  if (primary.length >= limit) return primary.slice(0, limit).map(({ page }) => card(page))
+
+  // Keep existing heading matches and their order. Stale text cannot add a new match.
+  const extra = candidates
+    .filter(({ page, score }) => score === 0 && page.status === "current")
+    .map(({ page, heading }) => ({ page, score: MemoryStore.relevance(heading + " " + page.body, words) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+  return [...primary, ...extra.slice(0, limit - primary.length)].map(({ page }) => card(page))
+}
+
 const normalized = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ")
 const titleKey = (title: string) => "title:" + Hash.sha256(normalized(title))
 const bodyKey = (body: string) => "body:" + Hash.sha256(normalized(body))

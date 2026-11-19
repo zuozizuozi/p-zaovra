@@ -151,19 +151,16 @@ export async function openLibrary(directory: string, arm: Arm, corpus: Corpus, d
       runtime.runPromise(
         Effect.gen(function* () {
           const pages = yield* MemoryPages.Service
-          const words = MemoryStore.terms(query)
           const refs = new Map([...pagesByRef].map(([ref, id]) => [id, ref]))
-          return (yield* pages.list(scope))
-            .map((page) => ({
-              ref: refs.get(page.id)!,
-              title: page.title,
-              summary: page.summary,
-              score: MemoryStore.relevance(page.title + " " + page.summary, words),
-            }))
-            .filter((page) => words.length === 0 || page.score > 0)
-            .sort((a, b) => b.score - a.score || a.ref.localeCompare(b.ref, "en", { numeric: true }))
-            .slice(0, 10)
-            .map(({ ref, title, summary }) => ({ ref, title, summary }))
+          // The frozen page order breaks equal-score ties across rebuilt evaluation databases.
+          const ordered = (yield* pages.list(scope)).toSorted((a, b) =>
+            refs.get(a.id)!.localeCompare(refs.get(b.id)!, "en", { numeric: true }),
+          )
+          return MemoryPages.lookup(ordered, query).map(({ id, title, summary }) => ({
+            ref: refs.get(id)!,
+            title,
+            summary,
+          }))
         }),
       ),
     read: async (ref: string) =>

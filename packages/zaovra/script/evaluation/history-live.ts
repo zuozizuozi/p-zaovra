@@ -13,7 +13,8 @@ type Selector = { phase: "generation"; document: string } | { phase: "qa"; arm: 
 export type HistoryLiveHost = Common & { request: (slot: Selector) => ModelRequest }
 
 const genVersion = "document-page-v1"
-const qaVersion = "blind-retrieval-v1"
+// Bind the retrieval behavior to the campaign so earlier transcripts cannot mix with new ranking.
+const qaVersion = "blind-retrieval-v2"
 const genSystem = [
   "Prepare one concise Chinese knowledge page from the single source record.",
   "Keep original identifiers, versions, numbers, error types, roles and the circumstances they refer to.",

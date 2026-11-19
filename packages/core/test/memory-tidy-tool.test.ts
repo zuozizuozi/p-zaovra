@@ -82,8 +82,7 @@ test("ordinary page discovery offers only lookup fields and keeps the full tidy 
       expect(JSON.stringify(full.inputSchema)).toContain('"expected"')
       expect((yield* h.registry.materialize()).definitions.find((tool) => tool.name === "memory_page")).toBe(full)
     }),
-  ),
-)
+  ))
 
 test("ordinary sessions cannot list or modify notes through memory_review or a forged basis", () =>
   withMemory((h) =>
@@ -196,7 +195,7 @@ test("page tools publish only within a live confirmed scope, then support ordina
         action: "publish",
         title: "Database testing",
         summary: "Use the isolated harness",
-        body: "Run database checks in the isolated harness",
+        body: "Run database checks in the isolated harness using walrecovery.",
         sources: [MemoryPages.source(note)],
       }
       expect((yield* h.page(ordinary.id, input)).result.type).toBe("error")
@@ -211,6 +210,17 @@ test("page tools publish only within a live confirmed scope, then support ordina
       const listed = yield* h.page(ordinary.id, { action: "list", query: "database" })
       expect(JSON.stringify(listed.output?.structured)).toContain(saved.summary)
       expect(JSON.stringify(listed.output?.structured)).not.toContain(saved.body)
+      const found = yield* h.page(ordinary.id, { action: "list", query: "walrecovery" })
+      const card = {
+        id: saved.id,
+        title: saved.title,
+        summary: saved.summary,
+        revision: saved.revision,
+        status: "current",
+      }
+      expect(found.output?.structured).toEqual({ pages: [card] })
+      const otherLayer = yield* h.page(ordinary.id, { action: "list", query: "walrecovery", layer: "user" })
+      expect(otherLayer.output?.structured).toEqual({ pages: [] })
       expect(
         JSON.stringify((yield* h.page(ordinary.id, { action: "read", id: saved.id })).output?.structured),
       ).toContain(saved.body)
@@ -223,6 +233,13 @@ test("page tools publish only within a live confirmed scope, then support ordina
       expect(JSON.stringify(searched.output?.structured)).toContain(saved.id)
       yield* h.tidy.finish(run.id, "cancelled")
       expect((yield* h.page(run.session_id, { ...input, title: "Late page" })).result.type).toBe("error")
+      yield* h.store.edit(note.id, { text: "Use the revised harness" })
+      const staleHeading = yield* h.page(ordinary.id, { action: "list", query: "database" })
+      expect(staleHeading.output?.structured).toEqual({ pages: [{ ...card, status: "stale" }] })
+      const staleBody = yield* h.page(ordinary.id, { action: "list", query: "walrecovery" })
+      expect(staleBody.output?.structured).toEqual({ pages: [] })
+      const staleRead = yield* h.page(ordinary.id, { action: "read", id: saved.id })
+      expect(staleRead.output?.structured).toMatchObject({ page: { id: saved.id, status: "stale", body: saved.body } })
       settings.enabled = false
       expect((yield* h.page(ordinary.id, { action: "read", id: saved.id })).result.type).toBe("error")
     }),

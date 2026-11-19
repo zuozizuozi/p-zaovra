@@ -28,6 +28,62 @@ import { SessionSchema } from "../src/session/schema"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
+test("page lookup retains heading rank, fills spare results with current text matches, and caps both together", () => {
+  const page = (
+    id: number,
+    title: string,
+    summary: string,
+    body: string,
+    status: Memory.Page["status"] = "current",
+  ): Memory.Page => ({
+    id: Memory.PageID.make("mpg_" + id),
+    scope: Memory.Scope.user,
+    title,
+    summary,
+    body,
+    status,
+    revision: "rev-" + id,
+    sources: [],
+    origin: "consolidation",
+    time: { created: id, updated: id },
+  })
+  const body = page(1, "Body", "Details", "alpha beta gamma delta")
+  const firstTie = page(2, "alpha", "beta", "describes a retired source", "stale")
+  const secondTie = page(3, "beta", "alpha", "gamma delta")
+  const heading = page(4, "alpha beta gamma", "summary", "details")
+  const combined = page(5, "delta", "Details", "gamma")
+  const anotherBody = page(6, "Another body", "Details", "alpha beta")
+  const weak = page(7, "Weak", "Details", "alpha")
+  const stale = page(8, "Outdated", "Details", "alpha beta gamma delta", "stale")
+  const pages = [body, firstTie, secondTie, heading, combined, anotherBody, weak, stale]
+  const query = "alpha beta gamma delta"
+
+  const matches = MemoryPages.lookup(pages, query)
+  expect(matches.map((item) => item.id)).toEqual(
+    [heading, firstTie, secondTie, body, combined, anotherBody].map((item) => item.id),
+  )
+  expect(matches[1]?.status).toBe("stale")
+  expect(matches[3]).toEqual({
+    id: body.id,
+    title: body.title,
+    summary: body.summary,
+    revision: body.revision,
+    status: body.status,
+  })
+  expect(MemoryPages.lookup(pages, "unmatched")).toEqual([])
+
+  const headers = Array.from({ length: 11 }, (_, i) => page(i + 10, "alpha", "beta", "details"))
+  const ordered = [weak, body, stale, ...headers, anotherBody]
+  for (const empty of [undefined, "", "  !?"])
+    expect(MemoryPages.lookup(ordered, empty).map((item) => item.id)).toEqual(
+      ordered.slice(0, 10).map((item) => item.id),
+    )
+  expect(MemoryPages.lookup(ordered, query).map((item) => item.id)).toEqual(headers.slice(0, 10).map((item) => item.id))
+  expect(MemoryPages.lookup([body, ...headers.slice(0, 9), anotherBody], query).map((item) => item.id)).toEqual(
+    [...headers.slice(0, 9), body].map((item) => item.id),
+  )
+})
+
 const nodes = LayerNode.group([
   MemoryPages.node,
   MemoryStore.node,
