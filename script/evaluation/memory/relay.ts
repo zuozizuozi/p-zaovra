@@ -105,7 +105,14 @@ export function startEvaluationRelay(options: {
   const tidy =
     input.maxCountRequests === undefined
       ? undefined
-      : createTidyRelay({ target, apiKey: input.apiKey, maxCountRequests: input.maxCountRequests, log })
+      : createTidyRelay({
+          target,
+          apiKey: input.apiKey,
+          maxCountRequests: input.maxCountRequests,
+          log: (record) => {
+            if (!closed) log(record)
+          },
+        })
   const deny = (status: number, reason: string) => {
     if (!closed) log({ phase: "denied", reason })
     return new Response(null, { status })

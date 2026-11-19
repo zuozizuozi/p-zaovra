@@ -103,25 +103,24 @@ for (const scenario of ["http-404", "valid-count"] as const) {
           calls.push(tidy ? "tidy-generation" : "user-generation")
           if (!tidy || ++tidyTurns > 1) return sse(text, finish)
           const fixture = await Bun.file(path.join(root, "stage-4", "fixture.json")).json()
+          const item = { type: "function_call", id: "fc_tidy", call_id: "call_tidy", name: "memory_review" }
+          const args = JSON.stringify({
+            layer: "project",
+            decisions: [
+              { id: fixture.inserted, action: "stale", basis: "The local publish fixture uses the renamed script." },
+            ],
+          })
           return sse(
             {
+              type: "response.output_item.added",
+              output_index: 0,
+              item: { ...item, arguments: "", status: "in_progress" },
+            },
+            { type: "response.function_call_arguments.delta", output_index: 0, item_id: item.id, delta: args },
+            {
               type: "response.output_item.done",
-              item: {
-                type: "function_call",
-                id: "fc_tidy",
-                call_id: "call_tidy",
-                name: "memory_review",
-                arguments: JSON.stringify({
-                  layer: "project",
-                  decisions: [
-                    {
-                      id: fixture.inserted,
-                      action: "stale",
-                      basis: "The local publish fixture uses the renamed script.",
-                    },
-                  ],
-                }),
-              },
+              output_index: 0,
+              item: { ...item, arguments: args, status: "completed" },
             },
             finish,
           )
@@ -185,6 +184,14 @@ for (const scenario of ["http-404", "valid-count"] as const) {
                 evidence,
                 calls,
                 terminalRows,
+                failureLines:
+                  evidence?.status === "rejected"
+                    ? (await Bun.file(path.join(root, "stage-4", "backend.log")).text())
+                        .split(/\r?\n/)
+                        .filter((line) => /Failed to drain Session|TypeError:|Error:|ReferenceError:/.test(line))
+                        .map((line) => line.replace(/Bearer\s+[\w-]+/gi, "Bearer [redacted]"))
+                        .slice(-20)
+                    : [],
                 tidyRelay: logs[0],
                 ordinaryRelay: logs[1],
                 stoppedOnFailure: await Bun.file(path.join(root, "stage-4", "tidy-stopped.json"))

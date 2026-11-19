@@ -42,6 +42,9 @@ export function createTidyRelay(input: {
     get current() {
       return current
     },
+    get available() {
+      return !used
+    },
     open(binding: { taskID: string; sessionID: string }) {
       if (used || !/^[\w-]{1,120}$/.test(binding.taskID) || !/^ses_[a-zA-Z0-9]+$/.test(binding.sessionID))
         throw new Error("invalid-evaluation-tidy-authorization")
@@ -63,7 +66,12 @@ export function createTidyRelay(input: {
       permits.clear()
     },
     evidence() {
-      return { countLimit: input.maxCountRequests, counts: structuredClone(counts), generationIDs: [...generations] }
+      return {
+        countLimit: input.maxCountRequests,
+        countBilling: "unknown" as const,
+        counts: structuredClone(counts),
+        generationIDs: [...generations],
+      }
     },
     consume(scope: Scope, body: Record<string, unknown>, id: string) {
       const digest = fingerprint(body)

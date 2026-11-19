@@ -66,6 +66,7 @@ export async function runEvaluationTidy(input: {
   let prepared: Task | undefined
   let started: Task | undefined
   let terminal: Task | undefined
+  let tidySession: { sessionID: string; watermark: number; fingerprint: string; messages: object[] } | undefined
   let reason: string | undefined
   let inserted: string | undefined
   try {
@@ -115,6 +116,8 @@ export async function runEvaluationTidy(input: {
     using grant = tidy.relay.open({ taskID: prepared.id, sessionID: prepared.sessionID })
     const task = { ...scope, id: prepared.id }
     started = await client.memory.startTidy(task, { signal })
+    if (started.id !== prepared.id || started.sessionID !== prepared.sessionID || started.requestID !== requestID)
+      throw new Error("evaluation-tidy-start-mismatch")
     for (;;) {
       const current = await client.memory.getTidy(task, { signal })
       if (current.id !== prepared.id || current.requestID !== requestID || current.sessionID !== prepared.sessionID)
@@ -138,6 +141,23 @@ export async function runEvaluationTidy(input: {
   if (before) {
     after = await inspectTidyMemory(client, scope, AbortSignal.timeout(5_000)).catch(() => undefined)
     if (!after) reason ??= "evaluation-tidy-final-snapshot-unavailable"
+  }
+  if (terminal && !terminal.executing) {
+    const record = await snapshot(client, terminal.sessionID, 8, 5_000).catch(() => undefined)
+    if (record)
+      tidySession = {
+        sessionID: terminal.sessionID,
+        watermark: record.watermark,
+        fingerprint: record.fingerprint,
+        messages: record.messages.map((message) => ({
+          id: message.id,
+          seq: message.seq,
+          type: message.type,
+          hash: hash(message),
+          ...(message.type === "assistant" ? { finish: message.finish, errorType: message.error?.type } : {}),
+        })),
+      }
+    if (!tidySession && terminal.state === "completed") reason ??= "evaluation-tidy-session-evidence-unavailable"
   }
   const transport = tidy.relay.evidence()
   if (!reason && terminal?.state !== "completed")
@@ -165,6 +185,7 @@ export async function runEvaluationTidy(input: {
     prepared,
     started,
     terminal,
+    tidySession,
     transport,
   }
   await writeFile(path.join(input.stage, "tidy.json"), JSON.stringify(evidence, null, 2), { flag: "wx" })

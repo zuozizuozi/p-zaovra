@@ -88,6 +88,7 @@ export async function runEvaluationChain(
     tidy &&
     (!input.relay ||
       input.relay === tidy.relay ||
+      !tidyRelay?.available ||
       input.family !== "gpt" ||
       tidyBinding?.protocol !== "openai-responses" ||
       tidyBinding.model !== input.modelID ||
