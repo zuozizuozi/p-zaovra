@@ -8,6 +8,8 @@ import { observe, validCapture } from "./observe"
 import type { CaptureBounds } from "./observe"
 import type { createMemoryAuthority } from "./memory-authority"
 import { collectHistory } from "./history"
+import { runEvaluationTidy } from "./tidy-stage"
+import type { EvaluationTidy } from "./tidy-stage"
 
 /** One new Session in an isolated, persistent profile; no retry admits another prompt.
  * Caller owns the trusted profile/workspace exclusively until this call settles. This is process
@@ -29,6 +31,7 @@ export async function runEvaluationSession(input: {
   memoryAuthority?: ReturnType<typeof createMemoryAuthority>
   stageUsage?: { baseURL: string; key: string; bindSession(sessionID: string): void }
   poison?: { chain: string; sourceSessionID: string }
+  tidy?: EvaluationTidy
   /** Opt-in sensitive own-turn projection; delivered only after final consistency and empty Job. */
   capture?: CaptureBounds
 }) {
@@ -39,6 +42,7 @@ export async function runEvaluationSession(input: {
     seconds < 10 ||
     seconds > 600 ||
     !validCapture(input.capture) ||
+    (input.tidy !== undefined && (!input.poison || !input.memoryAuthority || !input.stageUsage)) ||
     !input.prompt.trim()
   )
     throw new Error("invalid-evaluation-session")
@@ -213,6 +217,17 @@ export async function runEvaluationSession(input: {
     headers: { "x-zaovra-directory": encodeURIComponent(input.directory) },
   })
   const signal = AbortSignal.timeout(Math.max(1, seconds * 1000 - (Date.now() - began)))
+  if (input.tidy) {
+    try {
+      await runEvaluationTidy({ client, directory: input.directory, stage: input.stage, tidy: input.tidy, signal })
+    } catch (error) {
+      const stopped = await owner.stop()
+      await writeFile(path.join(input.stage, "tidy-stopped.json"), JSON.stringify({ generation, stopped }), {
+        flag: "wx",
+      })
+      throw error
+    }
+  }
   const session = await client.sessions.create(
     { location: { directory: input.directory }, model: input.model },
     { signal },

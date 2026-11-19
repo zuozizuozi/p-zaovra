@@ -295,7 +295,7 @@ async function bounded<T>(timeout: number, read: (signal: AbortSignal) => Promis
   }
 }
 
-async function snapshot(
+export async function snapshot(
   client: ReturnType<typeof Zaovra.make>,
   sessionID: string,
   maxPages: number,
