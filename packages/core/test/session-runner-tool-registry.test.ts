@@ -153,6 +153,17 @@ describe("ToolRegistry", () => {
     }),
   )
 
+  it.effect("excluding a named tool preserves other tools sharing its permission and rejects direct dispatch", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      yield* service.register({ read: make("read"), memory_check: make("read") })
+      const selected = yield* service.materialize([], new Set(["memory_check"]))
+      expect(selected.definitions.map((definition) => definition.name)).toEqual(["read"])
+      expect((yield* selected.settle(call("memory_check"))).inputRejected).toBe(true)
+      expect((yield* selected.settle(call("read"))).result.type).toBe("text")
+    }),
+  )
+
   it.effect("keeps permission decoration isolated between registrations", () =>
     Effect.gen(function* () {
       const service = yield* ToolRegistry.Service

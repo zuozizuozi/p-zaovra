@@ -981,9 +981,15 @@ const layer = Layer.effect(
         })
         return { needsContinuation: false, step: currentStep }
       }
-      const toolMaterialization =
-        isLastStep || textOnlyRecovery || deliveryReport ? undefined : yield* tools.materialize(agent.info?.permissions)
       const tidyAllowed = yield* tidyTools.allowed(session.id)
+      const excludedMemory =
+        !tidyAllowed && Config.latest(configuration, "memory")?.modelTools === false
+          ? MemoryTidyTools.conversationTools
+          : undefined
+      const toolMaterialization =
+        isLastStep || textOnlyRecovery || deliveryReport
+          ? undefined
+          : yield* tools.materialize(agent.info?.permissions, excludedMemory)
       const memoryNoteAllowed = yield* memoryWriting.allowed(session.id)
       const deliveryTools = ToolProfile.select(
         (toolMaterialization?.definitions ?? []).filter(

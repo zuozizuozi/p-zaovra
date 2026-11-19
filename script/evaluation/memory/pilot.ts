@@ -133,7 +133,12 @@ export async function runEvaluationChain(
     shell: "powershell",
     formatter: false,
     lsp: false,
-    memory: { enabled: input.treatment !== "A", taskSearch: input.treatment === "C", index: { enabled: true } },
+    memory: {
+      enabled: input.treatment !== "A",
+      modelTools: input.treatment === "C",
+      taskSearch: input.treatment === "C",
+      index: { enabled: true },
+    },
     agent: { build: { steps: 8 } },
     permission: {
       "*": "allow",
@@ -141,8 +146,6 @@ export async function runEvaluationChain(
       task: "deny",
       webfetch: "deny",
       websearch: "deny",
-      // A and B compare the recorder and startup index alone. C adds model-facing memory tools.
-      ...(input.treatment === "A" || input.treatment === "B" ? { "memory_*": "deny" } : {}),
     },
     provider: {
       [providerID]: {

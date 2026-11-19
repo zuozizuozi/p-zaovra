@@ -5,6 +5,10 @@ import { PositiveInt } from "../schema"
 
 export const Info = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
+  modelTools: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Offer memory tools in ordinary conversations (default true when memory is enabled). User-confirmed tidy tasks retain their own tool grant.",
+  }),
   taskSearch: Schema.optional(Schema.Boolean).annotate({
     description: "Search local notes and topic pages once per new user task (default true). No model call is made.",
   }),

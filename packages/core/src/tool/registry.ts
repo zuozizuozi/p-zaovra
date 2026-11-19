@@ -19,7 +19,10 @@ export type ExecuteInput = Omit<Tool.Context, "toolCallID"> & {
 }
 
 export interface Interface {
-  readonly materialize: (permissions?: PermissionV2.Ruleset) => Effect.Effect<Materialization>
+  readonly materialize: (
+    permissions?: PermissionV2.Ruleset,
+    excluded?: ReadonlySet<string>,
+  ) => Effect.Effect<Materialization>
   /** Internal registration capability exposed publicly only through Tools.Service. */
   readonly register: (tools: Readonly<Record<string, AnyTool>>) => Effect.Effect<void, RegistrationError, Scope.Scope>
 }
@@ -189,7 +192,7 @@ const registryLayer = Layer.effect(
           }),
         )
       }),
-      materialize: Effect.fn("ToolRegistry.materialize")(function* (permissions = []) {
+      materialize: Effect.fn("ToolRegistry.materialize")(function* (permissions = [], excluded?: ReadonlySet<string>) {
         const registrations = new Map(applications.entries())
         const disabled = new Set<string>()
         for (const [name, entries] of local) {
@@ -197,7 +200,7 @@ const registryLayer = Layer.effect(
           if (registration) registrations.set(name, registration)
         }
         for (const [name, registration] of registrations)
-          if (whollyDisabled(permission(registration.tool, name), permissions)) {
+          if (excluded?.has(name) || whollyDisabled(permission(registration.tool, name), permissions)) {
             disabled.add(name)
             registrations.delete(name)
           }

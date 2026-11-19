@@ -28,6 +28,15 @@ const permitted: ReadonlySet<string> = new Set([
   "memory_page",
   "memory_extract",
 ])
+/** Product memory tools omitted by the recorder-and-index-only configuration. */
+export const conversationTools: ReadonlySet<string> = new Set([
+  "memory_search",
+  "memory_note",
+  "memory_page",
+  "memory_extract",
+  "memory_check",
+  "memory_review",
+])
 const denied: ReadonlySet<string> = new Set()
 
 const layer = Layer.effect(
