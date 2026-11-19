@@ -14,6 +14,16 @@ const items = [
     id: "chat-b",
     baseModelID: "chat-b",
     name: "Configured chat",
+    api: { npm: "@ai-sdk/openai", url: "https://fixture.invalid/v1" },
+    provider: { id: "configured", name: "Configured" },
+    limit: { context: 10000 },
+    variants: {},
+  },
+  {
+    id: "chat-completions",
+    baseModelID: "chat-completions",
+    name: "Chat Completions",
+    api: { npm: "@ai-sdk/openai-compatible", url: "https://fixture.invalid/v1" },
     provider: { id: "configured", name: "Configured" },
     limit: { context: 10000 },
     variants: {},
@@ -22,6 +32,7 @@ const items = [
     id: "embedding",
     baseModelID: "embedding",
     name: "Embedding only",
+    api: { npm: "@ai-sdk/openai", url: "https://fixture.invalid/v1" },
     provider: { id: "configured", name: "Configured" },
     limit: { context: 10000 },
     variants: {},
@@ -235,6 +246,7 @@ async function choose() {
   picker().click()
   await until(() => !!document.querySelector('[data-option-key="configured:chat-b"]'))
   expect(document.querySelector('[data-option-key="configured:embedding"]')).toBeNull()
+  expect(document.querySelector('[data-option-key="configured:chat-completions"]')).toBeNull()
   expect(document.querySelector('[data-option-key="action:manage"]')).toBeNull()
   document.querySelector<HTMLButtonElement>('[data-option-key="configured:chat-b"]')!.click()
   await until(() => picker().textContent?.includes("Configured chat") === true)

@@ -28,7 +28,11 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     error: false,
   })
   const available = createMemo(() =>
-    models.list().filter((item) => models.type({ providerID: item.provider.id, modelID: item.id }) === "chat"),
+    models.list().filter((item) =>
+      item.api?.npm === "@ai-sdk/openai" &&
+      (Boolean(item.api.url?.trim()) || item.provider.id === "openai") &&
+      models.type({ providerID: item.provider.id, modelID: item.id }) === "chat",
+    ),
   )
   const selected = createMemo(() =>
     available().find((item) => item.id === state.model?.modelID && item.provider.id === state.model?.providerID),
@@ -78,7 +82,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     !!tasks.error ||
     !!automatic.error
   const submit = async () => {
-    if (state.busy || !state.request || blocked(state.request.layer)) return
+    if (state.busy || !state.request || (!state.sent && !selected()) || blocked(state.request.layer)) return
     const request = state.request
     setState({ busy: true, error: false, sent: true })
     await (
@@ -208,7 +212,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
             <div class="flex gap-2">
               <ButtonV2
                 variant="neutral"
-                disabled={state.busy || blocked(state.request?.layer)}
+                disabled={state.busy || (!state.sent && !selected()) || blocked(state.request?.layer)}
                 onClick={() => void submit()}
               >
                 {language.t(

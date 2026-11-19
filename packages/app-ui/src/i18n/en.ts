@@ -11,7 +11,7 @@ export const dict = {
     "Failed, cancelled or interrupted tasks are not retried automatically. Use a manual tidy to review unfinished content; disable and confirm again to permit later automatic tasks.",
   "settings.memory.task.title": "Budgeted memory tidy",
   "settings.memory.task.description":
-    "Choose a model and confirm a manual run, or separately enable automatic project tidy. Opening this page never starts or resumes a task. Tidying uses a conversation separate from your current chat.",
+    "Choose a configured Responses model for manual or automatic tidy. The endpoint must also support exact input counting. Choosing a model does not start a task.",
   "settings.memory.task.scope": "Scope",
   "settings.memory.task.chooseModel": "Choose a tidy model",
   "settings.memory.task.tokens": "Run limit (tokens)",

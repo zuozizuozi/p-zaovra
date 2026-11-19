@@ -15,7 +15,7 @@ export const dict = {
     "失败、取消或中断的任务不会自动重试。未完成内容可用手动整理检查；关闭后重新确认，可允许后续自动任务。",
   "settings.memory.task.title": "有预算的记忆整理",
   "settings.memory.task.description":
-    "选择模型并确认本次手动整理，或另行开启项目自动整理。打开页面不会开始或继续任务；整理使用独立对话，不改变当前聊天。",
+    "手动和自动整理均需选择已配置的 Responses 模型，服务端还需支持精确输入计数。选择模型后，确认才会启动手动整理或授权自动整理。",
   "settings.memory.task.scope": "整理范围",
   "settings.memory.task.chooseModel": "选择整理模型",
   "settings.memory.task.tokens": "单次上限（tokens）",
