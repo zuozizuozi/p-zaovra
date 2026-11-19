@@ -515,6 +515,8 @@ function inspectTool(
     output.status === "running"
   )
     return unknown
+  if (chain === "publish" && shell === "powershell" && input.command === "Get-FileHash -Algorithm SHA256 published.txt")
+    return { tool, kind: "read-only" }
   const command = fixedCommand(input.command, shell, chain)
   return command ? { tool, kind: "command", command, record } : unknown
 }
@@ -575,8 +577,15 @@ function fixedCommand(command: string, shell?: "powershell" | "posix", chain?: H
     ].includes(command)
   )
     return "rename-published"
-  if (shell === "powershell" && command === "Move-Item -LiteralPath 'published.txt' -Destination 'retired-published.txt'")
-    return "rename-published"
+  if (shell === "powershell") {
+    if (command === "node scripts\\validate.cjs") return "node scripts/validate.cjs"
+    if (command === "node scripts\\release.cjs") return "node scripts/release.cjs"
+    if (
+      command === "Move-Item -LiteralPath 'published.txt' -Destination 'retired-published.txt'" ||
+      command === "Rename-Item -LiteralPath 'published.txt' -NewName 'retired-published.txt'"
+    )
+      return "rename-published"
+  }
   if (command === "node scripts/validate.cjs && node scripts/release.cjs") return "validate-release"
 }
 

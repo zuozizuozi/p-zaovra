@@ -470,6 +470,30 @@ test("short-circuit validate then release is supported; semicolon is unknown", (
   expect(hostVerdict(input).status).toBe("unknown")
 })
 
+test("Windows path separators and an exact file hash observation preserve the release trace", () => {
+  const input = fixture("publish", 3)
+  input.shell = "powershell"
+  input.requirements = ["every-release-v1-preceded-by-successful-validate"]
+  bash(input, "node scripts\\validate.cjs", 1)
+  bash(input, "node scripts\\release.cjs", 2)
+  bash(input, "Get-FileHash -Algorithm SHA256 published.txt", 3)
+  expect(hostVerdict(input).status).toBe("verified")
+  input.shell = "posix"
+  expect(hostVerdict(input).status).toBe("unknown")
+  input.shell = "powershell"
+  bash(input, "Get-FileHash -Algorithm SHA256 published.txt; node scripts/release.cjs", 4)
+  expect(hostVerdict(input).status).toBe("unknown")
+})
+
+test("literal PowerShell Rename-Item followed by validation proves retirement", () => {
+  const input = fixture("publish", 4)
+  input.shell = "powershell"
+  input.requirements = ["published-renamed-to-retired-published", "validate-succeeded-after-retirement"]
+  bash(input, "Rename-Item -LiteralPath 'published.txt' -NewName 'retired-published.txt'", 1)
+  bash(input, "node scripts/validate.cjs", 2)
+  expect(hostVerdict(input).status).toBe("verified")
+})
+
 test("read-before-edit uses the host's stage-start bytes; partial Read stays unknown", () => {
   const input = fixture("arithmetic", 4)
   input.requirements = ["read-updated-test-and-package"]
