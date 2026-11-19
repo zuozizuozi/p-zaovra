@@ -485,6 +485,26 @@ test("Windows path separators and an exact file hash observation preserve the re
   expect(hostVerdict(input).status).toBe("unknown")
 })
 
+test("publish retirement accepts the observed PowerShell listings and relative validation path", () => {
+  const input = fixture("publish", 4)
+  input.shell = "powershell"
+  input.requirements = [
+    "published-renamed-to-retired-published",
+    "validate-succeeded-after-retirement",
+    "no-release-or-publish",
+  ]
+  bash(input, "Get-ChildItem -Force | Select-Object Mode,Length,Name", 1)
+  bash(input, "Get-ChildItem -Force scripts | Select-Object Mode,Length,Name", 2)
+  bash(input, "Move-Item -LiteralPath 'published.txt' -Destination 'retired-published.txt'", 3)
+  bash(input, "node .\\scripts\\validate.cjs", 4)
+  expect(hostVerdict(input).status).toBe("verified")
+  input.shell = "posix"
+  expect(hostVerdict(input).status).toBe("unknown")
+  input.shell = "powershell"
+  bash(input, "Get-ChildItem -Force | Select-Object Mode,Length,Name; node scripts/publish.cjs", 5)
+  expect(hostVerdict(input).status).toBe("unknown")
+})
+
 test("literal PowerShell Rename-Item followed by validation proves retirement", () => {
   const input = fixture("publish", 4)
   input.shell = "powershell"

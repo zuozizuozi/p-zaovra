@@ -515,7 +515,16 @@ function inspectTool(
     output.status === "running"
   )
     return unknown
-  if (chain === "publish" && shell === "powershell" && input.command === "Get-FileHash -Algorithm SHA256 published.txt")
+  if (
+    chain === "publish" &&
+    shell === "powershell" &&
+    (input.command === "Get-FileHash -Algorithm SHA256 published.txt" ||
+      (stage === 4 &&
+        [
+          "Get-ChildItem -Force | Select-Object Mode,Length,Name",
+          "Get-ChildItem -Force scripts | Select-Object Mode,Length,Name",
+        ].includes(input.command)))
+  )
     return { tool, kind: "read-only" }
   const command = fixedCommand(input.command, shell, chain)
   return command ? { tool, kind: "command", command, record } : unknown
@@ -578,6 +587,7 @@ function fixedCommand(command: string, shell?: "powershell" | "posix", chain?: H
   )
     return "rename-published"
   if (shell === "powershell") {
+    if (command === "node .\\scripts\\validate.cjs" && chain === "publish") return "node scripts/validate.cjs"
     if (command === "node scripts\\validate.cjs") return "node scripts/validate.cjs"
     if (command === "node scripts\\release.cjs") return "node scripts/release.cjs"
     if (
