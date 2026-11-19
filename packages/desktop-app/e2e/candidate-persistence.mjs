@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import { join, resolve } from "node:path"
 import { _electron } from "playwright-core"
+import { withCandidatePermission } from "./candidate-permission.mjs"
 
 // The launch binding contains only a loopback credential, never an upstream key.
 const binding = JSON.parse(await readFile(process.argv[2], "utf8"))
@@ -211,57 +212,55 @@ try {
               }
               throw new Error("candidate turn terminated: " + JSON.stringify(item.terminalFailure))
             }
-            const dock = page.locator('[data-notification-target^="permission:"]')
-            if (await dock.isVisible()) {
-              const id = await dock.getAttribute("data-notification-target")
-              if (!item.approvals.some((entry) => entry.id === id && entry.approved)) {
-                const permission = await dock.locator('[data-slot="permission-details"] > code').textContent()
-                const patterns = await dock.locator('[data-slot="permission-patterns"] code').allTextContents()
-                const tool = current
-                  .flatMap((row) => row.data.content)
-                  .findLast((part) => part.type === "tool" && part.name === "bash" && part.state.status === "running")
-                if (tool) {
-                  const project = join(item.runtime.documents, "Zaovra 项目")
-                  const command = tool.state.input.command
-                  const workdir = resolve(project, tool.state.input.workdir ?? ".")
-                  const scoped =
-                    permission === "bash" &&
-                    patterns.length === 1 &&
-                    patterns[0] === command &&
-                    workdir.toLowerCase() === resolve(project).toLowerCase()
-                  const decisions = binding.manualApprovalFile
-                    ? JSON.parse(await readFile(binding.manualApprovalFile, "utf8"))
-                    : []
-                  assert(Array.isArray(decisions), "approval decisions must be an explicit list")
-                  const approved =
-                    scoped &&
-                    ((binding.approvedCommands ?? []).includes(command) ||
-                      decisions.some(
-                        (entry) =>
-                          entry.id === id &&
-                          entry.permission === permission &&
-                          entry.command === command &&
-                          entry.workdir === workdir &&
-                          entry.response === "once",
-                      ))
-                  const prior = item.approvals.findIndex((entry) => entry.id === id)
-                  const entry = { id, permission, patterns, command, workdir, approved }
-                  if (prior < 0 || item.approvals[prior].approved !== approved) {
-                    await appendFile(
-                      join(root, `phase-${phase}-approval-events.jsonl`),
-                      JSON.stringify({ ...entry, at: Date.now() }) + "\n",
-                    )
-                  }
-                  item.approvals[prior < 0 ? item.approvals.length : prior] = entry
-                  await writeFile(join(root, `phase-${phase}-approvals.json`), JSON.stringify(item.approvals, null, 2))
-                  assert(
-                    scoped && (approved || binding.manualApprovalFile),
-                    "unreviewed permission request; do not grant blanket approval",
+            await withCandidatePermission(page, async ({ id, permission, patterns }, approveOnce) => {
+              if (item.approvals.some((entry) => entry.id === id && entry.approved)) return
+              const tools = current
+                .flatMap((row) => row.data.content)
+                .filter((part) => part.type === "tool" && part.name === "bash" && part.state.status === "running")
+              if (tools.length > 0) {
+                const matches = tools.filter((part) => part.state.input.command === patterns[0])
+                assert(matches.length <= 1, "permission matches more than one running bash")
+                const tool = matches[0] ?? tools.at(-1)
+                const project = join(item.runtime.documents, "Zaovra 项目")
+                const command = tool.state.input.command
+                const workdir = resolve(project, tool.state.input.workdir ?? ".")
+                const scoped =
+                  permission === "bash" &&
+                  patterns.length === 1 &&
+                  patterns[0] === command &&
+                  workdir.toLowerCase() === resolve(project).toLowerCase()
+                const decisions = binding.manualApprovalFile
+                  ? JSON.parse(await readFile(binding.manualApprovalFile, "utf8"))
+                  : []
+                assert(Array.isArray(decisions), "approval decisions must be an explicit list")
+                const approved =
+                  scoped &&
+                  ((binding.approvedCommands ?? []).includes(command) ||
+                    decisions.some(
+                      (entry) =>
+                        entry.id === id &&
+                        entry.permission === permission &&
+                        entry.command === command &&
+                        entry.workdir === workdir &&
+                        entry.response === "once",
+                    ))
+                if (approved) await approveOnce(command)
+                const prior = item.approvals.findIndex((entry) => entry.id === id)
+                const entry = { id, permission, patterns, command, workdir, approved }
+                if (prior < 0 || item.approvals[prior].approved !== approved) {
+                  await appendFile(
+                    join(root, `phase-${phase}-approval-events.jsonl`),
+                    JSON.stringify({ ...entry, at: Date.now() }) + "\n",
                   )
-                  if (approved) await dock.getByRole("button", { name: /^(允许一次|Allow once)$/, exact: true }).click()
                 }
+                item.approvals[prior < 0 ? item.approvals.length : prior] = entry
+                await writeFile(join(root, `phase-${phase}-approvals.json`), JSON.stringify(item.approvals, null, 2))
+                assert(
+                  scoped && (approved || binding.manualApprovalFile),
+                  "unreviewed permission request; do not grant blanket approval",
+                )
               }
-            }
+            })
             // A visible answer must also have a durable successful terminal and an idle UI.
             if (
               current.at(-1)?.data.finish === "stop" &&

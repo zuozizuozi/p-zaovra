@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 import { join, resolve } from "node:path"
 import { _electron } from "playwright-core"
+import { withCandidatePermission } from "./candidate-permission.mjs"
 
 // The launch binding contains only a loopback credential, never an upstream key.
 const binding = JSON.parse(await readFile(process.argv[2], "utf8"))
@@ -385,12 +386,9 @@ async function runTurn(page, database, runtime, item) {
       }
       assert(current.at(-1)?.data.finish !== "stop", "provider completed before a real Stop could be exercised")
     }
-    const dock = page.locator('[data-notification-target^="permission:"]')
-    if (item.mode !== "stop" && (await dock.isVisible())) {
-      const id = await dock.getAttribute("data-notification-target")
-      if (!item.approvals.some((entry) => entry.id === id && entry.approved)) {
-        const permission = await dock.locator('[data-slot="permission-details"] > code').textContent()
-        const patterns = await dock.locator('[data-slot="permission-patterns"] code').allTextContents()
+    if (item.mode !== "stop") {
+      await withCandidatePermission(page, async ({ id, permission, patterns }, approveOnce) => {
+        if (item.approvals.some((entry) => entry.id === id && entry.approved)) return
         // Parallel bash calls can wait together; attribute the visible permission by its exact command.
         const matches = tools.filter(
           (part) =>
@@ -425,6 +423,7 @@ async function runTurn(page, database, runtime, item) {
                 entry.workdir === workdir &&
                 entry.response === "once",
             ))
+        if (approved) await approveOnce(command)
         const previous = item.approvals.findIndex((entry) => entry.id === id)
         const entry = { id, permission, patterns, command, workdir, approved }
         if (previous < 0 || item.approvals[previous].approved !== approved)
@@ -435,8 +434,7 @@ async function runTurn(page, database, runtime, item) {
         item.approvals[previous < 0 ? item.approvals.length : previous] = entry
         await writeFile(join(root, `turn-${item.index}-approvals.json`), JSON.stringify(item.approvals, null, 2))
         assert(scoped && (approved || binding.manualApprovalFile), "unreviewed shell command")
-        if (approved) await dock.getByRole("button", { name: /^(允许一次|Allow once)$/, exact: true }).click()
-      }
+      })
     }
     if (
       item.mode !== "stop" &&
