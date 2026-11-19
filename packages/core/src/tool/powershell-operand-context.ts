@@ -74,6 +74,17 @@ function isNonPathFragment(node: Node) {
       result = outer
       continue
     }
+    if (
+      (outer.type === "parenthesized_expression" && outer.namedChildCount === 1) ||
+      (outer.type === "command_elements" && outer.text.trim() === result.text) ||
+      (outer.type === "command" &&
+        outer.namedChildCount === 2 &&
+        outer.lastNamedChild?.id === result.id &&
+        /^Write-Output$/i.test(outer.firstNamedChild?.text ?? ""))
+    ) {
+      result = outer
+      continue
+    }
     if (outer.namedChildCount === 1 && outer.text === result.text) {
       result = outer
       continue

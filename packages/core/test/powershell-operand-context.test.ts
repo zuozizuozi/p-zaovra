@@ -71,3 +71,16 @@ test("bracketed file contents use newline escapes only as standalone display tex
     expect((await analyzeShellCommand(command, "powershell")).paths, command).toContain("\\n")
   }
 })
+
+test("Write-Output of bracketed file contents keeps only file operands", async () => {
+  const command =
+    "$p = Join-Path (Get-Location) 'beta-proof.txt'; [System.IO.File]::WriteAllText($p, \"RECOVERY_0`n\", (New-Object System.Text.UTF8Encoding($false))); $b = [System.IO.File]::ReadAllBytes($p); Write-Output (\"bytes=\" + ($b -join ',')); Write-Output (\"text=[\" + [System.IO.File]::ReadAllText($p).Replace(\"`r\",\"\\r\").Replace(\"`n\",\"\\n\") + \"]\")"
+  const scan = await analyzeShellCommand(command, "powershell")
+  expect(scan.paths).toContain("beta-proof.txt")
+  expect(scan.paths).not.toContain("\\r")
+  expect(scan.paths).not.toContain("\\n")
+  const display = command.slice(command.lastIndexOf("Write-Output"))
+  for (const use of [display + " > log.txt", "$file = " + display, display + " | Get-Item", display.replace("Write-Output", "Get-Item")]) {
+    expect((await analyzeShellCommand(use, "powershell")).paths, use).toContain("\\r")
+  }
+})
