@@ -1,10 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "13b2fe6e-873d-4fb1-8d06-fdeefefba88e",
+  "id": "9b1f56d7-676a-4ac8-8b44-3e0f955556d2",
   "prevIds": [
-    "49dabb06-7b14-4d49-ba5c-813631e7e414",
-    "3ad7c1b3-188e-459a-95a8-2ec8985c5d95"
+    "13b2fe6e-873d-4fb1-8d06-fdeefefba88e"
   ],
   "ddl": [
     {
@@ -25,6 +24,10 @@
     },
     {
       "name": "memory_automatic",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_tidy_count",
       "entityType": "tables"
     },
     {
@@ -460,6 +463,16 @@
       "table": "memory_automatic"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "count_binding",
+      "entityType": "columns",
+      "table": "memory_automatic"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -468,6 +481,26 @@
       "name": "time_confirmed",
       "entityType": "columns",
       "table": "memory_automatic"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "memory_tidy_count"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "binding",
+      "entityType": "columns",
+      "table": "memory_tidy_count"
     },
     {
       "type": "text",
@@ -5173,6 +5206,16 @@
       "name": "memory_automatic_source_pk",
       "entityType": "pks",
       "table": "memory_automatic_source"
+    },
+    {
+      "columns": [
+        "directory",
+        "binding"
+      ],
+      "nameExplicit": false,
+      "name": "memory_tidy_count_pk",
+      "entityType": "pks",
+      "table": "memory_tidy_count"
     },
     {
       "columns": [

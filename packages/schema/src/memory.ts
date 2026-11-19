@@ -201,6 +201,7 @@ export const AutomaticPreference = Schema.Struct({
   directory: Schema.String,
   generation: Schema.String,
   enabled: Schema.Boolean,
+  countVerified: Schema.Boolean.pipe(optional),
   model: Model.Ref,
   tokens: PositiveInt,
   dailyTokens: PositiveInt,

@@ -65,7 +65,7 @@ mock.module("@/context/server-sync", () => ({
 const { SettingsMemoryV2 } = await import("../../src/components/settings-v2/memory")
 let dispose: (() => void) | undefined
 const calls: { path: string; body: Record<string, unknown>; query: URLSearchParams }[] = []
-let failure: "prepare" | "start" | "automatic" | undefined
+let failure: "prepare" | "start" | "automatic" | "count" | undefined
 let automatic: MemoryAutomaticPreference | null = null
 let tasks: MemoryTidyTask[] = []
 let target: ((value: string) => void) | undefined
@@ -92,9 +92,9 @@ function action() {
 function picker() {
   return document.querySelector<HTMLButtonElement>('[aria-label="Model for this tidy"]')!
 }
-async function mount(initial: MemoryTidyTask[] = []) {
+async function mount(initial: MemoryTidyTask[] = [], preference: MemoryAutomaticPreference | null = null) {
   tasks = initial
-  automatic = null
+  automatic = preference
   calls.length = 0
   localWrites = 0
   client = createZaovraClient({
@@ -146,7 +146,15 @@ async function mount(initial: MemoryTidyTask[] = []) {
           tokens: number
           dailyTokens: number
         }
+        if (failure === "count") {
+          failure = undefined
+          return Response.json(
+            { _tag: "MemoryTidyError", reason: "count", message: "Unverified input counting" },
+            { status: 409 },
+          )
+        }
         automatic = {
+          countVerified: true,
           directory: "/tidy-project",
           generation: input.requestID,
           model: input.model,
@@ -346,7 +354,7 @@ test("automatic consent has a separate confirmation, idempotent retry and an exp
   button("Review automatic project tidy").click()
   expect(calls).toHaveLength(0)
   expect(document.querySelector('[data-slot="memory-tidy-confirm"]')?.textContent).toContain(
-    "even when you are not chatting",
+    "while you are away",
   )
   failure = "automatic"
   button("Confirm and enable automatic tidy").click()
@@ -370,6 +378,30 @@ test("automatic consent has a separate confirmation, idempotent retry and an exp
   expect(calls[2].body).toEqual({ expected: confirmed.requestID })
   expect(tasks).toEqual([])
   expect(localWrites).toBe(0)
+})
+
+test("legacy consent is visibly paused while an unverified route cannot be confirmed", async () => {
+  await mount([], {
+    directory: "/tidy-project",
+    generation: "legacy",
+    model: { id: "model-a", providerID: "provider-a" },
+    tokens: 1000,
+    dailyTokens: 2000,
+    enabled: true,
+    currentRun: null,
+    confirmedAt: 1,
+  })
+  await until(() => document.body.textContent?.includes("input counting is unverified for this route") === true)
+  expect(button("Disable automatic tidy and stop its task").disabled).toBe(false)
+  await choose()
+  await until(() => button("Review automatic project tidy").disabled === false)
+  button("Review automatic project tidy").click()
+  failure = "count"
+  button("Confirm and enable automatic tidy").click()
+  await until(() => button("Review automatic project tidy")?.disabled === false)
+  expect(calls.map((call) => call.path)).toEqual(["/api/memory/automatic"])
+  expect(automatic?.generation).toBe("legacy")
+  expect(document.body.textContent).toContain("input counting is unverified for this route")
 })
 
 test("lost automatic confirmation can be disabled without retrying its grant", async () => {

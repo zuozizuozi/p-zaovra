@@ -220,6 +220,7 @@ function taskView(view: MemoryTidy.View): Memory.TidyTask {
 
 function tidyError(error: { reason: MemoryTidyError["reason"] }) {
   const messages = {
+    count: "这条线路尚未通过整理输入计数验证。",
     invalid: "整理请求或预算无效。",
     conflict: "同一次确认的参数已改变，请重新确认。",
     unauthorized: "整理授权已失效；请检查记忆开关、目录、模型及旧资料恢复状态。",

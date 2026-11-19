@@ -15,8 +15,19 @@ export const MemoryAutomaticTable = sqliteTable("memory_automatic", {
   token_limit: integer().notNull(),
   daily_limit: integer().notNull(),
   current_run: text(),
+  count_binding: text(),
   time_confirmed: integer().notNull(),
 })
+
+// Local evidence that the exact configured model and route returned a positive count.
+export const MemoryTidyCountTable = sqliteTable(
+  "memory_tidy_count",
+  {
+    directory: text().notNull(),
+    binding: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.directory, table.binding] })],
+)
 
 // Attempted source versions are not proof that the model reviewed every source.
 // No cascading Session FK: deleting history must not recreate a paid attempt.

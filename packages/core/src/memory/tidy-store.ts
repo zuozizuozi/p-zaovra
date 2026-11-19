@@ -14,6 +14,7 @@ import { SessionInputTable, SessionTable } from "../session/sql"
 import { MemoryTidyAttemptTable, MemoryTidyDayTable, MemoryTidyRunTable } from "./tidy.sql"
 import { MemoryStore } from "./store"
 import { MemoryAutomaticRunTable, MemoryAutomaticTable } from "./automatic.sql"
+import { MemoryTidyCount } from "./tidy-count"
 
 export const defaults = { tokens: 200_000, dailyTokens: 1_000_000 } as const
 export type Run = typeof MemoryTidyRunTable.$inferSelect
@@ -32,7 +33,7 @@ export type Resume = { checkpoint: string; tokens?: number }
 export type Dispatch = { id: string; checkpoint?: string; tokens?: number }
 
 export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Rejected", {
-  reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy"]),
+  reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy", "count"]),
   budget: Schema.optional(Schema.Literals(["run", "day"])),
   utcDay: Schema.optional(Schema.String),
   minimumTokens: Schema.optional(Schema.Number),
@@ -137,8 +138,11 @@ const layer = Layer.effect(
           consent.current_run !== run.id ||
           consent.scope !== run.scope ||
           consent.directory !== run.directory ||
+          !consent.count_binding ||
           modelKey(consent.model) !== modelKey(run.model)
         )
+          return yield* new Rejected({ reason: "unauthorized" })
+        if (!(yield* MemoryTidyCount.verified(db, run.directory, consent.count_binding)))
           return yield* new Rejected({ reason: "unauthorized" })
       }
       const session = yield* db

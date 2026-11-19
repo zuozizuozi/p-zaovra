@@ -16,6 +16,7 @@ import { Memory } from "@zaovra-ai/schema/memory"
 import { Catalog } from "../catalog"
 import type { ModelV2 } from "../model"
 import { Config } from "../config"
+import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { LayerNodePlatform } from "../effect/app-node-platform"
 import { Location } from "../location"
@@ -28,6 +29,7 @@ import { MemoryStore } from "./store"
 import { MemoryTidyBudget } from "./tidy-budget"
 import { MemoryTidyStore } from "./tidy-store"
 import { MemoryAutomaticIdle } from "./automatic-idle"
+import { MemoryTidyCount } from "./tidy-count"
 
 export interface Interface {
   /** Bound actual generation before encoding, leaving ordinary requests unchanged. */
@@ -40,15 +42,6 @@ export interface Interface {
   ) => Stream.Stream<LLMEvent, LLMError>
 }
 
-function supportsInputCount(model: LLMRequest["model"]) {
-  return (
-    model.route.protocol === "openai-responses" &&
-    model.route.transport === OpenAIResponses.httpTransport &&
-    model.route.body === OpenAIResponses.route.body &&
-    model.route.endpoint.path === OpenAIResponses.PATH
-  )
-}
-
 // Catalog admission checks the configured route. The real endpoint's count is checked at execution.
 export const supportsSelection = Effect.fn("MemoryTidy.supportsSelection")(function* (ref: ModelV2.Ref) {
   const catalog = yield* Catalog.Service
@@ -57,7 +50,7 @@ export const supportsSelection = Effect.fn("MemoryTidy.supportsSelection")(funct
   )
   if (!model) return false
   return yield* SessionRunnerModel.resolve({ model: ref }, model).pipe(
-    Effect.map(supportsInputCount),
+    Effect.map(MemoryTidyCount.supported),
     Effect.orElseSucceed(() => false),
   )
 })
@@ -75,6 +68,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const store = yield* MemoryTidyStore.Service
+    const { db } = yield* Database.Service
     const memory = yield* MemoryStore.Service
     const budget = yield* MemoryTidyBudget.Service
     const sessions = yield* SessionStore.Service
@@ -119,7 +113,18 @@ const layer = Layer.effect(
         current.route.endpoint.path !== request.model.route.endpoint.path
       )
         return yield* denied("整理模型的实际线路已经改变，请重新确认整理任务。")
-      return { input, dispatch }
+      const automatic = yield* MemoryTidyCount.automaticBinding(db, run.id).pipe(Effect.orDie)
+      const binding = yield* MemoryTidyCount.binding(run.model, request.model)
+      if (binding !== (yield* MemoryTidyCount.binding(run.model, current)))
+        return yield* denied("整理模型的凭据或请求头已经改变，请重新确认整理任务。")
+      if (
+        automatic &&
+        (!binding ||
+          automatic.binding !== binding ||
+          !(yield* MemoryTidyCount.verified(db, run.directory, binding).pipe(Effect.orDie)))
+      )
+        return yield* denied("自动整理的输入计数验证已失效，请重新确认。")
+      return { input, dispatch, binding }
     })
 
     return Service.of({
@@ -163,7 +168,7 @@ const layer = Layer.effect(
             let sent = false
             // A transport without an executor admission hook cannot participate
             // in the budget contract. Do not fall back to an unmetered stream.
-            if (!supportsInputCount(request.model))
+            if (!MemoryTidyCount.supported(request.model))
               return yield* denied("这条整理模型线路尚不支持完整输入精确计数，未发送生成请求。")
             const previousAdmission = yield* RequestExecutor.RequestAdmission
             const previousCompletion = yield* RequestExecutor.RequestCompletion
@@ -175,15 +180,22 @@ const layer = Layer.effect(
                   yield* previousAdmission(attempt)
                   const fresh = yield* store.forSession(sessionID)
                   if (!fresh || fresh.id !== run.id) return yield* denied("整理授权已失效，未发送模型请求。")
-                  const { dispatch } = yield* authority(fresh, request)
+                  const { dispatch, binding } = yield* authority(fresh, request)
                   const limit = MemoryTidyStore.dispatchLimit(fresh, dispatch)
                   if (limit === undefined) return yield* denied("整理断点需要当前任务的明确续做授权。")
                   const output = MemoryTidyBudget.wireLimit(request, attempt.request, limit)
                   if (!output) return yield* denied("整理请求缺少有效输出上限，或包含未授权的线路/服务端操作。")
-                  const counted = yield* count(http, attempt.request)
+                  const counted = yield* count(http, attempt.request).pipe(
+                    Effect.tapError(() =>
+                      binding
+                        ? MemoryTidyCount.remember(db, run.directory, binding, false).pipe(Effect.orDie)
+                        : Effect.void,
+                    ),
+                  )
                   // Counting is asynchronous. Recheck revocation, the selected
                   // model and current config before recording the reservation.
                   const { input: current } = yield* authority(run, request)
+                  if (binding) yield* MemoryTidyCount.remember(db, run.directory, binding, true).pipe(Effect.orDie)
                   yield* budget.admit({
                     authority: current,
                     id: attempt.id,
@@ -216,6 +228,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     MemoryTidyStore.node,
+    Database.node,
     MemoryStore.node,
     MemoryTidyBudget.node,
     MemoryAutomaticIdle.node,

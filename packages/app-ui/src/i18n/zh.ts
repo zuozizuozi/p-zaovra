@@ -4,18 +4,20 @@ type Keys = keyof typeof en
 
 export const dict = {
   "settings.memory.automatic.description":
-    "自动整理项目默认关闭。确认开启后，有新的已结束会话，且当前后端连续一分钟没有会话或后台任务时才会启动；读取设置不会启动任务。",
+    "自动整理项目默认关闭。先确认并运行一次手动整理，验证所选线路可以精确计数。随后授权自动整理，有新的已结束会话且后端空闲一分钟时才会启动。",
   "settings.memory.automatic.confirm":
-    "是否按下列模型和额度，持续授权自动整理当前项目？未聊天时也会消耗模型用量；每日额度与手动整理共享。线路不支持完整输入计数时会停止，不发送生成请求。",
+    "是否按下列模型和额度授权自动整理？仅输入计数已验证的线路可以启用。离开时也可能消耗模型用量，每日额度与手动整理共享。",
   "settings.memory.automatic.review": "核对自动整理项目",
   "settings.memory.automatic.enable": "确认开启自动整理",
   "settings.memory.automatic.enabled": "已开启项目自动整理",
+  "settings.memory.automatic.awaitingCount": "自动整理已暂停，当前线路的输入计数未验证",
+  "settings.memory.automatic.countRequired": "当前线路的输入计数未验证。请先确认并运行一次手动整理，再启用自动整理。",
   "settings.memory.automatic.disable": "关闭自动整理并停止其任务",
   "settings.memory.automatic.interrupted":
     "失败、取消或中断的任务不会自动重试。未完成内容可用手动整理检查；关闭后重新确认，可允许后续自动任务。",
   "settings.memory.task.title": "有预算的记忆整理",
   "settings.memory.task.description":
-    "手动和自动整理均需选择已配置的 Responses 模型，服务端还需支持精确输入计数。选择模型后，确认才会启动手动整理或授权自动整理。",
+    "请选择已配置的 Responses 模型。确认手动整理后，系统会先检查输入计数，成功后才会发送生成请求。",
   "settings.memory.task.scope": "整理范围",
   "settings.memory.task.chooseModel": "选择整理模型",
   "settings.memory.task.tokens": "单次上限（tokens）",

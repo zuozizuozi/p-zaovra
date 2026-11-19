@@ -15,6 +15,7 @@ import { SessionMessageTable, SessionTable } from "../session/sql"
 import { MemoryAutomaticRunTable, MemoryAutomaticSourceTable, MemoryAutomaticTable } from "./automatic.sql"
 import { MemoryTidyRunTable } from "./tidy.sql"
 import { MemoryTidyStore } from "./tidy-store"
+import { MemoryTidyCount } from "./tidy-count"
 
 export type Preference = typeof MemoryAutomaticTable.$inferSelect
 export type Place = { directory: string; project: ProjectV2.ID; scope: Memory.Scope }
@@ -34,6 +35,7 @@ export interface Interface {
     place: Place,
     input: Confirmation,
     modelAvailable?: boolean,
+    countBinding?: string,
   ) => Effect.Effect<{ preference: Preference; revokedRun?: string }, MemoryTidyStore.Rejected>
   readonly disable: (
     directory: string,
@@ -45,6 +47,7 @@ export interface Interface {
     generation: string,
     idle: Effect.Effect<boolean>,
     prepare: (input: MemoryTidyStore.Request) => Effect.Effect<MemoryTidyStore.Run, MemoryTidyStore.Rejected>,
+    countBinding?: string,
   ) => Effect.Effect<MemoryTidyStore.Run | undefined, MemoryTidyStore.Rejected>
 }
 
@@ -83,7 +86,7 @@ const layer = Layer.effect(
         .where(eq(MemoryAutomaticTable.enabled, true))
         .all()
         .pipe(Effect.orDie),
-      confirm: (place, input, modelAvailable = true) =>
+      confirm: (place, input, modelAvailable = true, countBinding) =>
         db
           .transaction(() =>
             Effect.gen(function* () {
@@ -117,6 +120,8 @@ const layer = Layer.effect(
               }
               if (old?.generation !== input.expected) return yield* conflict()
               if (!modelAvailable) return yield* new MemoryTidyStore.Rejected({ reason: "invalid" })
+              if (!countBinding || !(yield* MemoryTidyCount.verified(db, place.directory, countBinding)))
+                return yield* new MemoryTidyStore.Rejected({ reason: "count" })
               const preference = yield* db
                 .insert(MemoryAutomaticTable)
                 .values({
@@ -129,6 +134,7 @@ const layer = Layer.effect(
                   token_limit: input.tokens,
                   daily_limit: input.dailyTokens,
                   current_run: null,
+                  count_binding: countBinding,
                   time_confirmed: yield* Clock.currentTimeMillis,
                 })
                 .onConflictDoUpdate({
@@ -142,6 +148,7 @@ const layer = Layer.effect(
                     token_limit: input.tokens,
                     daily_limit: input.dailyTokens,
                     current_run: null,
+                    count_binding: countBinding,
                     time_confirmed: yield* Clock.currentTimeMillis,
                   },
                 })
@@ -170,7 +177,7 @@ const layer = Layer.effect(
             }),
           )
           .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
-      claim: (place, generation, idle, prepare) =>
+      claim: (place, generation, idle, prepare, countBinding) =>
         db
           .transaction(() =>
             Effect.gen(function* () {
@@ -183,6 +190,12 @@ const layer = Layer.effect(
                 preference.project_id !== place.project
               )
                 return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
+              if (
+                !countBinding ||
+                preference.count_binding !== countBinding ||
+                !(yield* MemoryTidyCount.verified(db, place.directory, countBinding))
+              )
+                return undefined
               if (!(yield* idle)) return undefined
               if (preference.current_run) {
                 const previous = yield* db

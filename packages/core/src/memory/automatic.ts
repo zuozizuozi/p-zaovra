@@ -2,6 +2,8 @@ export * as MemoryAutomatic from "./automatic"
 
 import { Clock, Context, Effect, Layer, Schedule } from "effect"
 import { Config } from "../config"
+import { Database } from "../database/database"
+import { Credential } from "../credential"
 import { BackgroundJob } from "../background-job"
 import { makeGlobalNode } from "../effect/app-node"
 import { Location } from "../location"
@@ -15,9 +17,12 @@ import { MemoryStore } from "./store"
 import { MemoryTidy } from "./tidy"
 import { MemoryTidyStore } from "./tidy-store"
 import { MemoryTidyTasks } from "./tidy-tasks"
+import { MemoryTidyCount } from "./tidy-count"
+import type { ModelV2 } from "../model"
 
 export interface Interface {
   readonly get: (directory: string) => Effect.Effect<MemoryAutomaticStore.Preference | undefined>
+  readonly countVerified: (preference: MemoryAutomaticStore.Preference) => Effect.Effect<boolean>
   readonly confirm: (
     directory: AbsolutePath,
     input: MemoryAutomaticStore.Confirmation,
@@ -37,6 +42,8 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const automatic = yield* MemoryAutomaticStore.Service
+    const { db } = yield* Database.Service
+    const credentials = yield* Credential.Service
     const jobs = yield* BackgroundJob.Service
     const idle = yield* MemoryAutomaticIdle.Service
     const memory = yield* MemoryStore.Service
@@ -61,6 +68,17 @@ export const layer = Layer.effect(
       ),
     )
     const quiet: { since?: number; revision?: string } = {}
+    const verifiedBinding = Effect.fn("MemoryAutomatic.verifiedBinding")(function* (
+      directory: string,
+      model: ModelV2.Ref,
+    ) {
+      const binding = yield* MemoryTidyCount.configuredBinding(model).pipe(
+        Effect.provideService(Credential.Service, credentials),
+      )
+      return binding && (yield* MemoryTidyCount.verified(db, directory, binding).pipe(Effect.orDie))
+        ? binding
+        : undefined
+    })
     const cancel = Effect.fn("MemoryAutomatic.cancel")(function* (id: string | undefined) {
       if (!id) return
       const run = yield* store.get(id)
@@ -135,16 +153,24 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             if (!(yield* idle.available())) return
             const target = yield* place
+            if (!preference.count_binding) return
+            const binding = yield* verifiedBinding(target.directory, preference.model)
+            if (binding !== preference.count_binding) return
             const tidy = yield* MemoryTidy.Service
-            const run = yield* automatic.claim(target, preference.generation, idle.available(), (request) =>
-              tidy
-                .prepare({
-                  requestID: request.requestID,
-                  model: request.model,
-                  tokens: request.tokens,
-                  dailyTokens: request.dailyTokens,
-                })
-                .pipe(Effect.map((view) => view.run)),
+            const run = yield* automatic.claim(
+              target,
+              preference.generation,
+              idle.available(),
+              (request) =>
+                tidy
+                  .prepare({
+                    requestID: request.requestID,
+                    model: request.model,
+                    tokens: request.tokens,
+                    dailyTokens: request.dailyTokens,
+                  })
+                  .pipe(Effect.map((view) => view.run)),
+              binding,
             )
             if (!run) return
             quiet.since = undefined
@@ -159,10 +185,19 @@ export const layer = Layer.effect(
     })
     return Service.of({
       get: automatic.get,
+      countVerified: (preference) =>
+        preference.enabled && preference.count_binding
+          ? verifiedBinding(preference.directory, preference.model).pipe(
+              Effect.map((binding) => binding === preference.count_binding),
+              Effect.provide(locations.get({ directory: AbsolutePath.make(preference.directory) })),
+              Effect.orElseSucceed(() => false),
+            )
+          : Effect.succeed(false),
       confirm: (directory, input, modelAvailable = true) =>
         Effect.gen(function* () {
           const target = yield* place
-          const result = yield* automatic.confirm(target, input, modelAvailable)
+          const binding = modelAvailable ? yield* verifiedBinding(target.directory, input.model) : undefined
+          const result = yield* automatic.confirm(target, input, modelAvailable, binding)
           yield* cancel(result.revokedRun)
           quiet.since = undefined
           return result.preference
@@ -190,6 +225,8 @@ export const node = makeGlobalNode({
   layer,
   deps: [
     MemoryAutomaticStore.node,
+    Database.node,
+    Credential.node,
     BackgroundJob.node,
     MemoryAutomaticIdle.node,
     MemoryStore.node,

@@ -50,7 +50,15 @@ export default {
           \`token_limit\` integer NOT NULL,
           \`daily_limit\` integer NOT NULL,
           \`current_run\` text,
+          \`count_binding\` text,
           \`time_confirmed\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`memory_tidy_count\` (
+          \`directory\` text NOT NULL,
+          \`binding\` text NOT NULL,
+          CONSTRAINT \`memory_tidy_count_pk\` PRIMARY KEY(\`directory\`, \`binding\`)
         );
       `)
       yield* tx.run(`

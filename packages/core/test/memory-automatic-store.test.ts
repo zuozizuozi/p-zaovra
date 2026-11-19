@@ -10,6 +10,7 @@ import { MemoryAutomaticStore } from "../src/memory/automatic-store"
 import { MemoryAutomaticIdle } from "../src/memory/automatic-idle"
 import { MemoryAutomaticSourceTable } from "../src/memory/automatic.sql"
 import { MemoryStore } from "../src/memory/store"
+import { MemoryTidyCount } from "../src/memory/tidy-count"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { ModelV2 } from "../src/model"
 import { ProjectV2 } from "../src/project"
@@ -42,6 +43,7 @@ const it = testEffect(
 )
 const model = { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") }
 const confirmation = { requestID: "consent-1", model, tokens: 200, dailyTokens: 1000 }
+const fixtureBinding = "fixture-positive-count"
 const host = Effect.gen(function* () {
   const database = yield* Database.Service
   const events = yield* EventV2.Service
@@ -63,6 +65,7 @@ const host = Effect.gen(function* () {
     project: ProjectV2.ID.global,
     scope: yield* memory.scope({ project: ProjectV2.ID.global, directory: "/automatic" }),
   }
+  yield* MemoryTidyCount.remember(database.db, place.directory, fixtureBinding, true).pipe(Effect.orDie)
   const create = (id = SessionSchema.ID.create(), directory = place.directory) =>
     Effect.gen(function* () {
       yield* events.publish(SessionEvent.Created, {
@@ -120,10 +123,26 @@ const host = Effect.gen(function* () {
         Effect.map((input) => ({ id: input.id, seq: input.admittedSeq })),
       ),
     )
-  const claim = (generation = confirmation.requestID, idle = Effect.succeed(true)) =>
-    automatic.claim(place, generation, idle, prepare)
-  return { database, automatic, tidy, place, create, turn, prepare, claim }
+  const confirm = (input: MemoryAutomaticStore.Confirmation) => automatic.confirm(place, input, true, fixtureBinding)
+  const claim = (generation = confirmation.requestID, idle = Effect.succeed(true), binding = fixtureBinding) =>
+    automatic.claim(place, generation, idle, prepare, binding)
+  return { database, automatic, tidy, place, create, turn, prepare, confirm, claim }
 })
+
+it.effect("a changed binding or revoked count cannot admit tasks or advance source versions", () =>
+  Effect.gen(function* () {
+    const h = yield* host
+    expect((yield* h.automatic.confirm(h.place, confirmation).pipe(Effect.flip)).reason).toBe("count")
+    expect(yield* h.automatic.get(h.place.directory)).toBeUndefined()
+    yield* h.confirm(confirmation)
+    yield* h.turn(yield* h.create())
+    expect(yield* h.claim(confirmation.requestID, Effect.succeed(true), "other-route")).toBeUndefined()
+    yield* MemoryTidyCount.remember(h.database.db, h.place.directory, fixtureBinding, false).pipe(Effect.orDie)
+    expect(yield* h.claim()).toBeUndefined()
+    expect((yield* h.automatic.get(h.place.directory))?.current_run).toBeNull()
+    expect(yield* h.database.db.select().from(MemoryAutomaticSourceTable).all().pipe(Effect.orDie)).toEqual([])
+  }),
+)
 
 it.effect("automatic idle requires one live coordinator", () =>
   Effect.gen(function* () {
@@ -165,7 +184,7 @@ it.effect("automatic idle excludes only its own admitted run; other work and bac
     const events = yield* EventV2.Service
     const active = new Set<SessionSchema.ID>()
     yield* status.track(Effect.sync(() => active))
-    yield* h.automatic.confirm(h.place, confirmation)
+    yield* h.confirm(confirmation)
     yield* h.turn(yield* h.create())
     const run = (yield* h.claim())!
     active.add(run.session_id)
@@ -205,24 +224,20 @@ it.effect("automatic consent is off by default; stale confirmations cannot re-en
     expect(yield* h.automatic.get(h.place.directory)).toBeUndefined()
     expect(yield* h.automatic.enabled).toEqual([])
     expect((yield* h.claim().pipe(Effect.flip)).reason).toBe("unauthorized")
-    const initial = yield* h.automatic.confirm(h.place, confirmation)
+    const initial = yield* h.confirm(confirmation)
     expect(initial.preference.enabled).toBe(true)
-    expect((yield* h.automatic.confirm(h.place, confirmation)).preference).toEqual(initial.preference)
+    expect((yield* h.confirm(confirmation)).preference).toEqual(initial.preference)
     yield* h.automatic.disable(h.place.directory, confirmation.requestID)
-    expect((yield* h.automatic.confirm(h.place, confirmation)).preference.enabled).toBe(false)
-    expect((yield* h.automatic.confirm(h.place, { ...confirmation, tokens: 201 }).pipe(Effect.flip)).reason).toBe(
-      "conflict",
-    )
-    expect((yield* h.automatic.confirm(h.place, { ...confirmation, requestID: "new" }).pipe(Effect.flip)).reason).toBe(
-      "conflict",
-    )
+    expect((yield* h.confirm(confirmation)).preference.enabled).toBe(false)
+    expect((yield* h.confirm({ ...confirmation, tokens: 201 }).pipe(Effect.flip)).reason).toBe("conflict")
+    expect((yield* h.confirm({ ...confirmation, requestID: "new" }).pipe(Effect.flip)).reason).toBe("conflict")
   }),
 )
 
 it.effect("completed new user work triggers once; titles, assistant maintenance and deletion do not", () =>
   Effect.gen(function* () {
     const h = yield* host
-    yield* h.automatic.confirm(h.place, confirmation)
+    yield* h.confirm(confirmation)
     expect(yield* h.claim()).toBeUndefined()
     const source = yield* h.create()
     yield* h.turn(source)
@@ -252,7 +267,7 @@ it.effect("completed new user work triggers once; titles, assistant maintenance 
 it.effect("foreign global directories and children cannot supply automatic work", () =>
   Effect.gen(function* () {
     const h = yield* host
-    yield* h.automatic.confirm(h.place, confirmation)
+    yield* h.confirm(confirmation)
     const foreign = yield* h.create(undefined, "/foreign")
     yield* h.turn(foreign)
     const child = yield* h.create()
@@ -280,7 +295,7 @@ it.effect("foreign global directories and children cannot supply automatic work"
 it.effect("busy and an activity change during selection leave no attempted version", () =>
   Effect.gen(function* () {
     const h = yield* host
-    yield* h.automatic.confirm(h.place, confirmation)
+    yield* h.confirm(confirmation)
     yield* h.turn(yield* h.create())
     expect(yield* h.claim(confirmation.requestID, Effect.succeed(false))).toBeUndefined()
     const state = { checks: 0 }
@@ -299,13 +314,13 @@ for (const state of ["active", "failed", "cancelled"] as const)
   it.effect(`automatic ${state} runs are not restarted; reconfirmation preserves attempted content`, () =>
     Effect.gen(function* () {
       const h = yield* host
-      yield* h.automatic.confirm(h.place, confirmation)
+      yield* h.confirm(confirmation)
       const source = yield* h.create()
       yield* h.turn(source)
       const run = (yield* h.claim())!
       if (state !== "active") yield* h.tidy.finish(run.id, state)
       expect(yield* h.claim()).toBeUndefined()
-      const replacement = yield* h.automatic.confirm(h.place, {
+      const replacement = yield* h.confirm({
         ...confirmation,
         expected: confirmation.requestID,
         requestID: "replacement",
@@ -327,7 +342,7 @@ for (const state of ["active", "failed", "cancelled"] as const)
 it.effect("disable revokes tool and physical-request authority before host interruption", () =>
   Effect.gen(function* () {
     const h = yield* host
-    yield* h.automatic.confirm(h.place, confirmation)
+    yield* h.confirm(confirmation)
     yield* h.turn(yield* h.create())
     const run = (yield* h.claim())!
     expect((yield* h.tidy.authorize({ sessionID: run.session_id, scope: run.scope, enabled: true })).id).toBe(run.id)
@@ -336,18 +351,22 @@ it.effect("disable revokes tool and physical-request authority before host inter
       (yield* h.tidy.authorize({ sessionID: run.session_id, scope: run.scope, enabled: true }).pipe(Effect.flip))
         .reason,
     ).toBe("unauthorized")
-    expect((yield* h.automatic.confirm(h.place, confirmation)).preference.enabled).toBe(false)
+    expect((yield* h.confirm(confirmation)).preference.enabled).toBe(false)
   }),
 )
 
 it.effect("failed durable admission rolls back source marks and can be explicitly attempted again", () =>
   Effect.gen(function* () {
     const h = yield* host
-    yield* h.automatic.confirm(h.place, confirmation)
+    yield* h.confirm(confirmation)
     yield* h.turn(yield* h.create())
     const result = yield* h.automatic
-      .claim(h.place, confirmation.requestID, Effect.succeed(true), () =>
-        Effect.fail(new MemoryTidyStore.Rejected({ reason: "limit" })),
+      .claim(
+        h.place,
+        confirmation.requestID,
+        Effect.succeed(true),
+        () => Effect.fail(new MemoryTidyStore.Rejected({ reason: "limit" })),
+        fixtureBinding,
       )
       .pipe(Effect.flip)
     expect(result.reason).toBe("limit")

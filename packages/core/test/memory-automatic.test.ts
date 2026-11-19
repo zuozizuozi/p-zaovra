@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { DateTime, Deferred, Effect, Layer } from "effect"
+import { DateTime, Deferred, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import { Credential } from "../src/credential"
+import { PluginV2 } from "../src/plugin"
+import { PluginInternal } from "../src/plugin/internal"
 import { BackgroundJob } from "../src/background-job"
 import { Config } from "../src/config"
 import { Database } from "../src/database/database"
@@ -9,8 +12,10 @@ import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
 import { EventV2 } from "../src/event"
 import { Global } from "../src/global"
+import { LocationServiceMap } from "../src/location-service-map"
 import { Location } from "../src/location"
 import { MemoryAutomatic } from "../src/memory/automatic"
+import { MemoryTidyCount } from "../src/memory/tidy-count"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { MemoryTidyTasks } from "../src/memory/tidy-tasks"
 import { ModelV2 } from "../src/model"
@@ -27,6 +32,15 @@ import { node } from "../src/session/runner/llm"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 
+const provider = Schema.decodeUnknownSync(Config.Info)({
+  providers: {
+    offline: {
+      api: { type: "aisdk", package: "@ai-sdk/openai", url: "http://127.0.0.1:1/v1" },
+      request: { body: { apiKey: "fixture" } },
+      models: { offline: { limit: { context: 32000, output: 32 } } },
+    },
+  },
+}).providers
 const model = { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") }
 
 for (const scenario of ["complete", "yield", "disable", "brief-background", "missing-config", "empty-config"] as const)
@@ -90,6 +104,14 @@ for (const scenario of ["complete", "yield", "disable", "brief-background", "mis
         expect(yield* automatic.get(directory)).toBeUndefined()
         yield* automatic.tick
         expect(state.calls).toBe(0)
+        const locations = yield* LocationServiceMap.Service
+        const binding = yield* Effect.gen(function* () {
+          const plugins = yield* PluginV2.Service
+          yield* plugins.wait(PluginInternal.readyID)
+          return yield* MemoryTidyCount.configuredBinding(model)
+        }).pipe(Effect.provide(locations.get({ directory })))
+        expect(binding).toBeDefined()
+        yield* MemoryTidyCount.remember(database.db, directory, binding!, true)
         yield* automatic.confirm(directory, { requestID: "consent", model, tokens: 200, dailyTokens: 1000 })
         if (scenario === "missing-config" || scenario === "empty-config") {
           state.memory = scenario === "missing-config" ? undefined : {}
@@ -148,6 +170,8 @@ for (const scenario of ["complete", "yield", "disable", "brief-background", "mis
           AppNodeBuilder.build(
             LayerNode.group([
               MemoryAutomatic.node,
+              LocationServiceMap.node,
+              Credential.node,
               MemoryTidyStore.node,
               MemoryTidyTasks.node,
               SessionV2.node,
@@ -184,7 +208,10 @@ for (const scenario of ["complete", "yield", "disable", "brief-background", "mis
                   Config.Service.of({
                     entries: () =>
                       Effect.succeed([
-                        new Config.Document({ type: "document", info: new Config.Info({ memory: state.memory }) }),
+                        new Config.Document({
+                          type: "document",
+                          info: new Config.Info({ memory: state.memory, providers: provider }),
+                        }),
                       ]),
                   }),
                 ),

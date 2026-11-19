@@ -71,5 +71,6 @@ export const migrations = (
     import("./migration/20261116061652_read-receipt"),
     import("./migration/20261119152350_memory-tidy-resume"),
     import("./migration/20261119153927_memory-extracted-digest"),
+    import("./migration/20261119162225_memory-tidy-count"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

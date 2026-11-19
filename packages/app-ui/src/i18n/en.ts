@@ -1,17 +1,20 @@
 export const dict = {
   "settings.memory.automatic.description":
-    "Automatic project tidy is off by default. After confirmation, new completed conversations can trigger a tidy when this backend has had no session or background work for one minute. Reading settings does not start work.",
+    "Automatic project tidy is off by default. Run a confirmed manual tidy to verify input counting for the chosen route first. After authorizing automatic tidy, new completed conversations can trigger it when this backend has been idle for one minute.",
   "settings.memory.automatic.confirm":
-    "Enable ongoing automatic tidy for this project with the model and limits below? It spends model tokens even when you are not chatting. Daily limits are shared with manual tidies. Unsupported input counting stops the task without sending a generation request.",
+    "Enable automatic tidy for this project with the model and limits below? Only a route with verified input counting can be enabled. It can spend model tokens while you are away, using the same daily limit as manual tidies.",
   "settings.memory.automatic.review": "Review automatic project tidy",
   "settings.memory.automatic.enable": "Confirm and enable automatic tidy",
   "settings.memory.automatic.enabled": "Automatic project tidy enabled",
+  "settings.memory.automatic.awaitingCount": "Automatic tidy paused — input counting is unverified for this route",
+  "settings.memory.automatic.countRequired":
+    "Input counting has not been verified on this route. Confirm and run a manual tidy before enabling automatic tidy.",
   "settings.memory.automatic.disable": "Disable automatic tidy and stop its task",
   "settings.memory.automatic.interrupted":
     "Failed, cancelled or interrupted tasks are not retried automatically. Use a manual tidy to review unfinished content; disable and confirm again to permit later automatic tasks.",
   "settings.memory.task.title": "Budgeted memory tidy",
   "settings.memory.task.description":
-    "Choose a configured Responses model for manual or automatic tidy. The endpoint must also support exact input counting. Choosing a model does not start a task.",
+    "Choose a configured Responses model. A confirmed manual tidy checks exact input counting before sending a generation request.",
   "settings.memory.task.scope": "Scope",
   "settings.memory.task.chooseModel": "Choose a tidy model",
   "settings.memory.task.tokens": "Run limit (tokens)",

@@ -20,6 +20,7 @@ import { MemoryTidy } from "../src/memory/tidy"
 import { MemoryAutomaticStore } from "../src/memory/automatic-store"
 import { MemoryStore } from "../src/memory/store"
 import { MemoryTidyExecution } from "../src/memory/tidy-execution"
+import { MemoryTidyCount } from "../src/memory/tidy-count"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
@@ -60,6 +61,7 @@ for (const scenario of [
   "over-budget",
   "daily-budget",
   "count-missing",
+  "automatic-count-lost",
   "count-invalid",
   "count-redirect",
   "generation-redirect",
@@ -107,7 +109,8 @@ for (const scenario of [
         if (url.pathname === "/responses/input_tokens") {
           state.counted.push(body)
           await state.duringCount()
-          if (scenario === "count-missing") return Response.json({ error: "unsupported" }, { status: 404 })
+          if (scenario === "count-missing" || scenario === "automatic-count-lost")
+            return Response.json({ error: "unsupported" }, { status: 404 })
           if (scenario === "count-redirect")
             return new Response(null, { status: 307, headers: { location: "/unadmitted" } })
           return Response.json({
@@ -219,9 +222,21 @@ for (const scenario of [
               project: here.project.id,
               scope: yield* memory.scope({ directory: here.directory, project: here.project.id }),
             }
-            yield* automatic.confirm(place, { requestID: "automatic", model: selected, tokens: 500, dailyTokens: 1000 })
-            const run = yield* automatic.claim(place, "automatic", Effect.succeed(true), (request) =>
-              tidy.prepare(request).pipe(Effect.map((view) => view.run)),
+            const { db } = yield* Database.Service
+            const binding = (yield* MemoryTidyCount.binding(selected, current.model))!
+            yield* MemoryTidyCount.remember(db, place.directory, binding, true).pipe(Effect.orDie)
+            yield* automatic.confirm(
+              place,
+              { requestID: "automatic", model: selected, tokens: 500, dailyTokens: 1000 },
+              true,
+              binding,
+            )
+            const run = yield* automatic.claim(
+              place,
+              "automatic",
+              Effect.succeed(true),
+              (request) => tidy.prepare(request).pipe(Effect.map((view) => view.run)),
+              binding,
             )
             expect(run).toBeDefined()
             return run!
@@ -388,8 +403,13 @@ for (const scenario of [
               ? "Success"
               : "Failure",
           )
-          if (Exit.isFailure(outcome) && scenario === "count-missing")
+          if (Exit.isFailure(outcome) && (scenario === "count-missing" || scenario === "automatic-count-lost"))
             expect(Cause.pretty(outcome.cause)).toContain("HTTP 404")
+          if (scenario === "automatic-count-lost") {
+            const { db } = yield* Database.Service
+            const binding = (yield* MemoryTidyCount.binding(selected, current.model))!
+            expect(yield* MemoryTidyCount.verified(db, run!.directory, binding)).toBe(false)
+          }
           if (Exit.isFailure(outcome) && scenario === "count-invalid")
             expect(Cause.pretty(outcome.cause)).toContain("输入计数无效")
           if (Exit.isFailure(outcome) && scenario === "over-budget")

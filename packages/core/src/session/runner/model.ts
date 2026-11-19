@@ -296,8 +296,17 @@ export const resolve = (
   session: Pick<SessionSchema.Info, "model">,
   model: ModelV2.Info,
   credential?: Credential.Value,
+  agent?: AgentV2.Info,
 ) =>
-  withVariant(model, session.model?.variant).pipe(
+  withVariant(
+    agent
+      ? produce(model, (draft) => {
+          Object.assign(draft.request.headers, agent.request.headers)
+          Object.assign(draft.request.body, agent.request.body)
+        })
+      : model,
+    session.model?.variant,
+  ).pipe(
     Effect.flatMap((configured) =>
       fromCatalogModel(configured, credential).pipe(
         // Carry capabilities from the selected Catalog entry, not an API model-ID lookup:
@@ -361,16 +370,11 @@ export const locationLayer = Layer.effect(
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
         )
-        const configured = agent
-          ? produce(selected, (draft) => {
-              Object.assign(draft.request.headers, agent.request.headers)
-              Object.assign(draft.request.body, agent.request.body)
-            })
-          : selected
         return yield* resolve(
           session,
-          configured,
+          selected,
           connection ? yield* integrations.connection.resolve(connection) : undefined,
+          agent,
         )
       }),
     })

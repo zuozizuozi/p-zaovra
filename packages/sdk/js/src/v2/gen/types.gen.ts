@@ -3257,7 +3257,7 @@ export type MemoryPageError = {
 
 export type MemoryTidyError = {
   _tag: "MemoryTidyError"
-  reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy"
+  reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy" | "count"
   message: string
 }
 
@@ -7759,6 +7759,7 @@ export type MemoryAutomaticPreference = {
   directory: string
   generation: string
   enabled: boolean
+  countVerified?: boolean
   model: ModelRef
   tokens: number
   dailyTokens: number

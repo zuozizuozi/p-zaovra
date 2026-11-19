@@ -29,7 +29,7 @@ test("memory tidy production listener lifetime is isolated from later server tes
     expect(code, stdout + stderr).toBe(0)
     expect(stderr).toContain("1 pass")
     expect(stderr).toContain("0 fail")
-    expect(stderr).toContain("40 expect() calls")
+    expect(stderr).toContain("63 expect() calls")
   } finally {
     child.kill()
     await child.exited

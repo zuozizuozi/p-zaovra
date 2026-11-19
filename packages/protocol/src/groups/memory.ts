@@ -11,7 +11,7 @@ const Query = Schema.Struct({ ...LocationQuery.fields, layer: Schema.optional(La
 export class MemoryTidyError extends Schema.TaggedErrorClass<MemoryTidyError>()(
   "MemoryTidyError",
   {
-    reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy"]),
+    reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy", "count"]),
     message: Schema.String,
   },
   { httpApiStatus: 409 },

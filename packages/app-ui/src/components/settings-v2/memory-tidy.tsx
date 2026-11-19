@@ -26,6 +26,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
     sent: false,
     busy: false,
     error: false,
+    countError: false,
     resumeTokens: {} as Record<string, string>,
   })
   const available = createMemo(() =>
@@ -88,29 +89,34 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
   const submit = async () => {
     if (state.busy || !state.request || (!state.sent && !selected()) || blocked(state.request.layer)) return
     const request = state.request
-    setState({ busy: true, error: false, sent: true })
+    setState({ busy: true, error: false, countError: false, sent: true })
     await (
       state.automatic
-        ? client.confirmAutomatic(
-            {
-              location,
-              memoryAutomaticConfirmation: {
-                requestID: request.requestID,
-                expected: state.automaticExpected,
-                model: request.model,
-                tokens: request.tokens!,
-                dailyTokens: request.dailyTokens!,
+        ? client
+            .confirmAutomatic(
+              {
+                location,
+                memoryAutomaticConfirmation: {
+                  requestID: request.requestID,
+                  expected: state.automaticExpected,
+                  model: request.model,
+                  tokens: request.tokens!,
+                  dailyTokens: request.dailyTokens!,
+                },
               },
-            },
-            { throwOnError: true },
-          )
+              { throwOnError: false },
+            )
+            .then(({ error }) => {
+              if (error && "reason" in error && error.reason === "count") return "count" as const
+              if (error) throw error
+            })
         : client
             .prepareTidy({ location, memoryTidyRequest: request }, { throwOnError: true })
             .then((result) =>
               client.startTidy({ location, layer: request.layer, id: result.data.data.id }, { throwOnError: true }),
             )
     ).then(
-      () => setState({ request: undefined, sent: false }),
+      (result) => setState({ request: undefined, sent: false, countError: result === "count" }),
       () => setState("error", true),
     )
     await Promise.resolve(actions.refetch()).catch(() => setState("error", true))
@@ -261,41 +267,49 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean; p
       </Show>
       <div data-slot="memory-automatic" class="flex flex-col gap-2 border-t border-v2-border-base pt-3">
         <p class="text-xs">{language.t("settings.memory.automatic.description")}</p>
-        <Show
-          when={!automatic.error && automatic()?.enabled}
-          fallback={
-            <ButtonV2
-              variant="neutral"
-              disabled={
-                state.busy ||
-                !!state.request ||
-                state.layer !== "project" ||
-                blocked() ||
-                !valid() ||
-                automatic.loading ||
-                !!automatic.error ||
-                tasks.loading ||
-                !!tasks.error ||
-                !!tasks()?.some((task) => task.state === "active")
-              }
-              onClick={() =>
-                setState({ request: confirmation(), automatic: true, automaticExpected: automatic()?.generation })
-              }
-            >
-              {language.t("settings.memory.automatic.review")}
-            </ButtonV2>
-          }
-        >
+        <Show when={!automatic.error && automatic()?.enabled}>
           <p class="break-all text-xs">
-            {language.t("settings.memory.automatic.enabled")} · {automatic()?.model.providerID} /{" "}
-            {automatic()?.model.id} · {automatic()?.tokens} / {automatic()?.dailyTokens} tokens
+            {language.t(
+              automatic()?.countVerified === true
+                ? "settings.memory.automatic.enabled"
+                : "settings.memory.automatic.awaitingCount",
+            )}{" "}
+            · {automatic()?.model.providerID} / {automatic()?.model.id} · {automatic()?.tokens} /{" "}
+            {automatic()?.dailyTokens} tokens
           </p>
           <p class="text-xs">{language.t("settings.memory.automatic.interrupted")}</p>
           <ButtonV2 variant="neutral" disabled={state.busy} onClick={() => void disableAutomatic()}>
             {language.t("settings.memory.automatic.disable")}
           </ButtonV2>
         </Show>
+        <Show when={automatic.error || !automatic()?.enabled || automatic()?.countVerified !== true}>
+          <ButtonV2
+            variant="neutral"
+            disabled={
+              state.busy ||
+              !!state.request ||
+              state.layer !== "project" ||
+              blocked() ||
+              !valid() ||
+              automatic.loading ||
+              !!automatic.error ||
+              tasks.loading ||
+              !!tasks.error ||
+              !!tasks()?.some((task) => task.state === "active")
+            }
+            onClick={() =>
+              setState({ request: confirmation(), automatic: true, automaticExpected: automatic()?.generation })
+            }
+          >
+            {language.t("settings.memory.automatic.review")}
+          </ButtonV2>
+        </Show>
       </div>
+      <Show when={state.countError}>
+        <p role="alert" class="text-xs">
+          {language.t("settings.memory.automatic.countRequired")}
+        </p>
+      </Show>
       <Show when={state.error || tasks.error || automatic.error}>
         <p role="alert" class="text-xs">
           {language.t("settings.memory.task.failed")}

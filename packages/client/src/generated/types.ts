@@ -100,7 +100,7 @@ export const isMemoryPageError = (value: unknown): value is MemoryPageError =>
 
 export type MemoryTidyError = {
   readonly _tag: "MemoryTidyError"
-  readonly reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy"
+  readonly reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy" | "count"
   readonly message: string
 }
 export const isMemoryTidyError = (value: unknown): value is MemoryTidyError =>
@@ -10458,6 +10458,7 @@ export type ServerMemoryAutomaticGetAutomaticOutput = {
     readonly directory: string
     readonly generation: string
     readonly enabled: boolean
+    readonly countVerified?: boolean
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly tokens: number
     readonly dailyTokens: number
@@ -10512,6 +10513,7 @@ export type ServerMemoryAutomaticConfirmAutomaticOutput = {
     readonly directory: string
     readonly generation: string
     readonly enabled: boolean
+    readonly countVerified?: boolean
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly tokens: number
     readonly dailyTokens: number
@@ -10532,6 +10534,7 @@ export type ServerMemoryAutomaticDisableAutomaticOutput = {
     readonly directory: string
     readonly generation: string
     readonly enabled: boolean
+    readonly countVerified?: boolean
     readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly tokens: number
     readonly dailyTokens: number

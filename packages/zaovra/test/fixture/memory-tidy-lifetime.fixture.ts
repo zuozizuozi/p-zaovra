@@ -2,6 +2,9 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import fs from "node:fs/promises"
 import { Effect } from "effect"
+import { eq } from "drizzle-orm"
+import { Database } from "@zaovra-ai/core/database/database"
+import { MemoryAutomaticTable } from "@zaovra-ai/core/memory/automatic.sql"
 import { Server } from "../../src/server/server"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { disposeAllInstances } from "./fixture"
@@ -11,12 +14,17 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
   const entered = Promise.withResolvers<void>()
   let sends = 0
   let counts = 0
+  let failCount = true
+  const requests: string[] = []
   const provider = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
-      if (new URL(request.url).pathname.endsWith("/input_tokens")) {
+      const route = new URL(request.url).pathname
+      requests.push(route)
+      if (route.endsWith("/input_tokens")) {
         counts++
+        if (failCount) return new Response(null, { status: 404 })
         return Response.json({ object: "response.input_tokens", input_tokens: 100 })
       }
       sends++
@@ -55,7 +63,10 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
           fixture: {
             npm: "@ai-sdk/openai",
             options: { baseURL: provider.url.href + "v1", apiKey: "offline" },
-            models: { fixture: { limit: { context: 32000, output: 32 } } },
+            models: {
+              fixture: { limit: { context: 32000, output: 32 } },
+              alternate: { limit: { context: 32000, output: 32 } },
+            },
           },
         },
       }),
@@ -96,25 +107,34 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
     }
     expect(await (await fetch(automatic)).json()).toEqual({ data: null })
     expect((await (await call(first.url, a)).json()).data).toEqual([])
-    const consent = await fetch(automatic, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(confirmation),
-    })
-    expect(consent.status, await consent.clone().text()).toBe(200)
-    const replacement = await fetch(automatic, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...confirmation,
-        expected: confirmation.requestID,
-        requestID: "replace",
-        model: { providerID: "chat", id: "fixture" },
-      }),
-    })
-    expect(replacement.status).toBe(409)
-    expect((await (await fetch(automatic)).json()).data.generation).toBe(confirmation.requestID)
+    const confirm = (body: typeof confirmation & { expected?: string } = confirmation, base = automatic) =>
+      fetch(base, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    const unverified = await confirm()
+    expect(unverified.status, await unverified.clone().text()).toBe(409)
+    expect((await unverified.json()).reason).toBe("count")
     expect([counts, sends]).toEqual([0, 0])
+    const missing = await call(first.url, a, "", { ...confirmation, requestID: "missing-input-count" })
+    expect(missing.status, await missing.clone().text()).toBe(200)
+    const missingID = (await missing.json()).data.id
+    expect((await call(first.url, a, "/" + missingID + "/start", {})).status).toBe(200)
+    let uncounted = (await (await call(first.url, a, "/" + missingID)).json()).data
+    for (let index = 0; index < 150 && uncounted.state === "active"; index++) {
+      await Bun.sleep(30)
+      uncounted = (await (await call(first.url, a, "/" + missingID)).json()).data
+    }
+    expect(uncounted.state).toBe("failed")
+    expect(uncounted.usage.reserved).toBe(0)
+    expect([counts, sends]).toEqual([1, 0])
+    const stillUnverified = await confirm()
+    expect(stillUnverified.status).toBe(409)
+    expect((await stillUnverified.json()).reason).toBe("count")
+    expect(await (await fetch(automatic)).json()).toEqual({ data: null })
+    expect([counts, sends]).toEqual([1, 0])
+    failCount = false
     const prepared = await call(first.url, a, "", confirmation)
     expect(prepared.status, await prepared.clone().text()).toBe(200)
     const task = (await prepared.json()).data
@@ -134,7 +154,27 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
       clearTimeout(timeout)
     }
     expect(sends).toBe(1)
-    expect(counts).toBe(1)
+    expect(counts).toBe(2)
+    const consent = await confirm()
+    expect(consent.status, await consent.clone().text()).toBe(200)
+    expect((await consent.json()).data.countVerified).toBe(true)
+    const replacement = await confirm({
+      ...confirmation,
+      expected: confirmation.requestID,
+      requestID: "replace",
+      model: { providerID: "chat", id: "fixture" },
+    })
+    expect(replacement.status).toBe(409)
+    expect((await (await fetch(automatic)).json()).data.generation).toBe(confirmation.requestID)
+    const alternate = await confirm({
+      ...confirmation,
+      expected: confirmation.requestID,
+      requestID: "replace-model",
+      model: { providerID: "fixture", id: "alternate" },
+    })
+    expect(alternate.status, await alternate.clone().text()).toBe(409)
+    expect((await alternate.json()).reason).toBe("count")
+    expect([counts, sends]).toEqual([2, 1])
     await first.stop(true)
     const live = (await (await call(second.url, a, "/" + task.id)).json()).data
     expect(live.executing).toBe(true)
@@ -168,6 +208,46 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
     expect(cancelled.usage).toEqual(live.usage)
     await read("/" + task.id + "/start", {})
     expect(sends).toBe(1)
+    const reloaded = new URL(automatic.pathname + automatic.search, reopened.url)
+    expect((await (await fetch(reloaded)).json()).data).toMatchObject({ countVerified: true, enabled: true })
+    const config = new URL("/config", reopened.url)
+    config.searchParams.set("directory", a)
+    const patched = await fetch(config, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: { fixture: { options: { baseURL: provider.url.href + "alternate/v1" } } } }),
+    })
+    expect(patched.status, await patched.clone().text()).toBe(200)
+    expect((await (await fetch(reloaded)).json()).data).toMatchObject({ countVerified: false, enabled: true })
+    const changedRoute = await confirm(
+      {
+        ...confirmation,
+        expected: confirmation.requestID,
+        requestID: "replace-route",
+      },
+      reloaded,
+    )
+    expect(changedRoute.status, await changedRoute.clone().text()).toBe(409)
+    expect((await changedRoute.json()).reason).toBe("count")
+    const legacy = await AppRuntime.runPromise(
+      Effect.gen(function* () {
+        const { db } = yield* Database.Service
+        return yield* db
+          .update(MemoryAutomaticTable)
+          .set({ count_binding: null })
+          .where(eq(MemoryAutomaticTable.generation, confirmation.requestID))
+          .returning({ generation: MemoryAutomaticTable.generation })
+          .get()
+      }),
+    )
+    expect(legacy?.generation).toBe(confirmation.requestID)
+    expect((await (await fetch(reloaded)).json()).data).toMatchObject({
+      generation: confirmation.requestID,
+      countVerified: false,
+      enabled: true,
+      currentRun: null,
+    })
+    expect(requests).toEqual(["/v1/responses/input_tokens", "/v1/responses/input_tokens", "/v1/responses"])
   } finally {
     await first.stop(true)
     await second.stop(true)

@@ -17,7 +17,8 @@ export const MemoryAutomaticHandler = HttpApiBuilder.group(Api, "server.memoryAu
         const automatic = yield* MemoryAutomatic.Service
         const location = yield* Location.Service
         const preference = yield* automatic.get(location.directory)
-        return { data: preference ? view(preference) : null }
+        if (preference?.enabled && preference.count_binding) yield* waitForReadiness("catalog")
+        return { data: preference ? view(preference, yield* automatic.countVerified(preference)) : null }
       }),
     )
     .handle(
@@ -30,7 +31,7 @@ export const MemoryAutomaticHandler = HttpApiBuilder.group(Api, "server.memoryAu
         const preference = yield* automatic
           .confirm(location.directory, ctx.payload, yield* MemoryTidyExecution.supportsSelection(ctx.payload.model))
           .pipe(Effect.mapError(error))
-        return { data: view(preference) }
+        return { data: view(preference, yield* automatic.countVerified(preference)) }
       }),
     )
     .handle(
@@ -41,16 +42,17 @@ export const MemoryAutomaticHandler = HttpApiBuilder.group(Api, "server.memoryAu
         const preference = yield* automatic
           .disable(location.directory, ctx.payload.expected)
           .pipe(Effect.mapError(error))
-        return { data: view(preference) }
+        return { data: view(preference, false) }
       }),
     ),
 )
 
-function view(preference: MemoryAutomaticStore.Preference): Memory.AutomaticPreference {
+function view(preference: MemoryAutomaticStore.Preference, countVerified: boolean): Memory.AutomaticPreference {
   return {
     directory: preference.directory,
     generation: preference.generation,
     enabled: preference.enabled,
+    countVerified,
     model: preference.model,
     tokens: preference.token_limit,
     dailyTokens: preference.daily_limit,
@@ -62,6 +64,9 @@ function view(preference: MemoryAutomaticStore.Preference): Memory.AutomaticPref
 function error(input: { reason: MemoryTidyError["reason"] }) {
   return new MemoryTidyError({
     reason: input.reason,
-    message: "自动整理设置未完成，请刷新设置并核对目录、模型、额度和当前授权。",
+    message:
+      input.reason === "count"
+        ? "当前模型线路尚未通过输入计数验证。请先确认并运行一次手动整理。"
+        : "自动整理设置未完成，请刷新设置并核对目录、模型、额度和当前授权。",
   })
 }
