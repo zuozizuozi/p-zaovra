@@ -22,6 +22,7 @@ type Input = {
   baseURL: string
   reserveTokens: number
   relayKey: string
+  providerTurnAllowance?: 8 | 12
   briefing?: "workspace-only-v1"
   caseVersion?: PublishCaseVersion
 }
@@ -53,6 +54,8 @@ export async function runEvaluationChain(
     }) => Promise<{ pass: boolean; reason: string }>
   },
 ) {
+  const steps = input.providerTurnAllowance === undefined ? 8 : input.providerTurnAllowance
+  if (steps !== 8 && steps !== 12) throw new Error("invalid-evaluation-turn-allowance")
   if (input.briefing !== undefined && input.briefing !== "workspace-only-v1")
     throw new Error("invalid-evaluation-briefing")
   if (input.caseVersion !== undefined && (input.chainID !== "publish" || !input.relay))
@@ -157,7 +160,7 @@ export async function runEvaluationChain(
       taskSearch: advanced,
       index: { enabled: true },
     },
-    agent: { build: { steps: 8 } },
+    agent: { build: { steps } },
     permission: {
       "*": "allow",
       external_directory: "deny",
@@ -217,7 +220,7 @@ export async function runEvaluationChain(
           promptHashes: prompts.map((prompt) => createHash("sha256").update(prompt).digest("hex")),
         }
       : {}),
-    providerTurnAllowance: 8,
+    providerTurnAllowance: steps,
     contextLimit: 32000,
     outputLimit: 4096,
     stageDeadlineSeconds: 180,

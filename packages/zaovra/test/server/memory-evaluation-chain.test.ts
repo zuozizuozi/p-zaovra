@@ -53,6 +53,7 @@ test.skipIf(process.platform !== "win32")(
       const root = path.join(tmp.path, "format-chain")
       const result = await runEvaluationChain({
         root,
+        providerTurnAllowance: 12,
         candidate: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim(),
         family: "deepseek",
         modelID: "fixture-model",
@@ -82,6 +83,7 @@ test.skipIf(process.platform !== "win32")(
         },
       })
       expect(result.chain).toBe("format")
+      expect(result.providerTurnAllowance).toBe(12)
       expect(result.counts).toEqual({ planned: 5, entered: 5, completed: 5, notRun: 0 })
       expect(result.pass).toBe(false)
       expect(
