@@ -592,6 +592,8 @@ test("lookup-first is a distinct prompt condition and preserves a model's immedi
     expect(result.counts).toEqual({ search: 2, pages: 2, both: 2 })
     expect(prompts).toHaveLength(6)
     expect(prompts.every((prompt) => prompt.includes("Use at least one permitted retrieval tool"))).toBe(true)
+    for (const prompt of prompts)
+      expect(prompt.includes("read its ref")).toBe(prompt.includes('"action":"read"'))
     await expect(answerHistoryLive(host, inputs, "autonomous", 2)).rejects.toThrow("evaluation-input-or-route-plan-changed")
     await expect(answerHistoryLive(host, inputs)).rejects.toThrow("evaluation-input-or-route-plan-changed")
     expect(prompts).toHaveLength(6)

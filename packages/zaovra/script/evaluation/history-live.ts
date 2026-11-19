@@ -41,6 +41,9 @@ const systemFor = (arm: Arm, retrieval: "autonomous" | "lookup-first") =>
     ...(retrieval === "lookup-first"
       ? ["Use at least one permitted retrieval tool before answering or abstaining. If the results are inadequate, abstain."]
       : []),
+    ...(retrieval === "lookup-first" && tools[arm].includes("read")
+      ? ["A listed page is a preview. If its title or summary matches the question, read its ref to obtain the passage and citation handle before deciding."]
+      : []),
     ...tools[arm].map((tool) => toolInstructions[tool]),
   ].join(" ")
 
