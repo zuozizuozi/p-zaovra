@@ -100,13 +100,23 @@ export async function loadCorpus(file: string) {
   return corpus
 }
 
-// Mechanical offline smoke-test pages. A mainline-generated draft uses the same envelope.
-export async function fixtureDrafts(input: string, output: string) {
+export async function loadGeneration(input: string) {
   const generation = await readJson(
     input,
     Schema.Struct({ documents: Schema.Array(Document), corpusHash: Schema.String }),
   )
-  if (generation.corpusHash !== fingerprint(generation.documents)) throw new Error("generation-input-mismatch")
+  if (
+    generation.corpusHash !== fingerprint(generation.documents) ||
+    !generation.documents.length ||
+    generation.documents.some((doc, i) => doc.id !== "doc-" + (i + 1))
+  )
+    throw new Error("generation-input-mismatch")
+  return generation
+}
+
+// Mechanical offline smoke-test pages use the same draft envelope.
+export async function fixtureDrafts(input: string, output: string) {
+  const generation = await loadGeneration(input)
   const pages = generation.documents.map((document) => ({
     title: document.title,
     summary: document.title,

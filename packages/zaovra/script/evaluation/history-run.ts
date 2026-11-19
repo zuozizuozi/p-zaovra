@@ -17,9 +17,9 @@ const response = Schema.Struct({
   decision: action,
   tokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
-const decodeResponse = Schema.decodeUnknownSync(response)
-type Action = typeof action.Type
-type Tool = Exclude<Action["action"], "answer" | "abstain">
+export const decodeResponse = Schema.decodeUnknownSync(response)
+export type Action = typeof action.Type
+export type Tool = Exclude<Action["action"], "answer" | "abstain">
 type Result =
   | { action: "list"; pages: ReadonlyArray<{ ref: string; title: string; summary: string }> }
   | {
@@ -38,7 +38,7 @@ export const limits = {
   deadlineMs: 120_000,
   maxOutputTokens: 768,
 } as const
-const tools: Record<Arm, ReadonlyArray<Tool>> = {
+export const tools: Record<Arm, ReadonlyArray<Tool>> = {
   search: ["search"],
   pages: ["list", "read"],
   both: ["search", "list", "read"],
@@ -55,7 +55,16 @@ export type Respond = (
 
 // A trusted mainline adapter should open a fresh model request context per slot, honor the
 // limit and signal, and account for every send. This script contains no model transport.
-export type ResponderFactory = () => Respond
+export type ResponderFactory = (slot: { arm: Arm; id: number }) => Respond
+
+export class HistoryPaused extends Error {}
+
+type LiveRun = {
+  nonce: string
+  signal?: AbortSignal
+  material: { corpus: Awaited<ReturnType<typeof loadCorpus>>; drafts: Awaited<ReturnType<typeof loadDrafts>> }
+  questions: Awaited<ReturnType<typeof loadQuestions>>
+}
 
 type Options = {
   corpus: string
@@ -79,11 +88,21 @@ function governed(respond: Respond, turn: Parameters<Respond>[0]) {
   })
 }
 
-export async function evaluate(options: Options, factory: ResponderFactory) {
+export async function loadQuestions(file: string) {
+  const questions = await readJson(file, bank)
+  if (
+    questions.length !== 25 ||
+    questions.some((item, index) => item.id !== index + 1 || !item.question.trim() || item.question.length > 1024)
+  )
+    throw new Error("expected-25-numbered-questions")
+  return questions
+}
+
+export async function evaluate(options: Options, factory: ResponderFactory, live?: LiveRun) {
   if (!path.isAbsolute(options.output)) throw new Error("absolute-evaluation-output-required")
-  const corpus = await loadCorpus(options.corpus)
-  const drafts = await loadDrafts(options.drafts, corpus)
-  await mkdir(options.output)
+  const corpus = live?.material.corpus ?? (await loadCorpus(options.corpus))
+  const drafts = live?.material.drafts ?? (await loadDrafts(options.drafts, corpus))
+  if (!live) await mkdir(options.output)
   const output = await realpath(options.output)
   // Product modules resolve global paths at import time. The entrypoint uses a dedicated
   // process with disposable global paths and replaces the database layer for every arm.
@@ -100,54 +119,88 @@ export async function evaluate(options: Options, factory: ResponderFactory) {
     TEMP: "tmp",
     TMPDIR: "tmp",
   }
-  for (const [variable, directory] of Object.entries(directories)) {
-    const target = path.join(profile, directory)
-    await mkdir(target, { recursive: true })
-    process.env[variable] = target
-  }
-  process.env.ZAOVRA_DB = ":memory:"
-  const { arms, openLibrary } = await import("./history-product")
-  // Bind the exact imported material before opening the question bank.
-  await writeJson(path.join(output, "input-lock.json"), {
-    originalCorpusHash: fingerprint(corpus.documents),
-    corpusHash: drafts.corpusHash,
-    draftsHash: sha256(JSON.stringify(drafts)),
-    generator: drafts.generator,
-    limits,
-  })
-  const questions = await readJson(options.questions, bank)
-  if (
-    questions.length !== 25 ||
-    questions.some((item, index) => item.id !== index + 1 || !item.question.trim() || item.question.length > 1024)
+  const old = new Map(
+    Object.keys(directories)
+      .concat("ZAOVRA_DB")
+      .map((variable) => [variable, process.env[variable]]),
   )
-    throw new Error("expected-25-numbered-questions")
-  for (const arm of arms) {
-    const directory = path.join(output, arm)
-    await mkdir(directory)
-    const library = await openLibrary(directory, arm, corpus, drafts)
-    const answers: Array<{ id: number; answer: string; citations: ReadonlyArray<string> }> = []
-    const evidence = []
-    const slots = []
+  try {
+    for (const [variable, directory] of Object.entries(directories)) {
+      const target = path.join(profile, directory)
+      await mkdir(target, { recursive: true })
+      process.env[variable] = target
+    }
+    process.env.ZAOVRA_DB = ":memory:"
+    const { arms, openLibrary } = await import("./history-product")
+    // Bind the exact imported material before opening the question bank.
+    await writeJson(path.join(output, "input-lock.json"), {
+      originalCorpusHash: fingerprint(corpus.documents),
+      corpusHash: drafts.corpusHash,
+      draftsHash: sha256(JSON.stringify(drafts)),
+      generator: drafts.generator,
+      limits,
+    })
+    const questions = live?.questions ?? (await loadQuestions(options.questions))
+    const pending = [...questions].flatMap((item) =>
+      live ? arms.map((_, offset) => ({ item, arm: arms[(item.id - 1 + offset) % arms.length] })) : [],
+    )
+    if (!live) for (const arm of arms) pending.push(...questions.map((item) => ({ arm, item })))
+    const openGroup = async (arm: Arm) => {
+      const directory = path.join(output, arm)
+      await mkdir(directory)
+      return {
+        directory,
+        library: await openLibrary(directory, arm, corpus, drafts),
+        answers: [] as Array<{ id: number; answer: string; citations: ReadonlyArray<string> }>,
+        evidence: [] as Array<{
+          id: number
+          handle: string
+          action: "read" | "search"
+          request: Action
+          text: string
+          sources: ReadonlyArray<{ id: string; sha256: string }>
+        }>,
+        slots: [] as Array<{
+          id: number
+          status: string
+          tokenReports: ReadonlyArray<number | null>
+          calls: ReadonlyArray<Tool>
+          handles: number
+        }>,
+      }
+    }
+    const groups = new Map<Arm, Awaited<ReturnType<typeof openGroup>>>()
+    let pause: string | undefined
     try {
-      for (const item of questions) {
-        const respond = factory()
+      for (const { arm, item } of pending) {
+        if (live?.signal?.aborted) throw new HistoryPaused("host-stopped")
+        const group = groups.get(arm) ?? (await openGroup(arm))
+        groups.set(arm, group)
+        const { answers, library, slots } = group
+        const evidence: typeof group.evidence = []
+        const respond = factory({ arm, id: item.id })
         const transcript: Array<Transcript[number]> = []
         const owned = new Set<string>()
         const listed = new Set<string>()
         const tokenReports: Array<number | null> = []
-        const signal = AbortSignal.timeout(limits.deadlineMs)
+        const deadline = AbortSignal.timeout(limits.deadlineMs)
+        const signal = live?.signal ? AbortSignal.any([deadline, live.signal]) : deadline
         let status = "limit"
         for (let turn = 0; turn < limits.turns; ++turn) {
           tokenReports.push(null)
-          const result = await governed(respond, {
+          const input = {
             question: item.question,
             tools: [...tools[arm]],
             transcript: structuredClone(transcript),
             limits: { ...limits },
             signal,
-          })
-            .then(decodeResponse, () => undefined)
-            .catch(() => undefined)
+          }
+          const result = await (live ? Promise.resolve().then(() => respond(input)) : governed(respond, input))
+            .then(decodeResponse)
+            .catch((error: unknown) => {
+              if (error instanceof HistoryPaused) throw error
+              return undefined
+            })
           if (!result) {
             status = signal.aborted ? "deadline" : "adapter-error"
             break
@@ -198,11 +251,13 @@ export async function evaluate(options: Options, factory: ResponderFactory) {
             decision.action === "search"
               ? await library.search(decision.query)
               : [await library.read(decision.ref)].filter((page) => page !== undefined)
-          const excerpts = []
+          const excerpts: Array<{ handle: string; title: string; text: string }> = []
           const offset = decision.action === "read" ? (decision.offset ?? 0) : 0
           let nextOffset: number | undefined
           for (const hit of found) {
-            const handle = randomUUID()
+            const handle = live
+              ? sha256(JSON.stringify([live.nonce, arm, item.id, turn, excerpts.length]))
+              : randomUUID()
             const title = clip(hit.title, 120)
             const characters = Array.from(hit.text)
             let end = Math.min(characters.length, offset + limits.excerptChars)
@@ -241,6 +296,7 @@ export async function evaluate(options: Options, factory: ResponderFactory) {
             result: { action: decision.action, excerpts, ...(nextOffset !== undefined ? { nextOffset } : {}) },
           })
         }
+        group.evidence.push(...evidence)
         slots.push({
           id: item.id,
           status,
@@ -249,11 +305,23 @@ export async function evaluate(options: Options, factory: ResponderFactory) {
           handles: owned.size,
         })
       }
+    } catch (error) {
+      if (!(error instanceof HistoryPaused)) throw error
+      pause = error.message
+    } finally {
+      await Promise.all([...groups.values()].map((group) => group.library.close()))
+    }
+    for (const [arm, { directory, library, answers, evidence, slots }] of groups) {
       await writeJson(path.join(directory, "answers.json"), answers)
       await writeJson(path.join(directory, "evidence.json"), evidence)
       await writeJson(path.join(directory, "run.json"), { arm, inventory: library.inventory, slots })
-    } finally {
-      await library.close()
+    }
+    const counts = Object.fromEntries(arms.map((arm) => [arm, groups.get(arm)?.slots.length ?? 0]))
+    return { counts, ...(pause ? { pause } : {}) }
+  } finally {
+    for (const [variable, value] of old) {
+      if (value === undefined) delete process.env[variable]
+      else process.env[variable] = value
     }
   }
 }
