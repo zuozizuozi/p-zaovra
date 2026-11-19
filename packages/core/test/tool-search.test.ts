@@ -91,6 +91,24 @@ describe("canonical tool discovery", () => {
       expect((yield* query(registry, { names: ["memory_check"] })).result).toMatchObject({ type: "error" })
     }),
   )
+  it.effect("only offers ordinary memory operations when searching outside a tidy task", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      for (const name of ["memory_search", "memory_extract", "memory_review"])
+        yield* registry.register({
+          [name]: Tool.make({
+            description: name,
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () => Effect.die("must not execute"),
+          }),
+        })
+      expect((yield* query(registry, {})).output?.structured).toEqual({
+        activated: [],
+        available: [{ name: "memory_search", description: "memory_search" }],
+      })
+    }),
+  )
   it.effect("does not list or activate memory_note for an unknown session model", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
