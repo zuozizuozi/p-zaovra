@@ -153,14 +153,17 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     )
     .add(
       HttpApiEndpoint.get("session.usage", "/api/usage", {
-        query: Schema.Struct({ sessionID: Session.ID.pipe(Schema.optional) }),
+        query: Schema.Struct({
+          sessionID: Session.ID.pipe(Schema.optional),
+          memoryTidy: Schema.Literal("separate").pipe(Schema.optional),
+        }),
         success: Schema.Struct({ data: SessionUsage.Summary }),
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.usage",
           summary: "Recorded token usage",
           description:
-            "Usage recorded by this server, optionally limited to one conversation. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.",
+            "Usage recorded by this server, optionally limited to one conversation. Set memoryTidy to separate for a separate memory tidy ledger in the overall report. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.",
         }),
       ),
     )

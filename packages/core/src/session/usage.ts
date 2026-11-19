@@ -2,6 +2,7 @@ export * as SessionUsageQuery from "./usage"
 
 import { Effect, Schema } from "effect"
 import { and, eq, inArray, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/sqlite-core"
 import { SessionUsage } from "@zaovra-ai/schema/session-usage"
 import { SessionEvent } from "@zaovra-ai/schema/session-event"
 import { Event } from "@zaovra-ai/schema/event"
@@ -9,6 +10,9 @@ import { Database } from "../database/database"
 import { EventTable } from "../event/sql"
 import { Model } from "@zaovra-ai/schema/model"
 import { SessionCache } from "./cache"
+import { SessionSchema } from "./schema"
+import { MemoryTidyStore } from "../memory/tidy-store"
+import { MemoryTidyRunTable } from "../memory/tidy.sql"
 
 const definitions = [
   SessionEvent.Step.Started,
@@ -20,6 +24,62 @@ const definitions = [
   SessionEvent.QualityProgress,
 ]
 const types = definitions.map((item) => Event.versionedType(item.type, item.durable?.version ?? 1))
+
+const sessionCreated = Event.versionedType(SessionEvent.Created.type, SessionEvent.Created.durable?.version ?? 1)
+const promptAdmitted = Event.versionedType(
+  SessionEvent.PromptAdmitted.type,
+  SessionEvent.PromptAdmitted.durable?.version ?? 1,
+)
+
+function tidyLifetimes(db: Database.Interface["db"], sessionID?: string) {
+  const creation = alias(EventTable, "tidy_creation")
+  const admission = alias(EventTable, "tidy_admission")
+  const nextCreation = alias(EventTable, "tidy_next_creation")
+  const run = MemoryTidyRunTable
+  // Use the durable admission for current runs. Older grants had no admission
+  // binding, so use their Session creation record at the time of the grant.
+  const legacyStart = db
+    .select({ seq: sql`max(${creation.seq})` })
+    .from(creation)
+    .where(
+      and(
+        eq(creation.aggregate_id, run.session_id),
+        eq(creation.type, sessionCreated),
+        sql`json_extract(${creation.data}, '$.timestamp') <= ${run.time_created}`,
+      ),
+    )
+  const boundStart = db
+    .select({ seq: admission.seq })
+    .from(admission)
+    .where(
+      and(
+        eq(admission.aggregate_id, run.session_id),
+        eq(admission.type, promptAdmitted),
+        sql`${admission.seq} = json_extract(${run.input}, '$.seq')`,
+        sql`json_extract(${admission.data}, '$.messageID') = json_extract(${run.input}, '$.id')`,
+      ),
+    )
+  const start = sql<number | null>`case when ${run.input} is null then (${legacyStart}) else (${boundStart}) end`
+  const end = db
+    .select({ seq: sql`min(${nextCreation.seq})` })
+    .from(nextCreation)
+    .where(
+      and(
+        eq(nextCreation.aggregate_id, run.session_id),
+        eq(nextCreation.type, sessionCreated),
+        sql`${nextCreation.seq} > (${start})`,
+      ),
+    )
+  return db
+    .select({
+      id: run.session_id,
+      start,
+      end: sql<number | null>`(${end})`,
+    })
+    .from(run)
+    .where(sessionID ? eq(run.session_id, SessionSchema.ID.make(sessionID)) : undefined)
+    .all()
+}
 
 /** Budget checks read settlement events only, avoiding full history/cache reports. */
 export const readTotal = Effect.fn("SessionUsage.readTotal")(function* (sessionID: string) {
@@ -41,25 +101,65 @@ export const readTotal = Effect.fn("SessionUsage.readTotal")(function* (sessionI
 export const read = Effect.fn("SessionUsage.read")(function* (
   sessionID?: string,
   catalogs?: (sessions: string[]) => Effect.Effect<ReadonlyMap<string, readonly Model.Info[]>>,
+  separateMemoryTidy = false,
 ) {
   const database = yield* Database.Service
+  const db = database.db
   // Read settlements, not projected messages: copied fork history is not another request,
   // and reverting or deleting a conversation must not refund its recorded usage.
-  const rows = yield* database.db
-    .select({
-      aggregate_id: EventTable.aggregate_id,
-      seq: EventTable.seq,
-      type: EventTable.type,
-      // Never load prompts, attachments or summary text just to count usage.
-      data: sql`json_remove(${EventTable.data}, '$.prompt', '$.text', '$.recent')`.mapWith(EventTable.data),
-    })
-    .from(EventTable)
-    .where(and(inArray(EventTable.type, types), sessionID ? eq(EventTable.aggregate_id, sessionID) : undefined))
-    .all()
-    .pipe(Effect.orDie)
+  const readRows = () =>
+    db
+      .select({
+        aggregate_id: EventTable.aggregate_id,
+        seq: EventTable.seq,
+        type: EventTable.type,
+        // Never load prompts, attachments or summary text just to count usage.
+        data: sql`json_remove(${EventTable.data}, '$.prompt', '$.text', '$.recent')`.mapWith(EventTable.data),
+      })
+      .from(EventTable)
+      .where(and(inArray(EventTable.type, types), sessionID ? eq(EventTable.aggregate_id, sessionID) : undefined))
+      .all()
+  const { rows, memoryTidy, memoryTidySession } = yield* (
+    separateMemoryTidy
+      ? db.transaction(() =>
+          Effect.gen(function* () {
+            const lifetimes = yield* tidyLifetimes(db, sessionID)
+            const entries = yield* readRows()
+            if (sessionID && lifetimes.some((item) => item.start !== null && item.end === null))
+              return { rows: entries, memoryTidySession: true }
+            const bySession = new Map<string, (typeof lifetimes)[number]>(lifetimes.map((item) => [item.id, item]))
+            const rows = entries.filter((row) => {
+              const lifetime = bySession.get(row.aggregate_id)
+              return (
+                !lifetime ||
+                lifetime.start === null ||
+                row.seq < lifetime.start ||
+                (lifetime.end !== null && row.seq >= lifetime.end)
+              )
+            })
+            if (sessionID) return { rows }
+            const usage = yield* MemoryTidyStore.readUsage(db)
+            return {
+              rows,
+              memoryTidy: {
+                known: usage.known,
+                reserved: usage.reserved,
+                unknown: usage.unknown,
+                countBilling: "unavailable" as const,
+              },
+            }
+          }),
+        )
+      : readRows().pipe(Effect.map((rows) => ({ rows, memoryTidy: undefined, memoryTidySession: undefined })))
+  ).pipe(Effect.orDie)
   const prices = catalogs ? yield* catalogs([...new Set(rows.map((row) => row.aggregate_id))]) : undefined
   const summary = summarize(rows, prices)
-  return { ...summary, lastTurn: sessionID ? summary.lastTurn : null }
+  return {
+    ...summary,
+    lastTurn: sessionID ? summary.lastTurn : null,
+    ...(memoryTidy ? { memoryTidy } : {}),
+    ...(memoryTidySession ? { memoryTidySession: true as const } : {}),
+  }
 })
 
 /** Price only known settlements belonging to this original user request. A

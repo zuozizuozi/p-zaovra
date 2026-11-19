@@ -396,7 +396,16 @@ export type SessionsCreateOutput = {
   }
 }["data"]
 
-export type SessionsUsageInput = { readonly sessionID?: { readonly sessionID?: string | undefined }["sessionID"] }
+export type SessionsUsageInput = {
+  readonly sessionID?: {
+    readonly sessionID?: string | undefined
+    readonly memoryTidy?: "separate" | undefined
+  }["sessionID"]
+  readonly memoryTidy?: {
+    readonly sessionID?: string | undefined
+    readonly memoryTidy?: "separate" | undefined
+  }["memoryTidy"]
+}
 
 export type SessionsUsageOutput = {
   readonly data: {
@@ -437,6 +446,13 @@ export type SessionsUsageOutput = {
         readonly count: number | "Infinity" | "-Infinity" | "NaN"
       }>
     }
+    readonly memoryTidy?: {
+      readonly known: number
+      readonly reserved: number
+      readonly unknown: number
+      readonly countBilling: "unavailable"
+    }
+    readonly memoryTidySession?: true
     readonly models: ReadonlyArray<{
       readonly providerID: string | null
       readonly modelID: string | null

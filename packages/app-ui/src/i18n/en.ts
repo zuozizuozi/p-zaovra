@@ -468,6 +468,13 @@ export const dict = {
   "usage.estimateUnavailable":
     "Cost estimate unavailable: the ledger does not yet expose per-model usage and pricing. Refer to your provider bill.",
   "usage.recent": "Recently loaded conversations (up to 5)",
+  "usage.memoryTidy": "Memory tidy",
+  "usage.memoryTidyReported": "Reported generation tokens (input + output)",
+  "usage.memoryTidyReserved": "Unsettled token reservations",
+  "usage.memoryTidyUnreported": "Generation requests with unconfirmed usage",
+  "usage.memoryTidyCountBilling": "Input counting API charges",
+  "usage.scopeWithMemoryTidy":
+    "Usage recorded on this server. Conversation totals and model cost estimates include subagent conversations. Memory tidy usage is shown separately.",
   "verification.modelReview": "Model review",
   "verification.commandPassed": "Command passed",
   "verification.commandFailed": "Command failed",

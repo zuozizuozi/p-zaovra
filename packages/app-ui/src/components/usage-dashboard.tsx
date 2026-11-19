@@ -16,7 +16,7 @@ type Summary = V2SessionUsageResponses[200]["data"]
 type Totals = Summary["total"]
 const tokenLabel = (totals: Totals) => `${totals.unreported ? "≥ " : ""}${totals.total.toLocaleString()}`
 
-function useUsage(sessionID: () => string | undefined, enabled: () => boolean = () => true) {
+function useUsage(sessionID: () => string | undefined, memoryTidy?: "separate", enabled: () => boolean = () => true) {
   const sdk = useServerSDK()
   const sync = useServerSync()
   const [usage, { refetch }] = createResource(
@@ -32,7 +32,10 @@ function useUsage(sessionID: () => string | undefined, enabled: () => boolean = 
         ),
       },
     async (input) => {
-      const response = await input.sdk.client.v2.session.usage({ sessionID: input.sessionID }, { throwOnError: true })
+      const response = await input.sdk.client.v2.session.usage(
+        { sessionID: input.sessionID, memoryTidy },
+        { throwOnError: true },
+      )
       if (!response.data?.data) throw new Error("Usage response is missing")
       return response.data.data
     },
@@ -219,7 +222,7 @@ export function UsageDashboard() {
   const language = useLanguage()
   const sync = useServerSync()
   const sdk = useServerSDK()
-  const { usage, refetch } = useUsage(() => undefined)
+  const { usage, refetch } = useUsage(() => undefined, "separate")
   const value = () => (usage.loading || usage.error ? undefined : usage())
   const [recent] = createResource(
     () => ({
@@ -230,16 +233,18 @@ export function UsageDashboard() {
         .sort((a, b) => b.time.updated - a.time.updated)
         .slice(0, 5),
     }),
-    (input) =>
-      Promise.all(
+    async (input) => {
+      const summaries = await Promise.all(
         input.sessions.map(async (session) => ({
           title: session.title,
-          usage: await input.sdk.client.v2.session
-            .usage({ sessionID: session.id }, { throwOnError: true })
-            .then((result) => result.data.data.total)
+          summary: await input.sdk.client.v2.session
+            .usage({ sessionID: session.id, memoryTidy: "separate" }, { throwOnError: true })
+            .then((result) => result.data.data)
             .catch(() => undefined),
         })),
-      ),
+      )
+      return summaries.filter((item) => !item.summary?.memoryTidySession)
+    },
   )
   return (
     <section class="usage-dashboard" aria-label={language.t("usage.title")}>
@@ -249,7 +254,7 @@ export function UsageDashboard() {
           {language.t("usage.refresh")}
         </ButtonV2>
       </div>
-      <p>{language.t("usage.scope")}</p>
+      <p>{language.t(value()?.memoryTidy ? "usage.scopeWithMemoryTidy" : "usage.scope")}</p>
       <Show when={usage.error}>
         <div role="alert">{language.t("usage.error")}</div>
       </Show>
@@ -273,6 +278,33 @@ export function UsageDashboard() {
             <div class="usage-card-grid">
               <UsageCard label={language.t("model.source.own")} totals={data().own} />
               <UsageCard label={language.t("model.source.official")} totals={data().official} />
+              <Show when={data().memoryTidy}>
+                {(tidy) => (
+                  <section class="usage-card" aria-label={language.t("usage.memoryTidy")}>
+                    <h3>{language.t("usage.memoryTidy")}</h3>
+                    <dl>
+                      <div>
+                        <dt>{language.t("usage.memoryTidyReported")}</dt>
+                        <dd>{tidy().known.toLocaleString()} Token</dd>
+                      </div>
+                      <Show when={tidy().unknown > 0}>
+                        <div>
+                          <dt>{language.t("usage.memoryTidyReserved")}</dt>
+                          <dd>{tidy().reserved.toLocaleString()} Token</dd>
+                        </div>
+                        <div>
+                          <dt>{language.t("usage.memoryTidyUnreported")}</dt>
+                          <dd>{tidy().unknown.toLocaleString()}</dd>
+                        </div>
+                      </Show>
+                      <div>
+                        <dt>{language.t("usage.memoryTidyCountBilling")}</dt>
+                        <dd>{language.t("usage.unknown")}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                )}
+              </Show>
             </div>
             <Show when={data().unknown.calls > 0}>
               <UsageCard label={language.t("usage.unknownSource")} totals={data().unknown} />
@@ -286,10 +318,10 @@ export function UsageDashboard() {
                   <div class="usage-billing">
                     <span>{item.title}</span>
                     <strong>
-                      {item.usage
-                        ? usageDisplay(item.usage).unknown
+                      {item.summary
+                        ? usageDisplay(item.summary.total).unknown
                           ? language.t("usage.unknown")
-                          : tokenLabel(item.usage)
+                          : tokenLabel(item.summary.total)
                         : language.t("usage.error")}
                     </strong>
                   </div>

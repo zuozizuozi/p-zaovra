@@ -84,9 +84,12 @@ const Endpoint3_1 = (raw: RawClient["server.session"]) => (input?: Endpoint3_1In
   )
 
 type Endpoint3_2Request = Parameters<RawClient["server.session"]["session.usage"]>[0]
-type Endpoint3_2Input = { readonly sessionID?: Endpoint3_2Request["query"]["sessionID"] }
+type Endpoint3_2Input = {
+  readonly sessionID?: Endpoint3_2Request["query"]["sessionID"]
+  readonly memoryTidy?: Endpoint3_2Request["query"]["memoryTidy"]
+}
 const Endpoint3_2 = (raw: RawClient["server.session"]) => (input?: Endpoint3_2Input) =>
-  raw["session.usage"]({ query: { sessionID: input?.["sessionID"] } }).pipe(
+  raw["session.usage"]({ query: { sessionID: input?.["sessionID"], memoryTidy: input?.["memoryTidy"] } }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),
   )

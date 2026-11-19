@@ -156,7 +156,7 @@ export interface Interface {
 
   readonly outcome: (sessionID: SessionSchema.ID) => Effect.Effect<Info, NotFoundError>
 
-  readonly usage: (sessionID?: SessionSchema.ID) => Effect.Effect<SessionUsage.Summary>
+  readonly usage: (sessionID?: SessionSchema.ID, separateMemoryTidy?: boolean) => Effect.Effect<SessionUsage.Summary>
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
@@ -455,30 +455,33 @@ const layer = Layer.effect(
       )
 
     const result = Service.of({
-      usage: (sessionID) =>
-        SessionUsageQuery.read(sessionID, (ids) =>
-          Effect.gen(function* () {
-            const catalogs = new Map<string, readonly ModelV2.Info[]>()
-            const entries = yield* Effect.forEach(ids, (id) =>
-              Effect.gen(function* () {
-                const session = yield* store.get(SessionSchema.ID.make(id))
-                if (!session) return [id, []] as const
-                const key = JSON.stringify(session.location)
-                const cached = catalogs.get(key)
-                if (cached) return [id, cached] as const
-                const models = yield* Effect.gen(function* () {
-                  const catalog = yield* Catalog.Service
-                  return yield* catalog.model.all()
-                }).pipe(
-                  Effect.provide(locations.get(session.location)),
-                  Effect.catch(() => Effect.succeed([])),
-                )
-                catalogs.set(key, models)
-                return [id, models] as const
-              }),
-            )
-            return new Map<string, readonly ModelV2.Info[]>(entries)
-          }),
+      usage: (sessionID, separateMemoryTidy) =>
+        SessionUsageQuery.read(
+          sessionID,
+          (ids) =>
+            Effect.gen(function* () {
+              const catalogs = new Map<string, readonly ModelV2.Info[]>()
+              const entries = yield* Effect.forEach(ids, (id) =>
+                Effect.gen(function* () {
+                  const session = yield* store.get(SessionSchema.ID.make(id))
+                  if (!session) return [id, []] as const
+                  const key = JSON.stringify(session.location)
+                  const cached = catalogs.get(key)
+                  if (cached) return [id, cached] as const
+                  const models = yield* Effect.gen(function* () {
+                    const catalog = yield* Catalog.Service
+                    return yield* catalog.model.all()
+                  }).pipe(
+                    Effect.provide(locations.get(session.location)),
+                    Effect.catch(() => Effect.succeed([])),
+                  )
+                  catalogs.set(key, models)
+                  return [id, models] as const
+                }),
+              )
+              return new Map<string, readonly ModelV2.Info[]>(entries)
+            }),
+          separateMemoryTidy,
         ).pipe(Effect.provideService(Database.Service, database)),
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()

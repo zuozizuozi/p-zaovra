@@ -53,7 +53,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.usage",
         Effect.fn(function* (ctx) {
-          return { data: yield* session.usage(ctx.query.sessionID) }
+          return { data: yield* session.usage(ctx.query.sessionID, ctx.query.memoryTidy === "separate") }
         }),
       )
       .handle(

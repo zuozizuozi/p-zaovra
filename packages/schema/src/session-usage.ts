@@ -78,8 +78,17 @@ export const Bucket = Schema.Struct({
 })
 export interface Bucket extends Schema.Schema.Type<typeof Bucket> {}
 
+export const MemoryTidy = Schema.Struct({
+  known: Schema.Finite,
+  reserved: Schema.Finite,
+  unknown: Schema.Finite,
+  countBilling: Schema.Literal("unavailable"),
+})
+
 export const Summary = Schema.Struct({
   cache: CacheReport.pipe(optional),
+  memoryTidy: MemoryTidy.pipe(optional),
+  memoryTidySession: Schema.Literal(true).pipe(optional),
   models: Schema.Array(Bucket),
   total: Totals,
   own: Totals,

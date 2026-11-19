@@ -2485,6 +2485,7 @@ export type Config = {
   shell?: string
   memory?: {
     enabled?: boolean
+    modelTools?: boolean
     taskSearch?: boolean
     index?: {
       enabled?: boolean
@@ -14038,6 +14039,7 @@ export type V2SessionUsageData = {
   path?: never
   query?: {
     sessionID?: string
+    memoryTidy?: "separate"
   }
   url: "/api/usage"
 }
@@ -14062,6 +14064,13 @@ export type V2SessionUsageResponses = {
   200: {
     data: {
       cache?: SessionUsageCacheReport
+      memoryTidy?: {
+        known: number
+        reserved: number
+        unknown: number
+        countBilling: "unavailable"
+      }
+      memoryTidySession?: true
       models: Array<{
         providerID: string
         modelID: string

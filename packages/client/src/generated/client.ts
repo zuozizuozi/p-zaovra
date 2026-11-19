@@ -447,7 +447,7 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/usage`,
-            query: { sessionID: input?.["sessionID"] },
+            query: { sessionID: input?.["sessionID"], memoryTidy: input?.["memoryTidy"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

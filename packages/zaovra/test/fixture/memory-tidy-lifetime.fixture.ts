@@ -150,6 +150,16 @@ test("legacy production listeners share tidy ownership and reopening cannot rele
     expect(paused.state).toBe("active")
     expect(paused.executing).toBe(false)
     expect(paused.usage).toEqual(live.usage)
+    const usage = await fetch(new URL("/api/usage?memoryTidy=separate", reopened.url))
+    expect(usage.status, await usage.clone().text()).toBe(200)
+    const totals = (await usage.json()).data
+    expect(totals.memoryTidy).toEqual({ known: 0, reserved: 132, unknown: 1, countBilling: "unavailable" })
+    expect(totals.total.calls).toBe(0)
+    const sessionUsage = new URL("/api/usage?memoryTidy=separate", reopened.url)
+    sessionUsage.searchParams.set("sessionID", task.sessionID)
+    const conversation = await fetch(sessionUsage)
+    expect(conversation.status, await conversation.clone().text()).toBe(200)
+    expect((await conversation.json()).data.memoryTidySession).toBe(true)
     await read()
     expect(sends).toBe(1)
     const cancelled = (await (await read("/" + task.id + "/cancel", {})).json()).data

@@ -8,7 +8,8 @@ import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 const [state, setState] = createStore({ id: "ses_808", server: 0 })
 const requests: {
   sessionID: string | null
-  response: ReturnType<typeof Promise.withResolvers<{ total: number; status: number }>>
+  memoryTidy: string | null
+  response: ReturnType<typeof Promise.withResolvers<{ total: number; status: number; extra?: object }>>
 }[] = []
 const server = createServer((request, response) => {
   if (request.method === "OPTIONS") {
@@ -18,16 +19,20 @@ const server = createServer((request, response) => {
     response.writeHead(204).end()
     return
   }
-  const pending = Promise.withResolvers<{ total: number; status: number }>()
+  const pending = Promise.withResolvers<{ total: number; status: number; extra?: object }>()
+  const query = new URL(request.url!, "http://127.0.0.1").searchParams
   requests.push({
-    sessionID: new URL(request.url!, "http://127.0.0.1").searchParams.get("sessionID"),
+    sessionID: query.get("sessionID"),
+    memoryTidy: query.get("memoryTidy"),
     response: pending,
   })
-  void pending.promise.then(({ total, status }) => {
+  void pending.promise.then(({ total, status, extra }) => {
     response.statusCode = status
     response.setHeader("Content-Type", "application/json")
     response.setHeader("Access-Control-Allow-Origin", "*")
-    response.end(JSON.stringify(status === 200 ? { data: summary(total) } : { message: "Unavailable" }))
+    response.end(
+      JSON.stringify(status === 200 ? { data: { ...summary(total), ...extra } } : { message: "Unavailable" }),
+    )
   })
 })
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -43,13 +48,16 @@ const clients = [0, 1].map(() => ({
     },
   },
 }))
-const sync = { data: { config: {} }, session: { watchExecution: async () => {} } }
+const [conversations, setConversations] = createStore<{
+  info: Record<string, { id: string; title: string; time: { updated: number } }>
+}>({ info: {} })
+const sync = { data: { config: {} }, session: { data: conversations, watchExecution: async () => {} } }
 mock.module("@solidjs/router", () => ({ useParams: () => state }))
 mock.module("@/context/server-sdk", () => ({ useServerSDK: () => () => clients[state.server] }))
 mock.module("@/context/server-sync", () => ({ useServerSync: () => () => sync }))
 mock.module("@/context/language", () => ({ useLanguage: () => ({ t: (key: string) => key }) }))
 mock.module("@/components/settings-dialog", () => ({ useSettingsDialog: () => () => {} }))
-const { SessionUsageBar } = await import("../../src/components/usage-dashboard")
+const { SessionUsageBar, UsageDashboard } = await import("../../src/components/usage-dashboard")
 
 const totals = (total: number) => ({
   input: total,
@@ -200,4 +208,45 @@ test("808 refresh errors preserve a visible row and recover on the next refresh"
     view.dispose()
   }
   expect(listeners.size).toBe(0)
+})
+
+test("usage dashboard renders tidy receipts, reservations and unknown count charges separately", async () => {
+  const index = requests.length
+  setConversations("info", {
+    ses_recent_ordinary: { id: "ses_recent_ordinary", title: "Ordinary fixture", time: { updated: 1 } },
+    ses_recent_tidy: { id: "ses_recent_tidy", title: "Tidy fixture", time: { updated: 2 } },
+  })
+  const root = document.createElement("div")
+  document.body.append(root)
+  const dispose = render(() => <UsageDashboard />, root)
+  try {
+    const settleUsage = async (offset: number) => {
+      const request = await next(index + offset)
+      expect(request.memoryTidy).toBe("separate")
+      if (request.sessionID === "ses_recent_ordinary") return respond(request, 55)
+      if (request.sessionID === "ses_recent_tidy")
+        return request.response.resolve({ total: 73, status: 200, extra: { memoryTidySession: true } })
+      request.response.resolve({
+        total: 55,
+        status: 200,
+        extra: { memoryTidy: { known: 73, reserved: 129, unknown: 2, countBilling: "unavailable" } },
+      })
+    }
+    await Promise.all([0, 1, 2].map(settleUsage))
+    // The aggregate timestamp triggers the existing recent-conversation refresh.
+    await Promise.all([3, 4].map(settleUsage))
+    await visible(root, "Ordinary fixture")
+    expect(root.textContent).not.toContain("Tidy fixture")
+    const card = root.querySelector('[aria-label="usage.memoryTidy"]')
+    expect(Array.from(card!.querySelectorAll("dd")).map((item) => item.textContent)).toEqual([
+      "73 Token",
+      "129 Token",
+      "2",
+      "usage.unknown",
+    ])
+    expect(card!.textContent).toContain("usage.memoryTidyCountBilling")
+  } finally {
+    dispose()
+    root.remove()
+  }
 })

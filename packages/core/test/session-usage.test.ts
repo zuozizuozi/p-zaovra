@@ -6,12 +6,16 @@ import { Usage } from "@zaovra-ai/llm"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Database } from "@zaovra-ai/core/database/database"
+import { MemoryTidyAttemptTable, MemoryTidyDayTable, MemoryTidyRunTable } from "@zaovra-ai/core/memory/tidy.sql"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { SessionEvent } from "@zaovra-ai/schema/session-event"
 import { Session } from "@zaovra-ai/schema/session"
 import { SessionMessage } from "@zaovra-ai/schema/session-message"
 import { Model } from "@zaovra-ai/schema/model"
+import { Memory } from "@zaovra-ai/schema/memory"
+import { Project } from "@zaovra-ai/schema/project"
 import { Provider } from "@zaovra-ai/schema/provider"
+import { AbsolutePath } from "@zaovra-ai/schema/schema"
 import { testEffect } from "./lib/effect"
 
 const tokens = { input: 100, output: 20, reasoning: 5, cache: { read: 30, write: 10 } }
@@ -303,5 +307,117 @@ it.effect("queries durable SQLite settlements across conversations and retains d
     expect(all.official.total).toBe(165)
     expect((yield* SessionUsageQuery.read("ses_new_fork_without_requests")).total.total).toBe(0)
     expect((yield* SessionUsageQuery.readTotal("ses_new_fork_without_requests")).total).toBe(0)
+  }),
+)
+
+it.effect("separates the tidy ledger from session estimates across deletion and ID reuse", () =>
+  Effect.gen(function* () {
+    const events = yield* EventV2.Service
+    const database = yield* Database.Service
+    const tidy = Session.ID.make("ses_usage_tidy")
+    const legacy = Session.ID.make("ses_usage_tidy_legacy")
+    const ordinary = Session.ID.make("ses_usage_ordinary")
+    const directory = AbsolutePath.make("/")
+    const timestamp = DateTime.makeUnsafe(1)
+    const model = { id: Model.ID.make("test"), providerID: Provider.ID.make("openai") }
+    const create = (sessionID: Session.ID) =>
+      events.publish(SessionEvent.Created, {
+        sessionID,
+        timestamp,
+        projectID: Project.ID.global,
+        location: { directory },
+        title: "Fixture",
+        slug: "fixture",
+        version: "fixture",
+      })
+    const record = (sessionID: Session.ID) =>
+      Effect.gen(function* () {
+        const assistantMessageID = SessionMessage.ID.create()
+        yield* events.publish(SessionEvent.Step.Started, {
+          sessionID,
+          assistantMessageID,
+          timestamp,
+          agent: "build",
+          inputSequence: 1,
+          model,
+        })
+        yield* events.publish(SessionEvent.Step.Ended, {
+          sessionID,
+          assistantMessageID,
+          timestamp,
+          finish: "stop",
+          cost: 0,
+          tokens,
+          usageReported: true,
+        })
+      })
+    yield* create(tidy)
+    const messageID = SessionMessage.ID.create()
+    const admission = yield* events.publish(SessionEvent.PromptAdmitted, {
+      sessionID: tidy,
+      messageID,
+      timestamp,
+      prompt: { text: "Tidy fixture" },
+      delivery: "steer",
+    })
+    yield* create(legacy)
+    yield* record(tidy)
+    yield* record(legacy)
+    yield* record(ordinary)
+    const grant = {
+      scope: Memory.Scope.make("usage-tidy-fixture"),
+      directory,
+      model,
+      token_limit: 500,
+      daily_limit: 1000,
+      state: "completed" as const,
+      time_created: 1,
+    }
+    yield* database.db
+      .insert(MemoryTidyRunTable)
+      .values([
+        {
+          ...grant,
+          id: "usage-tidy",
+          request_id: "request-tidy",
+          session_id: tidy,
+          input: { id: messageID, seq: admission.durable!.seq },
+        },
+        { ...grant, id: "usage-legacy", request_id: "request-legacy", session_id: legacy },
+      ])
+      .run()
+    const day = "2026-11-19"
+    yield* database.db.insert(MemoryTidyDayTable).values({ day, token_limit: 1000 }).run()
+    yield* database.db
+      .insert(MemoryTidyAttemptTable)
+      .values([
+        { id: "tidy-settled", run_id: "usage-tidy", day, reserved: 90, actual: 37, time_created: 1 },
+        { id: "tidy-unknown", run_id: "usage-tidy", day, reserved: 100, time_created: 1 },
+        { id: "tidy-legacy-settled", run_id: "usage-legacy", day, reserved: 90, actual: 9, time_created: 1 },
+      ])
+      .run()
+    const original = yield* SessionUsageQuery.read()
+    expect(original.total).toMatchObject({ total: 495, calls: 3 })
+    expect(original.memoryTidy).toBeUndefined()
+    const initial = yield* SessionUsageQuery.read(undefined, undefined, true)
+    expect(initial.total).toMatchObject({ total: 165, calls: 1 })
+    expect(initial.models[0]?.tokens.total).toBe(165)
+    expect(initial.memoryTidy).toEqual({ known: 46, reserved: 100, unknown: 1, countBilling: "unavailable" })
+    expect(yield* SessionUsageQuery.read(tidy, undefined, true)).toMatchObject({
+      total: { total: 165 },
+      memoryTidySession: true,
+    })
+    expect((yield* SessionUsageQuery.read(legacy, undefined, true)).memoryTidySession).toBe(true)
+
+    yield* events.publish(SessionEvent.Deleted, { sessionID: tidy, timestamp })
+    const recreated = yield* create(tidy)
+    expect(recreated.durable!.seq).toBeGreaterThan(admission.durable!.seq)
+    yield* record(tidy)
+    const reused = yield* SessionUsageQuery.read(tidy, undefined, true)
+    expect(reused.total.total).toBe(165)
+    expect(reused.memoryTidySession).toBeUndefined()
+    const after = yield* SessionUsageQuery.read(undefined, undefined, true)
+    expect(after.total).toMatchObject({ total: 330, calls: 2 })
+    expect(after.memoryTidy).toEqual(initial.memoryTidy)
   }),
 )

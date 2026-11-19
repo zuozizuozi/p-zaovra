@@ -3672,15 +3672,26 @@ export class Session extends HeyApiClient {
   /**
    * Recorded token usage
    *
-   * Usage recorded by this server, optionally limited to one conversation. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.
+   * Usage recorded by this server, optionally limited to one conversation. Set memoryTidy to separate for a separate memory tidy ledger in the overall report. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.
    */
   public usage<ThrowOnError extends boolean = false>(
     parameters?: {
       sessionID?: string
+      memoryTidy?: "separate"
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "sessionID" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "sessionID" },
+            { in: "query", key: "memoryTidy" },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).get<V2SessionUsageResponses, V2SessionUsageErrors, ThrowOnError>({
       url: "/api/usage",
       ...options,

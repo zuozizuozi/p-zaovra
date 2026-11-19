@@ -18,6 +18,7 @@ import { MemoryAutomaticRunTable, MemoryAutomaticTable } from "./automatic.sql"
 export const defaults = { tokens: 200_000, dailyTokens: 1_000_000 } as const
 export type Run = typeof MemoryTidyRunTable.$inferSelect
 export type Usage = { known: number; reserved: number; charged: number; unknown: number }
+type UsageScope = { runID: string } | { day: string }
 export type Request = {
   requestID: string
   scope: Memory.Scope
@@ -47,7 +48,7 @@ export interface Interface {
   readonly reserve: (input: Authority & { attemptID: string; tokens: number }) => Effect.Effect<void, Rejected>
   readonly settle: (attemptID: string, actual: number) => Effect.Effect<{ exceeded: boolean }, Rejected>
   readonly finish: (id: string, state: "completed" | "cancelled" | "failed") => Effect.Effect<void, Rejected>
-  readonly usage: (input: { runID: string } | { day: string }) => Effect.Effect<Usage>
+  readonly usage: (input: UsageScope) => Effect.Effect<Usage>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/MemoryTidyStore") {}
@@ -56,6 +57,23 @@ const integer = (value: number) => Number.isSafeInteger(value) && value >= 0
 const modelKey = (model: { id: string; providerID: string; variant?: string }) =>
   JSON.stringify([model.providerID, model.id, model.variant ?? "default"])
 
+export function readUsage(db: Database.Interface["db"], input?: UsageScope) {
+  return db
+    .select({
+      known: sql<number>`coalesce(sum(${MemoryTidyAttemptTable.actual}), 0)`,
+      reserved: sql<number>`coalesce(sum(case when ${MemoryTidyAttemptTable.actual} is null then ${MemoryTidyAttemptTable.reserved} else 0 end), 0)`,
+      charged: sql<number>`coalesce(sum(coalesce(${MemoryTidyAttemptTable.actual}, ${MemoryTidyAttemptTable.reserved})), 0)`,
+      unknown: sql<number>`coalesce(sum(case when ${MemoryTidyAttemptTable.actual} is null then 1 else 0 end), 0)`,
+    })
+    .from(MemoryTidyAttemptTable)
+    .where(
+      input &&
+        ("runID" in input ? eq(MemoryTidyAttemptTable.run_id, input.runID) : eq(MemoryTidyAttemptTable.day, input.day)),
+    )
+    .get()
+    .pipe(Effect.map((row) => row ?? { known: 0, reserved: 0, charged: 0, unknown: 0 }))
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -63,20 +81,6 @@ const layer = Layer.effect(
     const memory = yield* MemoryStore.Service
     const db = database.db
     const get = (id: string) => db.select().from(MemoryTidyRunTable).where(eq(MemoryTidyRunTable.id, id)).get()
-    const usage = (input: { runID: string } | { day: string }) =>
-      db
-        .select({
-          known: sql<number>`coalesce(sum(${MemoryTidyAttemptTable.actual}), 0)`,
-          reserved: sql<number>`coalesce(sum(case when ${MemoryTidyAttemptTable.actual} is null then ${MemoryTidyAttemptTable.reserved} else 0 end), 0)`,
-          charged: sql<number>`coalesce(sum(coalesce(${MemoryTidyAttemptTable.actual}, ${MemoryTidyAttemptTable.reserved})), 0)`,
-          unknown: sql<number>`coalesce(sum(case when ${MemoryTidyAttemptTable.actual} is null then 1 else 0 end), 0)`,
-        })
-        .from(MemoryTidyAttemptTable)
-        .where(
-          "runID" in input ? eq(MemoryTidyAttemptTable.run_id, input.runID) : eq(MemoryTidyAttemptTable.day, input.day),
-        )
-        .get()
-        .pipe(Effect.map((row) => row ?? { known: 0, reserved: 0, charged: 0, unknown: 0 }))
     const authorize = Effect.fn("MemoryTidyStore.authorize")(function* (input: Authority) {
       if (!input.enabled) return yield* new Rejected({ reason: "unauthorized" })
       const run = yield* db
@@ -168,7 +172,7 @@ const layer = Layer.effect(
           .orderBy(desc(MemoryTidyRunTable.time_created), desc(MemoryTidyRunTable.id))
           .all()
           .pipe(Effect.orDie),
-      usage: (input) => usage(input).pipe(Effect.orDie),
+      usage: (input) => readUsage(db, input).pipe(Effect.orDie),
       authorize: (input) =>
         db
           .transaction(() => authorize(input))
@@ -293,8 +297,8 @@ const layer = Layer.effect(
 
               const limit = yield* db.select().from(MemoryTidyDayTable).where(eq(MemoryTidyDayTable.day, day)).get()
 
-              const total = yield* usage({ runID: run.id })
-              const daily = yield* usage({ day })
+              const total = yield* readUsage(db, { runID: run.id })
+              const daily = yield* readUsage(db, { day })
               if (!limit) return yield* Effect.die("Missing daily allowance after upsert")
               // A new UTC day never restores this task's own allowance.
               if (input.tokens > run.token_limit - total.charged)
